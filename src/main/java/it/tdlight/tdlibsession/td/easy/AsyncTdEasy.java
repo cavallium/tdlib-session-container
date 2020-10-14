@@ -200,7 +200,7 @@ public class AsyncTdEasy {
 	 * @return The value or nothing
 	 */
 	public Mono<String> getOptionString(String name) {
-		return this.<TdApi.OptionValue>sendDirectly(new TdApi.GetOption(name)).<OptionValue>handle(MonoUtils::orElseThrow).flatMap((TdApi.OptionValue value) -> {
+		return this.<TdApi.OptionValue>sendDirectly(new TdApi.GetOption(name)).<OptionValue>flatMap(MonoUtils::orElseThrow).flatMap((TdApi.OptionValue value) -> {
 			switch (value.getConstructor()) {
 				case OptionValueString.CONSTRUCTOR:
 					return Mono.just(((OptionValueString) value).value);
@@ -219,7 +219,7 @@ public class AsyncTdEasy {
 	 * @return The value or nothing
 	 */
 	public Mono<Long> getOptionInteger(String name) {
-		return this.<TdApi.OptionValue>sendDirectly(new TdApi.GetOption(name)).<TdApi.OptionValue>handle(MonoUtils::orElseThrow).flatMap((TdApi.OptionValue value) -> {
+		return this.<TdApi.OptionValue>sendDirectly(new TdApi.GetOption(name)).<TdApi.OptionValue>flatMap(MonoUtils::orElseThrow).flatMap((TdApi.OptionValue value) -> {
 			switch (value.getConstructor()) {
 				case OptionValueInteger.CONSTRUCTOR:
 					return Mono.just(((OptionValueInteger) value).value);
@@ -238,7 +238,7 @@ public class AsyncTdEasy {
 	 * @return The value or nothing
 	 */
 	public Mono<Boolean> getOptionBoolean(String name) {
-		return this.<TdApi.OptionValue>sendDirectly(new TdApi.GetOption(name)).<TdApi.OptionValue>handle(MonoUtils::orElseThrow).flatMap((TdApi.OptionValue value) -> {
+		return this.<TdApi.OptionValue>sendDirectly(new TdApi.GetOption(name)).<TdApi.OptionValue>flatMap(MonoUtils::orElseThrow).flatMap((TdApi.OptionValue value) -> {
 			switch (value.getConstructor()) {
 				case OptionValueBoolean.CONSTRUCTOR:
 					return Mono.just(((OptionValueBoolean) value).value);

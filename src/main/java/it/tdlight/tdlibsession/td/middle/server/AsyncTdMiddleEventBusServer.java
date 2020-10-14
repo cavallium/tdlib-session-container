@@ -216,11 +216,17 @@ public class AsyncTdMiddleEventBusServer extends AbstractVerticle {
 							.switchIfEmpty(Mono.fromSupplier(() -> {
 								return TdResult.failed(new TdApi.Error(500, "Received null response"));
 							}))
-							.subscribe(response -> {
-								msg.reply(new TdResultMessage(response.result(), response.cause()),
-										cluster.newDeliveryOpts().setLocalOnly(local)
-								);
-							}, ex -> {
+							.handle((response, sink) -> {
+								try {
+									msg.reply(new TdResultMessage(response.result(), response.cause()),
+											cluster.newDeliveryOpts().setLocalOnly(local)
+									);
+									sink.next(response);
+								} catch (Exception ex) {
+									sink.error(ex);
+								}
+							})
+							.subscribe(response -> {}, ex -> {
 								logger.error("Error when processing a request", ex);
 								msg.fail(500, ex.getLocalizedMessage());
 							});

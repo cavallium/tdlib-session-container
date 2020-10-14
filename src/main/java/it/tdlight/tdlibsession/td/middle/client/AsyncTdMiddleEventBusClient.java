@@ -171,7 +171,7 @@ public class AsyncTdMiddleEventBusClient extends AbstractVerticle implements Asy
 	}
 
 	private Mono<Void> pipe() {
-		incomingUpdatesCo.onNext(this.requestUpdatesBatchFromNetwork()
+		var updates = this.requestUpdatesBatchFromNetwork()
 				.repeatWhen(nFlux -> {
 					return Flux.push(emitter -> {
 						var dispos = Flux.combineLatest(nFlux, tdClosed, Pair::of).subscribe(val -> {
@@ -210,7 +210,13 @@ public class AsyncTdMiddleEventBusClient extends AbstractVerticle implements Asy
 						}
 					});
 				})
-				.log("TdMiddle", Level.FINEST).publish().autoConnect(1));
+				.log("TdMiddle", Level.FINEST).publish().autoConnect(1);
+
+		updates.subscribe(t -> incomingUpdatesCo.onNext(Flux.just(t)),
+				incomingUpdatesCo::onError,
+				incomingUpdatesCo::onComplete
+		);
+
 		return Mono.empty();
 	}
 
@@ -303,32 +309,43 @@ public class AsyncTdMiddleEventBusClient extends AbstractVerticle implements Asy
 					.replace(" = ", "="));
 		}
 
-		return Mono.from(tdClosed).single()
-				.filter(tdClosed -> !tdClosed)
-				.<TdResult<T>>flatMap((_x) -> Mono.create(sink -> {
-					cluster.getEventBus().request(botAddress + ".execute", req, cluster.newDeliveryOpts().setLocalOnly(local), (AsyncResult<Message<TdResultMessage>> event) -> {
-						if (event.succeeded()) {
-							if (event.result().body() == null) {
-								sink.error(new NullPointerException("Response is empty"));
-							} else {
-								sink.success(Objects.requireNonNull(event.result().body()).toTdResult());
-							}
-						} else {
-							sink.error(ResponseError.newResponseError(request, botAlias, event.cause()));
-						}
-					});
-				})).<TdResult<T>>handle((response, sink) -> {
+		return Mono.from(tdClosed).single().filter(tdClosed -> !tdClosed).<TdResult<T>>flatMap((_x) -> Mono.create(sink -> {
+			try {
+				cluster
+						.getEventBus()
+						.request(botAddress + ".execute",
+								req,
+								cluster.newDeliveryOpts().setLocalOnly(local),
+								(AsyncResult<Message<TdResultMessage>> event) -> {
+									try {
+										if (event.succeeded()) {
+											if (event.result().body() == null) {
+												sink.error(new NullPointerException("Response is empty"));
+											} else {
+												sink.success(Objects.requireNonNull(event.result().body()).toTdResult());
+											}
+										} else {
+											sink.error(ResponseError.newResponseError(request, botAlias, event.cause()));
+										}
+									} catch (Throwable t) {
+										sink.error(t);
+									}
+								}
+						);
+			} catch (Throwable t) {
+				sink.error(t);
+			}
+		})).<TdResult<T>>switchIfEmpty(Mono.defer(() -> Mono.just(TdResult.<T>failed(new TdApi.Error(500,
+				"Client is closed or response is empty"
+		))))).<TdResult<T>>handle((response, sink) -> {
 			try {
 				Objects.requireNonNull(response);
 				if (OUTPUT_REQUESTS) {
-					System.out.println(" <- " + response.toString()
-							.replace("\n", " ")
-							.replace("\t", "")
-							.replace("  ", "")
-							.replace(" = ", "="));
+					System.out.println(
+							" <- " + response.toString().replace("\n", " ").replace("\t", "").replace("  ", "").replace(" = ", "="));
 				}
 				sink.next(response);
-			} catch (ClassCastException | NullPointerException e) {
+			} catch (Exception e) {
 				sink.error(e);
 			}
 		}).switchIfEmpty(Mono.fromSupplier(() -> {

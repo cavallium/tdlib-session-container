@@ -5,12 +5,14 @@ import io.vertx.core.Handler;
 import io.vertx.core.Promise;
 import io.vertx.core.Vertx;
 import it.tdlight.jni.TdApi;
+import it.tdlight.jni.TdApi.Object;
 import it.tdlight.tdlibsession.td.TdError;
 import it.tdlight.tdlibsession.td.TdResult;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
+import java.util.function.Supplier;
 import org.reactivestreams.Subscription;
 import org.warp.commonutils.concurrency.future.CompletableFutureUtils;
 import reactor.core.CoreSubscriber;
@@ -117,12 +119,11 @@ public class MonoUtils {
 		}
 	}
 
-	public static <R extends TdApi.Object> void orElseThrow(TdResult<R> value, SynchronousSink<R> sink) {
+	public static <R extends TdApi.Object> Mono<R> orElseThrow(TdResult<R> value) {
 		if (value.succeeded()) {
-			sink.next(value.result());
+			return Mono.just(value.result());
 		} else {
-			sink.complete();
-			//sink.error(new TdError(value.cause().code, value.cause().message));
+			return Mono.error(new TdError(value.cause().code, value.cause().message));
 		}
 	}
 
@@ -134,5 +135,43 @@ public class MonoUtils {
 				sink.error(new TdError(optional.cause().code, optional.cause().message));
 			}
 		});
+	}
+
+	public static <T> Mono<T> fromFuture(CompletableFuture<T> future) {
+		return Mono.create(sink -> {
+			future.whenComplete((result, error) -> {
+				if (error != null) {
+					sink.error(error);
+				} else if (result != null) {
+					sink.success(result);
+				} else {
+					sink.success();
+				}
+			});
+		});
+	}
+
+	public static <T> Mono<T> fromFuture(Supplier<CompletableFuture<T>> future) {
+		return Mono.create(sink -> {
+			CompletableFutureUtils.getCompletableFuture(future).whenComplete((result, error) -> {
+				if (error != null) {
+					sink.error(error.getCause());
+				} else if (result != null) {
+					sink.success(result);
+				} else {
+					sink.success();
+				}
+			});
+		});
+	}
+
+	public static <T extends Object> CompletableFuture<T> toFuture(Mono<T> mono) {
+		var cf = new CompletableFuture<T>();
+		mono.subscribe(value -> {
+			cf.complete(value);
+		}, ex -> {
+			cf.completeExceptionally(ex);
+		}, () -> cf.complete(null));
+		return cf;
 	}
 }

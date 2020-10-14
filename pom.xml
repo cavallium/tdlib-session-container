@@ -4,7 +4,7 @@
     <modelVersion>4.0.0</modelVersion>
     <groupId>it.tdlight</groupId>
     <artifactId>tdlib-session-container</artifactId>
-    <version>3.169.52</version>
+    <version>3.169.54</version>
     <name>TDLib Session Container</name>
     <properties>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
@@ -84,7 +84,7 @@
         <dependency>
             <groupId>it.tdlight</groupId>
             <artifactId>tdlight-java</artifactId>
-            <version>3.169.52</version>
+            <version>3.169.54</version>
         </dependency>
         <dependency>
             <groupId>it.cavallium</groupId>

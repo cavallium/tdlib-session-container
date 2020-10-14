@@ -2,6 +2,7 @@ package it.tdlight.tdlibsession.td;
 
 import it.tdlight.jni.TdApi;
 import it.tdlight.jni.TdApi.Error;
+import java.util.Objects;
 import java.util.StringJoiner;
 import java.util.concurrent.CompletionException;
 import java.util.function.Function;
@@ -219,10 +220,12 @@ public interface TdResult<T extends TdApi.Object> {
 	}
 
 	static <T extends TdApi.Object> TdResult<T> succeeded(@NotNull T value) {
+		Objects.requireNonNull(value);
 		return new TdResultImpl<T>(value, null);
 	}
 
 	static <T extends TdApi.Object> TdResult<T> failed(@NotNull TdApi.Error error) {
+		Objects.requireNonNull(error);
 		return new TdResultImpl<T>(null, error);
 	}
 
