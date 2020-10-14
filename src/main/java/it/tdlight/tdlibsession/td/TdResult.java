@@ -2,6 +2,7 @@ package it.tdlight.tdlibsession.td;
 
 import it.tdlight.jni.TdApi;
 import it.tdlight.jni.TdApi.Error;
+import java.util.StringJoiner;
 import java.util.concurrent.CompletionException;
 import java.util.function.Function;
 import org.jetbrains.annotations.NotNull;
@@ -272,6 +273,14 @@ public interface TdResult<T extends TdApi.Object> {
 		@Override
 		public boolean failed() {
 			return error != null;
+		}
+
+		@Override
+		public String toString() {
+			return new StringJoiner(", ", TdResultImpl.class.getSimpleName() + "[", "]")
+					.add("value=" + value)
+					.add("error=" + error)
+					.toString();
 		}
 	}
 }

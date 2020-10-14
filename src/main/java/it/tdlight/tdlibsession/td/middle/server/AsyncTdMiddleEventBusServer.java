@@ -7,6 +7,7 @@ import io.vertx.core.AsyncResult;
 import io.vertx.core.Promise;
 import io.vertx.core.eventbus.Message;
 import it.tdlight.common.ConstructorDetector;
+import it.tdlight.jni.TdApi;
 import it.tdlight.jni.TdApi.AuthorizationStateClosed;
 import it.tdlight.jni.TdApi.Update;
 import it.tdlight.jni.TdApi.UpdateAuthorizationState;
@@ -210,15 +211,22 @@ public class AsyncTdMiddleEventBusServer extends AbstractVerticle {
 								.replace("  ", "")
 								.replace(" = ", "="));
 					}
-					td.execute(msg.body().getRequest(), msg.body().isExecuteDirectly()).single().subscribe(response -> {
-						msg.reply(new TdResultMessage(response.result(), response.cause()), cluster.newDeliveryOpts().setLocalOnly(local));
-					}, ex -> {
-						msg.fail(500, ex.getLocalizedMessage());
-						logger.error("Error when processing a request", ex);
-					});
+					td
+							.execute(msg.body().getRequest(), msg.body().isExecuteDirectly())
+							.switchIfEmpty(Mono.fromSupplier(() -> {
+								return TdResult.failed(new TdApi.Error(500, "Received null response"));
+							}))
+							.subscribe(response -> {
+								msg.reply(new TdResultMessage(response.result(), response.cause()),
+										cluster.newDeliveryOpts().setLocalOnly(local)
+								);
+							}, ex -> {
+								logger.error("Error when processing a request", ex);
+								msg.fail(500, ex.getLocalizedMessage());
+							});
 				} catch (ClassCastException ex) {
-					msg.fail(500, ex.getMessage());
 					logger.error("Error when deserializing a request", ex);
+					msg.fail(500, ex.getMessage());
 				}
 			}).completionHandler(MonoUtils.toHandler(registrationSink));
 

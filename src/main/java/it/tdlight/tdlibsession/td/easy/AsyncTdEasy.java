@@ -144,7 +144,7 @@ public class AsyncTdEasy {
 	 * @return The response or {@link TdApi.Error}.
 	 */
 	public <T extends Object> Mono<TdResult<T>> send(TdApi.Function request) {
-		return td.execute(request, false);
+		return td.<T>execute(request, false);
 	}
 
 	private <T extends TdApi.Object> Mono<TdResult<T>> sendDirectly(TdApi.Function obj) {
@@ -156,7 +156,7 @@ public class AsyncTdEasy {
 	 * @param i level
 	 */
 	public Mono<Void> setVerbosityLevel(int i) {
-		return sendDirectly(new TdApi.SetLogVerbosityLevel(i)).then();
+		return MonoUtils.thenOrError(sendDirectly(new TdApi.SetLogVerbosityLevel(i)));
 	}
 
 	/**
@@ -164,7 +164,7 @@ public class AsyncTdEasy {
 	 * @param name option name
 	 */
 	public Mono<Void> clearOption(String name) {
-		return sendDirectly(new TdApi.SetOption(name, new TdApi.OptionValueEmpty())).then();
+		return MonoUtils.thenOrError(sendDirectly(new TdApi.SetOption(name, new TdApi.OptionValueEmpty())));
 	}
 
 	/**
@@ -173,7 +173,7 @@ public class AsyncTdEasy {
 	 * @param value option value
 	 */
 	public Mono<Void> setOptionString(String name, String value) {
-		return sendDirectly(new TdApi.SetOption(name, new TdApi.OptionValueString(value))).then();
+		return MonoUtils.thenOrError(sendDirectly(new TdApi.SetOption(name, new TdApi.OptionValueString(value))));
 	}
 
 	/**
@@ -182,7 +182,7 @@ public class AsyncTdEasy {
 	 * @param value option value
 	 */
 	public Mono<Void> setOptionInteger(String name, long value) {
-		return sendDirectly(new TdApi.SetOption(name, new TdApi.OptionValueInteger(value))).then();
+		return MonoUtils.thenOrError(sendDirectly(new TdApi.SetOption(name, new TdApi.OptionValueInteger(value))));
 	}
 
 	/**
@@ -191,7 +191,7 @@ public class AsyncTdEasy {
 	 * @param value option value
 	 */
 	public Mono<Void> setOptionBoolean(String name, boolean value) {
-		return sendDirectly(new TdApi.SetOption(name, new TdApi.OptionValueBoolean(value))).then();
+		return MonoUtils.thenOrError(sendDirectly(new TdApi.SetOption(name, new TdApi.OptionValueBoolean(value))));
 	}
 
 	/**
@@ -349,7 +349,7 @@ public class AsyncTdEasy {
 					this.authState.onNext(new AuthorizationStateReady());
 					switch (obj.getConstructor()) {
 						case AuthorizationStateWaitTdlibParameters.CONSTRUCTOR:
-							return Mono.from(this.settings).map(settings -> {
+							return MonoUtils.thenOrError(Mono.from(this.settings).map(settings -> {
 								var parameters = new TdlibParameters();
 								parameters.useTestDc = settings.useTestDc;
 								parameters.databaseDirectory = settings.databaseDirectory;
@@ -367,11 +367,11 @@ public class AsyncTdEasy {
 								parameters.enableStorageOptimizer = settings.enableStorageOptimizer;
 								parameters.ignoreFileNames = settings.ignoreFileNames;
 								return new SetTdlibParameters(parameters);
-							}).flatMap(this::sendDirectly).then();
+							}).flatMap(this::sendDirectly));
 						case AuthorizationStateWaitEncryptionKey.CONSTRUCTOR:
-							return sendDirectly(new CheckDatabaseEncryptionKey()).then();
+							return MonoUtils.thenOrError(sendDirectly(new CheckDatabaseEncryptionKey()));
 						case AuthorizationStateWaitPhoneNumber.CONSTRUCTOR:
-							return Mono.from(this.settings).flatMap(settings -> {
+							return MonoUtils.thenOrError(Mono.from(this.settings).flatMap(settings -> {
 								if (settings.isPhoneNumberSet()) {
 									return sendDirectly(new SetAuthenticationPhoneNumber(String.valueOf(settings.getPhoneNumber()),
 											new PhoneNumberAuthenticationSettings(false, false, false)
@@ -381,7 +381,7 @@ public class AsyncTdEasy {
 								} else {
 									return Mono.error(new IllegalArgumentException("A bot is neither an user or a bot"));
 								}
-							}).then();
+							}));
 						case AuthorizationStateWaitRegistration.CONSTRUCTOR:
 							var authorizationStateWaitRegistration = (AuthorizationStateWaitRegistration) obj;
 							RegisterUser registerUser = new RegisterUser();
@@ -398,7 +398,7 @@ public class AsyncTdEasy {
 								registerUser.lastName = ScannerUtils.askParameter(this.logName, "Enter Last Name").trim();
 							}
 
-							return sendDirectly(registerUser).then();
+							return MonoUtils.thenOrError(sendDirectly(registerUser));
 						case AuthorizationStateWaitPassword.CONSTRUCTOR:
 							var authorizationStateWaitPassword = (AuthorizationStateWaitPassword) obj;
 							String passwordMessage = "Password authorization of '" + this.logName + "':";
@@ -409,7 +409,7 @@ public class AsyncTdEasy {
 
 							var password = ScannerUtils.askParameter(this.logName, "Enter your password");
 
-							return sendDirectly(new CheckAuthenticationPassword(password)).then();
+							return MonoUtils.thenOrError(sendDirectly(new CheckAuthenticationPassword(password)));
 						case AuthorizationStateReady.CONSTRUCTOR: {
 							return Mono.empty();
 						}

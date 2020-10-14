@@ -125,4 +125,14 @@ public class MonoUtils {
 			//sink.error(new TdError(value.cause().code, value.cause().message));
 		}
 	}
+
+	public static <T extends TdApi.Object> Mono<Void> thenOrError(Mono<TdResult<T>> optionalMono) {
+		return optionalMono.handle((optional, sink) -> {
+			if (optional.succeeded()) {
+				sink.complete();
+			} else {
+				sink.error(new TdError(optional.cause().code, optional.cause().message));
+			}
+		});
+	}
 }

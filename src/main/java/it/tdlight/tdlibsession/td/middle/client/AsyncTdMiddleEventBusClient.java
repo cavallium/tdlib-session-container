@@ -288,7 +288,7 @@ public class AsyncTdMiddleEventBusClient extends AbstractVerticle implements Asy
 
 	@Override
 	public Flux<Update> getUpdates() {
-		return incomingUpdatesCo.filter(Objects::nonNull).take(1).single().flatMapMany(v -> v);
+		return incomingUpdatesCo.filter(Objects::nonNull).flatMap(v -> v);
 	}
 
 	@Override
@@ -305,19 +305,19 @@ public class AsyncTdMiddleEventBusClient extends AbstractVerticle implements Asy
 
 		return Mono.from(tdClosed).single()
 				.filter(tdClosed -> !tdClosed)
-				.<TdResult<T>>handle((_x, sink) -> {
+				.<TdResult<T>>flatMap((_x) -> Mono.create(sink -> {
 					cluster.getEventBus().request(botAddress + ".execute", req, cluster.newDeliveryOpts().setLocalOnly(local), (AsyncResult<Message<TdResultMessage>> event) -> {
 						if (event.succeeded()) {
 							if (event.result().body() == null) {
-								sink.complete();
+								sink.error(new NullPointerException("Response is empty"));
 							} else {
-								sink.next(Objects.requireNonNull(event.result().body()).toTdResult());
+								sink.success(Objects.requireNonNull(event.result().body()).toTdResult());
 							}
 						} else {
 							sink.error(ResponseError.newResponseError(request, botAlias, event.cause()));
 						}
 					});
-		}).handle((response, sink) -> {
+				})).<TdResult<T>>handle((response, sink) -> {
 			try {
 				Objects.requireNonNull(response);
 				if (OUTPUT_REQUESTS) {
@@ -331,6 +331,8 @@ public class AsyncTdMiddleEventBusClient extends AbstractVerticle implements Asy
 			} catch (ClassCastException | NullPointerException e) {
 				sink.error(e);
 			}
-		});
+		}).switchIfEmpty(Mono.fromSupplier(() -> {
+			return TdResult.failed(new TdApi.Error(500, "Client is closed or response is empty"));
+		}));
 	}
 }

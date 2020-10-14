@@ -40,7 +40,7 @@ public class AsyncTdMiddleLocal implements AsyncTdMiddle {
 			masterClusterManager
 					.getVertx()
 					.deployVerticle(srv,
-							new DeploymentOptions().setConfig(new JsonObject().put("botAddress", botAddress).put("local", true)),
+							new DeploymentOptions().setConfig(new JsonObject().put("botAddress", botAddress).put("botAlias", botAlias).put("local", true)),
 							MonoUtils.toHandler(sink)
 					);
 		}).onErrorMap(InitializationException::new).flatMap(_x -> {
@@ -62,6 +62,9 @@ public class AsyncTdMiddleLocal implements AsyncTdMiddle {
 
 	@Override
 	public <T extends Object> Mono<TdResult<T>> execute(Function request, boolean executeDirectly) {
-		return cli.filter(Objects::nonNull).single().flatMap(c -> c.execute(request, executeDirectly));
+		return cli
+				.filter(obj -> Objects.nonNull(obj))
+				.single()
+				.flatMap(c -> c.<T>execute(request, executeDirectly));
 	}
 }
