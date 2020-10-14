@@ -123,4 +123,9 @@ public class ResponseError extends IOException {
 				.replace("  ", "")
 				.replace(" = ", "=");
 	}
+
+	@Override
+	public String toString() {
+		return getMessage();
+	}
 }

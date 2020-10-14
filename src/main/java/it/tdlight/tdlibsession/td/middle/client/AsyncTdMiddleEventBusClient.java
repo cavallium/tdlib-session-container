@@ -305,20 +305,19 @@ public class AsyncTdMiddleEventBusClient extends AbstractVerticle implements Asy
 
 		return Mono.from(tdClosed).single()
 				.filter(tdClosed -> !tdClosed)
-				.flatMap(_x -> Mono.<TdResult<T>>create(sink -> {
+				.<TdResult<T>>handle((_x, sink) -> {
 					cluster.getEventBus().request(botAddress + ".execute", req, cluster.newDeliveryOpts().setLocalOnly(local), (AsyncResult<Message<TdResultMessage>> event) -> {
 						if (event.succeeded()) {
 							if (event.result().body() == null) {
-								sink.success();
+								sink.complete();
 							} else {
-								sink.success(Objects.requireNonNull(event.result().body()).toTdResult());
+								sink.next(Objects.requireNonNull(event.result().body()).toTdResult());
 							}
 						} else {
 							sink.error(ResponseError.newResponseError(request, botAlias, event.cause()));
 						}
 					});
-
-		})).flatMap(response -> {
+		}).handle((response, sink) -> {
 			try {
 				Objects.requireNonNull(response);
 				if (OUTPUT_REQUESTS) {
@@ -328,9 +327,9 @@ public class AsyncTdMiddleEventBusClient extends AbstractVerticle implements Asy
 							.replace("  ", "")
 							.replace(" = ", "="));
 				}
-				return Mono.just((TdResult<T>) response);
+				sink.next(response);
 			} catch (ClassCastException | NullPointerException e) {
-				return Mono.error(e);
+				sink.error(e);
 			}
 		});
 	}
