@@ -20,6 +20,7 @@ public class TdEasySettings {
 	public final boolean ignoreFileNames;
 	private final Long phoneNumber;
 	private final String botToken;
+	private final ParameterRequestHandler parameterRequestHandler;
 
 	public TdEasySettings(boolean useTestDc,
 			String databaseDirectory,
@@ -36,7 +37,8 @@ public class TdEasySettings {
 			boolean enableStorageOptimizer,
 			boolean ignoreFileNames,
 			@Nullable Long phoneNumber,
-			@Nullable String botToken) {
+			@Nullable String botToken,
+			@Nullable ParameterRequestHandler parameterRequestHandler) {
 		this.useTestDc = useTestDc;
 		this.databaseDirectory = databaseDirectory;
 		this.filesDirectory = filesDirectory;
@@ -56,6 +58,14 @@ public class TdEasySettings {
 		if ((phoneNumber == null) == (botToken == null)) {
 			throw new IllegalArgumentException("You must set a phone number or a bot token");
 		}
+		if (parameterRequestHandler == null) {
+			if (botToken != null) {
+				parameterRequestHandler = new ScannerParameterRequestHandler("bot_" + botToken.split(":")[0]);
+			} else {
+				parameterRequestHandler = new ScannerParameterRequestHandler("+" + phoneNumber);
+			}
+		}
+		this.parameterRequestHandler = parameterRequestHandler;
 	}
 
 	public boolean isPhoneNumberSet() {
@@ -72,6 +82,10 @@ public class TdEasySettings {
 
 	public String getBotToken() {
 		return Objects.requireNonNull(botToken, "You must set a bot token");
+	}
+
+	public ParameterRequestHandler getParameterRequestHandler() {
+		return Objects.requireNonNull(parameterRequestHandler, "You must set a parameter request handler");
 	}
 
 	public static Builder newBuilder() {
@@ -98,6 +112,7 @@ public class TdEasySettings {
 		private Long phoneNumber = null;
 		@Nullable
 		private String botToken = null;
+		private ParameterRequestHandler parameterRequestHandler;
 
 		private Builder() {
 
@@ -239,6 +254,15 @@ public class TdEasySettings {
 			return this;
 		}
 
+		public Builder setParameterRequestHandler(ParameterRequestHandler parameterRequestHandler) {
+			this.parameterRequestHandler = parameterRequestHandler;
+			return this;
+		}
+
+		public ParameterRequestHandler getParameterRequestHandler() {
+			return parameterRequestHandler;
+		}
+
 		public TdEasySettings build() {
 			return new TdEasySettings(useTestDc,
 					databaseDirectory,
@@ -255,7 +279,8 @@ public class TdEasySettings {
 					enableStorageOptimizer,
 					ignoreFileNames,
 					phoneNumber,
-					botToken
+					botToken,
+					parameterRequestHandler
 			);
 		}
 	}

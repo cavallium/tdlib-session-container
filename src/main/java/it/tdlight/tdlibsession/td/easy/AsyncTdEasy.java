@@ -1,6 +1,5 @@
 package it.tdlight.tdlibsession.td.easy;
 
-import it.tdlight.common.utils.ScannerUtils;
 import it.tdlight.jni.TdApi;
 import it.tdlight.jni.TdApi.AuthorizationState;
 import it.tdlight.jni.TdApi.AuthorizationStateClosed;
@@ -8,11 +7,13 @@ import it.tdlight.jni.TdApi.AuthorizationStateClosing;
 import it.tdlight.jni.TdApi.AuthorizationStateReady;
 import it.tdlight.jni.TdApi.AuthorizationStateWaitCode;
 import it.tdlight.jni.TdApi.AuthorizationStateWaitEncryptionKey;
+import it.tdlight.jni.TdApi.AuthorizationStateWaitOtherDeviceConfirmation;
 import it.tdlight.jni.TdApi.AuthorizationStateWaitPassword;
 import it.tdlight.jni.TdApi.AuthorizationStateWaitPhoneNumber;
 import it.tdlight.jni.TdApi.AuthorizationStateWaitRegistration;
 import it.tdlight.jni.TdApi.AuthorizationStateWaitTdlibParameters;
 import it.tdlight.jni.TdApi.CheckAuthenticationBotToken;
+import it.tdlight.jni.TdApi.CheckAuthenticationCode;
 import it.tdlight.jni.TdApi.CheckAuthenticationPassword;
 import it.tdlight.jni.TdApi.CheckDatabaseEncryptionKey;
 import it.tdlight.jni.TdApi.Error;
@@ -38,6 +39,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Comparator;
+import java.util.Objects;
 import java.util.Set;
 import org.reactivestreams.Publisher;
 import org.slf4j.Logger;
@@ -390,26 +392,67 @@ public class AsyncTdEasy {
 								logger.info("Telegram Terms of Service:\n" + authorizationStateWaitRegistration.termsOfService.text.text);
 							}
 
-							while (registerUser.firstName == null || registerUser.firstName.length() <= 0
-									|| registerUser.firstName.length() > 64 || registerUser.firstName.isBlank()) {
-								registerUser.firstName = ScannerUtils.askParameter(this.logName, "Enter First Name").trim();
-							}
-							while (registerUser.lastName == null || registerUser.firstName.length() > 64) {
-								registerUser.lastName = ScannerUtils.askParameter(this.logName, "Enter Last Name").trim();
-							}
-
-							return MonoUtils.thenOrError(sendDirectly(registerUser));
+							return Mono
+									.from(settings)
+									.map(TdEasySettings::getParameterRequestHandler)
+									.flatMap(handler -> {
+										return handler
+												.onParameterRequest(Parameter.ASK_FIRST_NAME, new ParameterInfoEmpty())
+												.filter(Objects::nonNull)
+												.map(String::trim)
+												.filter(firstName -> !firstName.isBlank() && firstName.length() <= 64 && firstName.length() > 0)
+												.repeatWhen(s -> s.takeWhile(n -> n == 0))
+												.last()
+												.doOnNext(firstName -> registerUser.firstName = firstName)
+												.then(handler
+														.onParameterRequest(Parameter.ASK_LAST_NAME, new ParameterInfoEmpty())
+														.filter(Objects::nonNull)
+														.map(String::trim)
+														.filter(lastName -> lastName.length() <= 64)
+														.repeatWhen(s -> s.takeWhile(n -> n == 0))
+														.last()
+														.defaultIfEmpty("")
+														.doOnNext(lastName -> registerUser.lastName = lastName)
+												)
+												.thenReturn(handler);
+									})
+									.then(MonoUtils.thenOrError(sendDirectly(registerUser)));
+						case TdApi.AuthorizationStateWaitOtherDeviceConfirmation.CONSTRUCTOR:
+							var authorizationStateWaitOtherDeviceConfirmation = (AuthorizationStateWaitOtherDeviceConfirmation) obj;
+							return Mono
+									.from(settings)
+									.map(TdEasySettings::getParameterRequestHandler)
+									.flatMap(handler -> {
+										return handler.onParameterRequest(Parameter.NOTIFY_LINK,
+												new ParameterInfoNotifyLink(authorizationStateWaitOtherDeviceConfirmation.link)
+										);
+									});
+						case TdApi.AuthorizationStateWaitCode.CONSTRUCTOR:
+							var authorizationStateWaitCode = (AuthorizationStateWaitCode) obj;
+							return Mono
+									.from(settings)
+									.map(TdEasySettings::getParameterRequestHandler)
+									.flatMap(handler -> {
+										return handler.onParameterRequest(Parameter.ASK_CODE,
+												new ParameterInfoCode(authorizationStateWaitCode.codeInfo.phoneNumber,
+														authorizationStateWaitCode.codeInfo.nextType,
+														authorizationStateWaitCode.codeInfo.timeout,
+														authorizationStateWaitCode.codeInfo.type
+												)
+										);
+									})
+									.flatMap(code -> MonoUtils.thenOrError(sendDirectly(new CheckAuthenticationCode(code))));
 						case AuthorizationStateWaitPassword.CONSTRUCTOR:
 							var authorizationStateWaitPassword = (AuthorizationStateWaitPassword) obj;
-							String passwordMessage = "Password authorization of '" + this.logName + "':";
-							if (authorizationStateWaitPassword.passwordHint != null && !authorizationStateWaitPassword.passwordHint.isBlank()) {
-								passwordMessage += "\n\tHint: " + authorizationStateWaitPassword.passwordHint;
-							}
-							logger.info(passwordMessage);
-
-							var password = ScannerUtils.askParameter(this.logName, "Enter your password");
-
-							return MonoUtils.thenOrError(sendDirectly(new CheckAuthenticationPassword(password)));
+							return Mono
+									.from(settings)
+									.map(TdEasySettings::getParameterRequestHandler)
+									.flatMap(handler -> {
+										return handler.onParameterRequest(Parameter.ASK_PASSWORD,
+												new ParameterInfoPasswordHint(authorizationStateWaitPassword.passwordHint)
+										);
+									})
+									.flatMap(password -> MonoUtils.thenOrError(sendDirectly(new CheckAuthenticationPassword(password))));
 						case AuthorizationStateReady.CONSTRUCTOR: {
 							return Mono.empty();
 						}
