@@ -8,12 +8,15 @@ import it.tdlight.jni.TdApi;
 import it.tdlight.jni.TdApi.Object;
 import it.tdlight.tdlibsession.td.TdError;
 import it.tdlight.tdlibsession.td.TdResult;
+import it.tdlight.tdlibsession.td.middle.direct.AsyncTdMiddleDirect;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
 import org.reactivestreams.Subscription;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.warp.commonutils.concurrency.future.CompletableFutureUtils;
 import reactor.core.CoreSubscriber;
 import reactor.core.publisher.Mono;
@@ -22,6 +25,8 @@ import reactor.core.publisher.SynchronousSink;
 import reactor.util.context.Context;
 
 public class MonoUtils {
+
+	private static final Logger logger = LoggerFactory.getLogger(MonoUtils.class);
 
 	public static <T> Handler<AsyncResult<T>> toHandler(SynchronousSink<T> sink) {
 		return event -> {
@@ -135,6 +140,26 @@ public class MonoUtils {
 				sink.error(new TdError(optional.cause().code, optional.cause().message));
 			}
 		});
+	}
+
+	public static <T extends TdApi.Object> Mono<Void> thenOrLogSkipError(Mono<TdResult<T>> optionalMono) {
+		return optionalMono.handle((optional, sink) -> {
+			if (optional.failed()) {
+				logger.error("Received TDLib error: {}", optional.cause());
+			}
+			sink.complete();
+		});
+	}
+
+	public static <T extends TdApi.Object> Mono<Void> thenOrLogRepeatError(Supplier<? extends Mono<TdResult<T>>> optionalMono) {
+		return Mono.defer(() -> optionalMono.get().handle((TdResult<T> optional, SynchronousSink<Void> sink) -> {
+			if (optional.succeeded()) {
+				sink.complete();
+			} else {
+				logger.error("Received TDLib error: {}", optional.cause());
+				sink.error(new TdError(optional.cause().code, optional.cause().message));
+			}
+		})).retry();
 	}
 
 	public static <T> Mono<T> fromFuture(CompletableFuture<T> future) {

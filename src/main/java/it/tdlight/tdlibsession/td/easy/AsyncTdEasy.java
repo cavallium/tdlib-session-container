@@ -34,6 +34,7 @@ import it.tdlight.tdlibsession.FatalErrorType;
 import it.tdlight.tdlibsession.td.TdResult;
 import it.tdlight.tdlibsession.td.middle.AsyncTdMiddle;
 import it.tdlight.utils.MonoUtils;
+import it.tdlight.utils.TdLightUtils;
 import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
@@ -348,7 +349,6 @@ public class AsyncTdEasy {
 				.filter(obj -> obj.getConstructor() == UpdateAuthorizationState.CONSTRUCTOR)
 				.map(obj -> ((UpdateAuthorizationState) obj).authorizationState)
 				.flatMap(obj -> {
-					this.authState.onNext(new AuthorizationStateReady());
 					switch (obj.getConstructor()) {
 						case AuthorizationStateWaitTdlibParameters.CONSTRUCTOR:
 							return MonoUtils.thenOrError(Mono.from(this.settings).map(settings -> {
@@ -371,7 +371,12 @@ public class AsyncTdEasy {
 								return new SetTdlibParameters(parameters);
 							}).flatMap(this::sendDirectly));
 						case AuthorizationStateWaitEncryptionKey.CONSTRUCTOR:
-							return MonoUtils.thenOrError(sendDirectly(new CheckDatabaseEncryptionKey()));
+							return MonoUtils
+									.thenOrError(sendDirectly(new CheckDatabaseEncryptionKey()))
+									.onErrorResume((error) -> {
+										logger.error("Error while checking TDLib encryption key", error);
+										return sendDirectly(new TdApi.Close()).then();
+									});
 						case AuthorizationStateWaitPhoneNumber.CONSTRUCTOR:
 							return MonoUtils.thenOrError(Mono.from(this.settings).flatMap(settings -> {
 								if (settings.isPhoneNumberSet()) {
@@ -383,7 +388,10 @@ public class AsyncTdEasy {
 								} else {
 									return Mono.error(new IllegalArgumentException("A bot is neither an user or a bot"));
 								}
-							}));
+							})).onErrorResume((error) -> {
+								logger.error("Error while waiting for phone number", error);
+								return sendDirectly(new TdApi.Close()).then();
+							});
 						case AuthorizationStateWaitRegistration.CONSTRUCTOR:
 							var authorizationStateWaitRegistration = (AuthorizationStateWaitRegistration) obj;
 							RegisterUser registerUser = new RegisterUser();
@@ -396,7 +404,7 @@ public class AsyncTdEasy {
 									.from(settings)
 									.map(TdEasySettings::getParameterRequestHandler)
 									.flatMap(handler -> {
-										return handler
+										return MonoUtils.thenOrLogRepeatError(() -> handler
 												.onParameterRequest(Parameter.ASK_FIRST_NAME, new ParameterInfoEmpty())
 												.filter(Objects::nonNull)
 												.map(String::trim)
@@ -414,9 +422,8 @@ public class AsyncTdEasy {
 														.defaultIfEmpty("")
 														.doOnNext(lastName -> registerUser.lastName = lastName)
 												)
-												.thenReturn(handler);
-									})
-									.then(MonoUtils.thenOrError(sendDirectly(registerUser)));
+												.then(sendDirectly(registerUser)));
+									});
 						case TdApi.AuthorizationStateWaitOtherDeviceConfirmation.CONSTRUCTOR:
 							var authorizationStateWaitOtherDeviceConfirmation = (AuthorizationStateWaitOtherDeviceConfirmation) obj;
 							return Mono
@@ -433,27 +440,26 @@ public class AsyncTdEasy {
 									.from(settings)
 									.map(TdEasySettings::getParameterRequestHandler)
 									.flatMap(handler -> {
-										return handler.onParameterRequest(Parameter.ASK_CODE,
+										return MonoUtils.thenOrLogRepeatError(() -> handler.onParameterRequest(Parameter.ASK_CODE,
 												new ParameterInfoCode(authorizationStateWaitCode.codeInfo.phoneNumber,
 														authorizationStateWaitCode.codeInfo.nextType,
 														authorizationStateWaitCode.codeInfo.timeout,
 														authorizationStateWaitCode.codeInfo.type
 												)
-										);
-									})
-									.flatMap(code -> MonoUtils.thenOrError(sendDirectly(new CheckAuthenticationCode(code))));
+										).flatMap(code -> sendDirectly(new CheckAuthenticationCode(code))));
+									});
 						case AuthorizationStateWaitPassword.CONSTRUCTOR:
 							var authorizationStateWaitPassword = (AuthorizationStateWaitPassword) obj;
 							return Mono
 									.from(settings)
 									.map(TdEasySettings::getParameterRequestHandler)
 									.flatMap(handler -> {
-										return handler.onParameterRequest(Parameter.ASK_PASSWORD,
+										return MonoUtils.thenOrLogRepeatError(() -> handler.onParameterRequest(Parameter.ASK_PASSWORD,
 												new ParameterInfoPasswordHint(authorizationStateWaitPassword.passwordHint)
-										);
-									})
-									.flatMap(password -> MonoUtils.thenOrError(sendDirectly(new CheckAuthenticationPassword(password))));
+										).flatMap(password -> sendDirectly(new CheckAuthenticationPassword(password))));
+									});
 						case AuthorizationStateReady.CONSTRUCTOR: {
+							this.authState.onNext(new AuthorizationStateReady());
 							return Mono.empty();
 						}
 						case AuthorizationStateClosed.CONSTRUCTOR:
