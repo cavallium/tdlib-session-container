@@ -4,7 +4,6 @@ import io.vertx.circuitbreaker.CircuitBreaker;
 import io.vertx.circuitbreaker.CircuitBreakerOptions;
 import io.vertx.core.AbstractVerticle;
 import io.vertx.core.AsyncResult;
-import io.vertx.core.DeploymentOptions;
 import io.vertx.core.Promise;
 import io.vertx.core.eventbus.DeliveryOptions;
 import io.vertx.core.eventbus.Message;
@@ -76,7 +75,7 @@ public class AsyncTdMiddleEventBusClient extends AbstractVerticle implements Asy
 	public static Mono<AsyncTdMiddleEventBusClient> getAndDeployInstance(TdClusterManager clusterManager, String botAlias, String botAddress, boolean local) throws InitializationException {
 		try {
 			var instance = new AsyncTdMiddleEventBusClient(clusterManager);
-			var options = new DeploymentOptions().setConfig(new JsonObject()
+			var options = clusterManager.newDeploymentOpts().setConfig(new JsonObject()
 					.put("botAddress", botAddress)
 					.put("botAlias", botAlias)
 					.put("local", local));

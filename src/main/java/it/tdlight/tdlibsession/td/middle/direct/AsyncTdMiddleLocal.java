@@ -40,7 +40,7 @@ public class AsyncTdMiddleLocal implements AsyncTdMiddle {
 			masterClusterManager
 					.getVertx()
 					.deployVerticle(srv,
-							new DeploymentOptions().setConfig(new JsonObject().put("botAddress", botAddress).put("botAlias", botAlias).put("local", true)),
+							masterClusterManager.newDeploymentOpts().setConfig(new JsonObject().put("botAddress", botAddress).put("botAlias", botAlias).put("local", true)),
 							MonoUtils.toHandler(sink)
 					);
 		}).onErrorMap(InitializationException::new).flatMap(_x -> {

@@ -1,6 +1,5 @@
 package it.tdlight.tdlibsession.remoteclient;
 
-import io.vertx.core.DeploymentOptions;
 import io.vertx.core.Handler;
 import io.vertx.core.json.JsonObject;
 import io.vertx.core.net.JksOptions;
@@ -8,6 +7,7 @@ import it.tdlight.common.Init;
 import it.tdlight.common.utils.CantLoadLibrary;
 import it.tdlight.tdlibsession.td.middle.TdClusterManager;
 import it.tdlight.tdlibsession.td.middle.server.AsyncTdMiddleEventBusServer;
+import it.tdlight.utils.MonoUtils;
 import java.io.IOException;
 import java.net.URISyntaxException;
 import java.nio.file.FileAlreadyExistsException;
@@ -21,7 +21,6 @@ import java.util.stream.Collectors;
 import org.apache.logging.log4j.LogManager;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import it.tdlight.utils.MonoUtils;
 import reactor.core.publisher.Mono;
 import reactor.core.publisher.ReplayProcessor;
 
@@ -133,7 +132,7 @@ public class TDLibRemoteClient implements AutoCloseable {
 								.getKey()
 								.getVertx()
 								.deployVerticle(new AsyncTdMiddleEventBusServer(entry.getKey()),
-										new DeploymentOptions().setConfig(new JsonObject()
+										entry.getKey().newDeploymentOpts().setConfig(new JsonObject()
 												.put("botAddress", entry.getValue())
 												.put("botAlias", entry.getValue())
 												.put("local", false)),

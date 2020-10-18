@@ -8,6 +8,7 @@ import com.hazelcast.config.MaxSizeConfig;
 import com.hazelcast.config.MaxSizeConfig.MaxSizePolicy;
 import com.hazelcast.config.MergePolicyConfig;
 import com.hazelcast.config.SemaphoreConfig;
+import io.vertx.core.DeploymentOptions;
 import io.vertx.core.Handler;
 import io.vertx.core.Vertx;
 import io.vertx.core.VertxOptions;
@@ -223,5 +224,9 @@ public class TdClusterManager {
 		} else {
 			return eb.consumer(address, handler);
 		}
+	}
+
+	public DeploymentOptions newDeploymentOpts() {
+		return new DeploymentOptions().setWorkerPoolName("td-main-pool");
 	}
 }

@@ -3,7 +3,6 @@ package it.tdlight.tdlibsession.td.middle.direct;
 import static it.tdlight.tdlibsession.td.middle.server.AsyncTdMiddleEventBusServer.WAIT_DURATION;
 
 import io.vertx.core.AbstractVerticle;
-import io.vertx.core.DeploymentOptions;
 import io.vertx.core.Promise;
 import io.vertx.core.json.JsonObject;
 import it.tdlight.jni.TdApi.Function;
@@ -39,7 +38,7 @@ public class AsyncTdMiddleDirect extends AbstractVerticle implements AsyncTdMidd
 			String botAddress) throws InitializationException {
 		try {
 			var instance = new AsyncTdMiddleDirect();
-			var options = new DeploymentOptions().setConfig(new JsonObject()
+			var options = clusterManager.newDeploymentOpts().setConfig(new JsonObject()
 					.put("botAlias", botAlias)
 					.put("botAddress", botAddress));
 			return MonoUtils.<String>executeAsFuture(promise -> {
