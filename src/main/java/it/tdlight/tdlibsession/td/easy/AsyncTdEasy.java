@@ -34,7 +34,6 @@ import it.tdlight.tdlibsession.FatalErrorType;
 import it.tdlight.tdlibsession.td.TdResult;
 import it.tdlight.tdlibsession.td.middle.AsyncTdMiddle;
 import it.tdlight.utils.MonoUtils;
-import it.tdlight.utils.TdLightUtils;
 import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
@@ -56,7 +55,7 @@ public class AsyncTdEasy {
 
 	private static final Logger logger = LoggerFactory.getLogger(AsyncTdEasy.class);
 
-	private final ReplayProcessor<AuthorizationState> authState = ReplayProcessor.cacheLastOrDefault(new AuthorizationStateClosed());
+	private final ReplayProcessor<AuthorizationState> authState = ReplayProcessor.create(1);
 	private final ReplayProcessor<Boolean> requestedDefinitiveExit = ReplayProcessor.cacheLastOrDefault(false);
 	private final ReplayProcessor<TdEasySettings> settings = ReplayProcessor.cacheLast();
 	private final EmitterProcessor<Error> globalErrors = EmitterProcessor.create();
