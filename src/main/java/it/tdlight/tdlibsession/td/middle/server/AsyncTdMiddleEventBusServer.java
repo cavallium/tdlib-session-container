@@ -140,7 +140,6 @@ public class AsyncTdMiddleEventBusServer extends AbstractVerticle {
 						.from(tdClosed)
 						.single()
 						.filter(tdClosedVal -> !tdClosedVal)
-						.subscribeOn(td.getTdUpdatesScheduler())
 						.map(_v -> {
 							ArrayList<AsyncResult<TdResult<Update>>> updatesBatch = new ArrayList<>();
 							while (!queue.isEmpty() && updatesBatch.size() < 1000) {
