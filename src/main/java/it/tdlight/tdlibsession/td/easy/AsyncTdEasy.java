@@ -467,6 +467,7 @@ public class AsyncTdEasy {
 									logger.info("AsyncTdEasy closed successfully");
 								} else {
 									logger.warn("AsyncTdEasy closed unexpectedly: " + logName);
+									authState.onNext(obj);
 								}
 							}).flatMap(closeRequested -> {
 								if (closeRequested) {
