@@ -71,7 +71,7 @@ public class AsyncTdDirectImpl implements AsyncTdDirect {
 	@Override
 	public Mono<Void> initializeClient() {
 		return Mono.<Boolean>create(sink -> {
-			Flux.<AsyncResult<TdResult<Update>>>create(emitter -> {
+			var updatesConnectableFlux = Flux.<AsyncResult<TdResult<Update>>>create(emitter -> {
 				var client = ClientManager.create((Object object) -> {
 					emitter.next(Future.succeededFuture(TdResult.of(object)));
 					// Close the emitter if receive closed state
@@ -90,16 +90,27 @@ public class AsyncTdDirectImpl implements AsyncTdDirect {
 				emitter.onDispose(() -> {
 					this.td.set(null);
 				});
-			}).subscribeOn(tdPollScheduler).subscribe(next -> {
-				updatesProcessor.onNext(next);
+			}).subscribeOn(tdPollScheduler).publish();
+
+			// Complete initialization when receiving first update
+			updatesConnectableFlux.subscribeOn(tdPollScheduler).take(1).single().subscribe(next -> {
 				sink.success(true);
 			}, error -> {
-				updatesProcessor.onError(error);
 				sink.error(error);
 			}, () -> {
-				updatesProcessor.onComplete();
 				sink.success(true);
 			});
+
+			// Pass updates to UpdatesProcessor
+			updatesConnectableFlux.subscribeOn(tdPollScheduler).subscribe(next -> {
+				updatesProcessor.onNext(next);
+			}, error -> {
+				updatesProcessor.onError(error);
+			}, () -> {
+				updatesProcessor.onComplete();
+			});
+
+			updatesConnectableFlux.connect();
 		}).single().then().subscribeOn(tdScheduler);
 	}
 
