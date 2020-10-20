@@ -151,6 +151,14 @@ public class MonoUtils {
 		});
 	}
 
+	public static <T extends TdApi.Object> Mono<T> orElseLogSkipError(TdResult<T> optional) {
+		if (optional.failed()) {
+			logger.error("Received TDLib error: {}", optional.cause());
+			return Mono.empty();
+		}
+		return Mono.just(optional.result());
+	}
+
 	public static <T extends TdApi.Object> Mono<Void> thenOrLogRepeatError(Supplier<? extends Mono<TdResult<T>>> optionalMono) {
 		return Mono.defer(() -> optionalMono.get().handle((TdResult<T> optional, SynchronousSink<Void> sink) -> {
 			if (optional.succeeded()) {
