@@ -25,6 +25,7 @@ import it.tdlight.utils.MonoUtils;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.List;
 import java.util.Queue;
 import java.util.concurrent.atomic.AtomicBoolean;
 import org.slf4j.Logger;
@@ -140,15 +141,17 @@ public class AsyncTdMiddleEventBusServer extends AbstractVerticle {
 						.from(tdClosed)
 						.single()
 						.filter(tdClosedVal -> !tdClosedVal)
-						.map(_v -> {
-							ArrayList<AsyncResult<TdResult<Update>>> updatesBatch = new ArrayList<>();
-							while (!queue.isEmpty() && updatesBatch.size() < 1000) {
-								var item = queue.poll();
-								if (item == null) break;
-								updatesBatch.add(item);
-							}
-							return updatesBatch;
-						})
+						.flatMap(_v -> Mono.<List<AsyncResult<TdResult<Update>>>>create(sink -> {
+							sink.onRequest((l) -> {
+								ArrayList<AsyncResult<TdResult<Update>>> updatesBatch = new ArrayList<>();
+								while (!queue.isEmpty() && updatesBatch.size() < 1000) {
+									var item = queue.poll();
+									if (item == null) break;
+									updatesBatch.add(item);
+								}
+								sink.success(updatesBatch);
+							});
+						}))
 						.flatMap(receivedList -> {
 							return Flux.fromIterable(receivedList).flatMap(result -> {
 								if (result.succeeded()) {
