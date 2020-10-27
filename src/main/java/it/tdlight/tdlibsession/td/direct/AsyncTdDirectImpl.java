@@ -15,7 +15,6 @@ import java.time.Duration;
 import java.util.concurrent.atomic.AtomicReference;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import reactor.core.publisher.EmitterProcessor;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Scheduler;
@@ -29,6 +28,7 @@ public class AsyncTdDirectImpl implements AsyncTdDirect {
 	private final Scheduler tdScheduler = Schedulers.newSingle("TdMain");
 	private final Scheduler tdPollScheduler = Schedulers.newSingle("TdPoll");
 	private final Scheduler tdResponsesScheduler = Schedulers.newSingle("TdResponse");
+	private final Scheduler tdExecScheduler = Schedulers.newSingle("TdExec");
 	private final Scheduler tdResponsesOutputScheduler = Schedulers.boundedElastic();
 
 	private Flux<AsyncResult<TdResult<Update>>> updatesProcessor;
@@ -44,7 +44,7 @@ public class AsyncTdDirectImpl implements AsyncTdDirect {
 			return Mono
 					.fromCallable(() -> TdResult.<T>of(this.td.get().execute(request)))
 					.subscribeOn(tdResponsesScheduler)
-					.publishOn(Schedulers.single());
+					.publishOn(tdExecScheduler);
 		} else {
 			return Mono.<TdResult<T>>create(sink -> {
 				try {
