@@ -5,20 +5,18 @@ import static it.tdlight.tdlibsession.td.middle.server.AsyncTdMiddleEventBusServ
 import io.vertx.core.AbstractVerticle;
 import io.vertx.core.Promise;
 import io.vertx.core.json.JsonObject;
+import it.tdlight.jni.TdApi;
 import it.tdlight.jni.TdApi.Function;
 import it.tdlight.jni.TdApi.Object;
-import it.tdlight.jni.TdApi.Update;
 import it.tdlight.tdlibsession.td.ResponseError;
 import it.tdlight.tdlibsession.td.TdResult;
 import it.tdlight.tdlibsession.td.direct.AsyncTdDirectImpl;
 import it.tdlight.tdlibsession.td.middle.AsyncTdMiddle;
 import it.tdlight.tdlibsession.td.middle.TdClusterManager;
 import it.tdlight.utils.MonoUtils;
-import org.reactivestreams.Publisher;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.warp.commonutils.error.InitializationException;
-import reactor.core.publisher.ConnectableFlux;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.core.publisher.ReplayProcessor;
@@ -31,7 +29,7 @@ public class AsyncTdMiddleDirect extends AbstractVerticle implements AsyncTdMidd
 	protected AsyncTdDirectImpl td;
 	private String botAddress;
 	private String botAlias;
-	private Flux<Update> updatesFluxCo;
+	private Flux<TdApi.Object> updatesFluxCo;
 
 	public AsyncTdMiddleDirect() {
 	}
@@ -78,11 +76,11 @@ public class AsyncTdMiddleDirect extends AbstractVerticle implements AsyncTdMidd
 						logger.error("Received an errored update",
 								ResponseError.newResponseError("incoming update", botAlias, result.result().cause())
 						);
-						return Mono.<Update>empty();
+						return Mono.<TdApi.Object>empty();
 					}
 				} else {
 					logger.error("Received an errored update", result.cause());
-					return Mono.<Update>empty();
+					return Mono.<TdApi.Object>empty();
 				}
 			})).publish().refCount(1);
 			startPromise.complete();
@@ -105,7 +103,7 @@ public class AsyncTdMiddleDirect extends AbstractVerticle implements AsyncTdMidd
 	}
 
 	@Override
-	public Flux<Update> getUpdates() {
+	public Flux<TdApi.Object> getUpdates() {
 		return Flux.from(updatesFluxCo);
 	}
 

@@ -19,8 +19,10 @@ import io.vertx.core.eventbus.MessageCodec;
 import io.vertx.core.eventbus.MessageConsumer;
 import io.vertx.core.http.ClientAuth;
 import io.vertx.core.net.JksOptions;
+import io.vertx.core.shareddata.SharedData;
 import io.vertx.core.spi.cluster.ClusterManager;
 import io.vertx.spi.cluster.hazelcast.HazelcastClusterManager;
+import it.tdlight.utils.MonoUtils;
 import java.nio.channels.AlreadyBoundException;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -30,7 +32,6 @@ import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import org.jetbrains.annotations.Nullable;
-import it.tdlight.utils.MonoUtils;
 import reactor.core.publisher.Mono;
 
 public class TdClusterManager {
@@ -228,5 +229,9 @@ public class TdClusterManager {
 
 	public DeploymentOptions newDeploymentOpts() {
 		return new DeploymentOptions().setWorkerPoolName("td-main-pool");
+	}
+
+	public SharedData getSharedData() {
+		return vertx.sharedData();
 	}
 }

@@ -4,7 +4,6 @@ import io.vertx.core.buffer.Buffer;
 import io.vertx.core.eventbus.MessageCodec;
 import it.tdlight.jni.TdApi;
 import it.tdlight.jni.TdApi.Error;
-import it.tdlight.jni.TdApi.Update;
 import it.tdlight.tdlibsession.td.TdResult;
 import it.unimi.dsi.fastutil.io.FastByteArrayInputStream;
 import it.unimi.dsi.fastutil.io.FastByteArrayOutputStream;
@@ -27,7 +26,7 @@ public class TdOptListMessageCodec implements MessageCodec<TdOptionalList, TdOpt
 				if (ts.isSet()) {
 					var t = ts.getValues();
 					dos.writeInt(t.size());
-					for (TdResult<Update> t1 : t) {
+					for (TdResult<TdApi.Object> t1 : t) {
 						if (t1.succeeded()) {
 							dos.writeBoolean(true);
 							t1.result().serialize(dos);
@@ -55,10 +54,10 @@ public class TdOptListMessageCodec implements MessageCodec<TdOptionalList, TdOpt
 				if (size < 0) {
 					return new TdOptionalList(false, Collections.emptyList());
 				} else {
-					ArrayList<TdResult<TdApi.Update>> list = new ArrayList<>();
+					ArrayList<TdResult<TdApi.Object>> list = new ArrayList<>();
 					for (int i = 0; i < size; i++) {
 						if (dis.readBoolean()) {
-							list.add(TdResult.succeeded((Update) TdApi.Deserializer.deserialize(dis)));
+							list.add(TdResult.succeeded((TdApi.Object) TdApi.Deserializer.deserialize(dis)));
 						} else {
 							list.add(TdResult.failed((Error) TdApi.Deserializer.deserialize(dis)));
 						}

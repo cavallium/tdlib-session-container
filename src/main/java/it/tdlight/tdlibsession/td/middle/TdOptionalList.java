@@ -8,9 +8,9 @@ import java.util.StringJoiner;
 
 public class TdOptionalList {
 	private final boolean isSet;
-	private final List<TdResult<TdApi.Update>> values;
+	private final List<TdResult<TdApi.Object>> values;
 
-	public TdOptionalList(boolean isSet, List<TdResult<TdApi.Update>> values) {
+	public TdOptionalList(boolean isSet, List<TdResult<TdApi.Object>> values) {
 		this.isSet = isSet;
 		this.values = values;
 	}
@@ -19,7 +19,7 @@ public class TdOptionalList {
 		return isSet;
 	}
 
-	public List<TdResult<TdApi.Update>> getValues() {
+	public List<TdResult<TdApi.Object>> getValues() {
 		return values;
 	}
 

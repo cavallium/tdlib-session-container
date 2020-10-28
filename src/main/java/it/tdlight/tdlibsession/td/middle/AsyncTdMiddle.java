@@ -10,9 +10,9 @@ public interface AsyncTdMiddle {
 	/**
 	 * Receives incoming updates from TDLib.
 	 *
-	 * @return Updates
+	 * @return Updates (or Error if received a fatal error. A fatal error means that the client is no longer working)
 	 */
-	Flux<TdApi.Update> getUpdates();
+	Flux<TdApi.Object> getUpdates();
 
 	/**
 	 * Sends request to TDLib. May be called from any thread.

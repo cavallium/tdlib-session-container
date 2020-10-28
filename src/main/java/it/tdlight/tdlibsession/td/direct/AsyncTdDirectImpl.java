@@ -5,9 +5,10 @@ import io.vertx.core.Future;
 import it.tdlight.common.TelegramClient;
 import it.tdlight.jni.TdApi;
 import it.tdlight.jni.TdApi.AuthorizationStateClosed;
+import it.tdlight.jni.TdApi.Close;
 import it.tdlight.jni.TdApi.Function;
 import it.tdlight.jni.TdApi.Object;
-import it.tdlight.jni.TdApi.Update;
+import it.tdlight.jni.TdApi.Ok;
 import it.tdlight.jni.TdApi.UpdateAuthorizationState;
 import it.tdlight.tdlibsession.td.TdResult;
 import it.tdlight.tdlight.ClientManager;
@@ -31,7 +32,7 @@ public class AsyncTdDirectImpl implements AsyncTdDirect {
 	private final Scheduler tdExecScheduler = Schedulers.newSingle("TdExec");
 	private final Scheduler tdResponsesOutputScheduler = Schedulers.boundedElastic();
 
-	private Flux<AsyncResult<TdResult<Update>>> updatesProcessor;
+	private Flux<AsyncResult<TdResult<TdApi.Object>>> updatesProcessor;
 	private final String botAlias;
 
 	public AsyncTdDirectImpl(String botAlias) {
@@ -42,15 +43,32 @@ public class AsyncTdDirectImpl implements AsyncTdDirect {
 	public <T extends TdApi.Object> Mono<TdResult<T>> execute(Function request, boolean synchronous) {
 		if (synchronous) {
 			return Mono
-					.fromCallable(() -> TdResult.<T>of(this.td.get().execute(request)))
+					.fromCallable(() -> {
+						var td = this.td.get();
+						if (td == null) {
+							if (request.getConstructor() == Close.CONSTRUCTOR) {
+								return TdResult.<T>of(new Ok());
+							}
+							throw new IllegalStateException("TDLib client is destroyed");
+						}
+						return TdResult.<T>of(td.execute(request));
+					})
 					.subscribeOn(tdResponsesScheduler)
 					.publishOn(tdExecScheduler);
 		} else {
 			return Mono.<TdResult<T>>create(sink -> {
 				try {
-					this.td.get().send(request, v -> {
-						sink.success(TdResult.of(v));
-					}, sink::error);
+					var td = this.td.get();
+					if (td == null) {
+						if (request.getConstructor() == Close.CONSTRUCTOR) {
+							sink.success(TdResult.<T>of(new Ok()));
+						}
+						sink.error(new IllegalStateException("TDLib client is destroyed"));
+					} else {
+						td.send(request, v -> {
+							sink.success(TdResult.of(v));
+						}, sink::error);
+					}
 				} catch (Throwable t) {
 					sink.error(t);
 				}
@@ -59,14 +77,14 @@ public class AsyncTdDirectImpl implements AsyncTdDirect {
 	}
 
 	@Override
-	public Flux<AsyncResult<TdResult<Update>>> getUpdates(Duration receiveDuration, int eventsSize) {
+	public Flux<AsyncResult<TdResult<TdApi.Object>>> getUpdates(Duration receiveDuration, int eventsSize) {
 		return updatesProcessor;
 	}
 
 	@Override
 	public Mono<Void> initializeClient() {
 		return Mono.<Boolean>create(sink -> {
-			var updatesConnectableFlux = Flux.<AsyncResult<TdResult<Update>>>create(emitter -> {
+			var updatesConnectableFlux = Flux.<AsyncResult<TdResult<TdApi.Object>>>create(emitter -> {
 				var client = ClientManager.create((Object object) -> {
 					emitter.next(Future.succeededFuture(TdResult.of(object)));
 					// Close the emitter if receive closed state
@@ -100,9 +118,10 @@ public class AsyncTdDirectImpl implements AsyncTdDirect {
 
 	@Override
 	public Mono<Void> destroyClient() {
-		return Mono.fromCallable(() -> {
-			// do nothing
-			return (Void) null;
-		}).single().subscribeOn(tdScheduler).publishOn(tdResponsesOutputScheduler);
+		return this
+				.execute(new TdApi.Close(), false)
+				.then()
+				.subscribeOn(tdScheduler)
+				.publishOn(tdResponsesOutputScheduler);
 	}
 }

@@ -7,12 +7,13 @@ import io.vertx.core.AsyncResult;
 import io.vertx.core.Promise;
 import io.vertx.core.eventbus.DeliveryOptions;
 import io.vertx.core.eventbus.Message;
+import io.vertx.core.eventbus.MessageConsumer;
 import io.vertx.core.json.JsonObject;
 import it.tdlight.common.ConstructorDetector;
 import it.tdlight.jni.TdApi;
 import it.tdlight.jni.TdApi.AuthorizationStateClosed;
+import it.tdlight.jni.TdApi.Error;
 import it.tdlight.jni.TdApi.Function;
-import it.tdlight.jni.TdApi.Update;
 import it.tdlight.jni.TdApi.UpdateAuthorizationState;
 import it.tdlight.tdlibsession.td.ResponseError;
 import it.tdlight.tdlibsession.td.TdResult;
@@ -30,6 +31,7 @@ import java.time.Duration;
 import java.util.List;
 import java.util.Objects;
 import java.util.StringJoiner;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.logging.Level;
 import org.apache.commons.lang3.tuple.Pair;
 import org.slf4j.Logger;
@@ -41,7 +43,8 @@ import reactor.core.publisher.ReplayProcessor;
 
 public class AsyncTdMiddleEventBusClient extends AbstractVerticle implements AsyncTdMiddle {
 
-	private static final Logger logger = LoggerFactory.getLogger(AsyncTdMiddleEventBusClient.class);
+	private static final Logger logger = LoggerFactory.getLogger(AsyncTdMiddleEventBusClient.class );
+
 	public static final boolean OUTPUT_REQUESTS = false;
 	public static final byte[] EMPTY = new byte[0];
 
@@ -49,7 +52,7 @@ public class AsyncTdMiddleEventBusClient extends AbstractVerticle implements Asy
 	private final DeliveryOptions deliveryOptions;
 	private final DeliveryOptions deliveryOptionsWithTimeout;
 
-	private ReplayProcessor<Flux<Update>> incomingUpdatesCo = ReplayProcessor.cacheLast();
+	private ReplayProcessor<Flux<TdApi.Object>> incomingUpdatesCo = ReplayProcessor.cacheLast();
 
 	private TdClusterManager cluster;
 
@@ -57,6 +60,7 @@ public class AsyncTdMiddleEventBusClient extends AbstractVerticle implements Asy
 	private String botAlias;
 	private boolean local;
 	private long initTime;
+	private MessageConsumer<byte[]> readyToStartConsumer;
 
 	@SuppressWarnings({"unchecked", "rawtypes"})
 	public AsyncTdMiddleEventBusClient(TdClusterManager clusterManager) {
@@ -121,37 +125,41 @@ public class AsyncTdMiddleEventBusClient extends AbstractVerticle implements Asy
 
 		startBreaker.execute(future -> {
 			try {
-				logger.error("Requesting " + botAddress + ".ping");
-				cluster
-						.getEventBus()
-						.request(botAddress + ".ping", EMPTY, deliveryOptions, pingMsg -> {
-									if (pingMsg.succeeded()) {
-										logger.error("Received ping reply (succeeded)");
-										logger.error("Requesting " + botAddress + ".start");
+				logger.debug("Requesting tdlib.remoteclient.clients.deploy.existing");
+				cluster.getEventBus().publish("tdlib.remoteclient.clients.deploy", botAddress, deliveryOptions);
+
+
+				logger.debug("Waiting for " + botAddress + ".readyToStart");
+				AtomicBoolean alreadyReceived = new AtomicBoolean(false);
+				this.readyToStartConsumer = cluster.getEventBus().consumer(botAddress + ".readyToStart", (Message<byte[]> pingMsg) -> {
+					// Reply instantly
+					pingMsg.reply(new byte[0]);
+
+					if (!alreadyReceived.getAndSet(true)) {
+						logger.debug("Received ping reply (succeeded)");
+						logger.debug("Requesting " + botAddress + ".start");
+						cluster
+								.getEventBus()
+								.request(botAddress + ".start", EMPTY, deliveryOptionsWithTimeout, startMsg -> {
+									if (startMsg.succeeded()) {
+										logger.debug("Requesting " + botAddress + ".isWorking");
 										cluster
 												.getEventBus()
-												.request(botAddress + ".start", EMPTY, deliveryOptionsWithTimeout, startMsg -> {
-													if (startMsg.succeeded()) {
-														logger.error("Requesting " + botAddress + ".isWorking");
-														cluster
-																.getEventBus()
-																.request(botAddress + ".isWorking", EMPTY, deliveryOptionsWithTimeout, msg -> {
-																	if (msg.succeeded()) {
-																		this.listen().then(this.pipe()).timeout(Duration.ofSeconds(10)).subscribe(v -> {}, future::fail, future::complete);
-																	} else {
-																		future.fail(msg.cause());
-																	}
-																});
+												.request(botAddress + ".isWorking", EMPTY, deliveryOptionsWithTimeout, msg -> {
+													if (msg.succeeded()) {
+														this.listen().then(this.pipe()).timeout(Duration.ofSeconds(10)).subscribe(v -> {}, future::fail, future::complete);
 													} else {
-														future.fail(startMsg.cause());
+														future.fail(msg.cause());
 													}
 												});
 									} else {
-										logger.error("Received ping reply (failed) (local=" + local + ")", pingMsg.cause());
-										future.fail(pingMsg.cause());
+										future.fail(startMsg.cause());
 									}
-								}
-						);
+								});
+					} else {
+						// Already received
+					}
+				});
 			} catch (Exception ex) {
 				future.fail(ex);
 			}
@@ -165,8 +173,10 @@ public class AsyncTdMiddleEventBusClient extends AbstractVerticle implements Asy
 
 	@Override
 	public void stop(Promise<Void> stopPromise) {
-		tdClosed.onNext(true);
-		stopPromise.complete();
+		readyToStartConsumer.unregister(result -> {
+			tdClosed.onNext(true);
+			stopPromise.complete();
+		});
 	}
 
 	private Mono<Void> listen() {
@@ -178,7 +188,7 @@ public class AsyncTdMiddleEventBusClient extends AbstractVerticle implements Asy
 		var updates = this.requestUpdatesBatchFromNetwork()
 				.repeatWhen(nFlux -> {
 					return Flux.push(emitter -> {
-						var dispos = Flux.combineLatest(nFlux, tdClosed, Pair::of).subscribe(val -> {
+						var dispos = Flux.combineLatest(nFlux, tdClosed.distinct(), Pair::of).subscribe(val -> {
 							//noinspection PointlessBooleanExpression
 							if (val.getRight() == true) {
 								emitter.complete();
@@ -194,12 +204,19 @@ public class AsyncTdMiddleEventBusClient extends AbstractVerticle implements Asy
 					});
 				}) // Repeat when there is one batch with a flux of updates
 				.flatMap(batch -> batch)
+				.onErrorResume(error -> {
+					logger.error("Bot updates request failed! Marking as closed.", error);
+					if (error.getMessage().contains("Timed out")) {
+						return Flux.just(new Error(444, "CONNECTION_KILLED"));
+					} else {
+						return Flux.just(new Error(406, "INVALID_UPDATE"));
+					}
+				})
 				.flatMap(update -> {
-					return Mono.<Update>create(sink -> {
+					return Mono.<TdApi.Object>create(sink -> {
 						if (update.getConstructor() == UpdateAuthorizationState.CONSTRUCTOR) {
 							var state = (UpdateAuthorizationState) update;
 							if (state.authorizationState.getConstructor() == AuthorizationStateClosed.CONSTRUCTOR) {
-								tdClosed.onNext(true);
 								this.getVertx().undeploy(this.deploymentID(), undeployed -> {
 									if (undeployed.failed()) {
 										logger.error("Error when undeploying td verticle", undeployed.cause());
@@ -225,10 +242,10 @@ public class AsyncTdMiddleEventBusClient extends AbstractVerticle implements Asy
 	}
 
 	private static class UpdatesBatchResult {
-		public final Flux<Update> updatesFlux;
+		public final Flux<TdApi.Object> updatesFlux;
 		public final boolean completed;
 
-		private UpdatesBatchResult(Flux<Update> updatesFlux, boolean completed) {
+		private UpdatesBatchResult(Flux<TdApi.Object> updatesFlux, boolean completed) {
 			this.updatesFlux = updatesFlux;
 			this.completed = completed;
 		}
@@ -242,15 +259,15 @@ public class AsyncTdMiddleEventBusClient extends AbstractVerticle implements Asy
 		}
 	}
 
-	private Mono<Flux<TdApi.Update>> requestUpdatesBatchFromNetwork() {
+	private Mono<Flux<TdApi.Object>> requestUpdatesBatchFromNetwork() {
 		return Mono
-				.from(tdClosed)
+				.from(tdClosed.distinct())
 				.single()
 				.filter(tdClosed -> !tdClosed)
-				.flatMap(_x -> Mono.<Flux<TdApi.Update>>create(sink -> {
+				.flatMap(_x -> Mono.<Flux<TdApi.Object>>create(sink -> {
 					cluster.getEventBus().<TdOptionalList>request(botAddress + ".getNextUpdatesBlock",
 							EMPTY,
-							deliveryOptions,
+							deliveryOptionsWithTimeout,
 							msg -> {
 								if (msg.failed()) {
 									//if (System.currentTimeMillis() - initTime <= 30000) {
@@ -267,8 +284,8 @@ public class AsyncTdMiddleEventBusClient extends AbstractVerticle implements Asy
 									} else {
 										var resultBody = msg.result().body();
 										if (resultBody.isSet()) {
-											List<TdResult<Update>> updates = resultBody.getValues();
-											for (TdResult<Update> updateObj : updates) {
+											List<TdResult<TdApi.Object>> updates = resultBody.getValues();
+											for (TdResult<TdApi.Object> updateObj : updates) {
 												if (updateObj.succeeded()) {
 													if (OUTPUT_REQUESTS) {
 														System.out.println(" <- " + updateObj.result()
@@ -297,7 +314,7 @@ public class AsyncTdMiddleEventBusClient extends AbstractVerticle implements Asy
 	}
 
 	@Override
-	public Flux<Update> getUpdates() {
+	public Flux<TdApi.Object> getUpdates() {
 		return incomingUpdatesCo.filter(Objects::nonNull).flatMap(v -> v);
 	}
 
@@ -313,7 +330,7 @@ public class AsyncTdMiddleEventBusClient extends AbstractVerticle implements Asy
 					.replace(" = ", "="));
 		}
 
-		return Mono.from(tdClosed).single().filter(tdClosed -> !tdClosed).<TdResult<T>>flatMap((_x) -> Mono.create(sink -> {
+		return Mono.from(tdClosed.distinct()).single().filter(tdClosed -> !tdClosed).<TdResult<T>>flatMap((_x) -> Mono.create(sink -> {
 			try {
 				cluster
 						.getEventBus()

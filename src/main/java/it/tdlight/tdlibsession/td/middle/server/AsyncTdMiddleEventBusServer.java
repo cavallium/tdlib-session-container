@@ -4,12 +4,14 @@ import static it.tdlight.tdlibsession.td.middle.client.AsyncTdMiddleEventBusClie
 
 import io.vertx.core.AbstractVerticle;
 import io.vertx.core.AsyncResult;
+import io.vertx.core.Future;
+import io.vertx.core.Handler;
 import io.vertx.core.Promise;
 import io.vertx.core.eventbus.Message;
+import io.vertx.core.eventbus.MessageConsumer;
 import it.tdlight.common.ConstructorDetector;
 import it.tdlight.jni.TdApi;
 import it.tdlight.jni.TdApi.AuthorizationStateClosed;
-import it.tdlight.jni.TdApi.Update;
 import it.tdlight.jni.TdApi.UpdateAuthorizationState;
 import it.tdlight.tdlibsession.td.TdResult;
 import it.tdlight.tdlibsession.td.TdResultMessage;
@@ -26,9 +28,11 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.Consumer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import reactor.core.publisher.Flux;
@@ -40,6 +44,7 @@ import reactor.core.scheduler.Schedulers;
 public class AsyncTdMiddleEventBusServer extends AbstractVerticle {
 
 	private static final Logger logger = LoggerFactory.getLogger(AsyncTdMiddleEventBusServer.class);
+
 	private static final byte[] EMPTY = new byte[0];
 	// todo: restore duration to 2 seconds instead of 10 millis, when the bug of tdlight double queue wait is fixed
 	public static final Duration WAIT_DURATION = Duration.ofSeconds(1);// Duration.ofMillis(10);
@@ -54,8 +59,14 @@ public class AsyncTdMiddleEventBusServer extends AbstractVerticle {
 
 	protected final ReplayProcessor<Boolean> tdClosed = ReplayProcessor.cacheLastOrDefault(false);
 	protected AsyncTdDirectImpl td;
-	protected final LinkedBlockingQueue<AsyncResult<TdResult<Update>>> queue = new LinkedBlockingQueue<>();
+	protected final LinkedBlockingQueue<AsyncResult<TdResult<TdApi.Object>>> queue = new LinkedBlockingQueue<>();
 	private final Scheduler tdSrvPoll;
+	private List<Consumer<Promise<Void>>> onBeforeStopListeners = new CopyOnWriteArrayList<>();
+	private List<Consumer<Promise<Void>>> onAfterStopListeners = new CopyOnWriteArrayList<>();
+	private MessageConsumer<?> startConsumer;
+	private MessageConsumer<byte[]> isWorkingConsumer;
+	private MessageConsumer<byte[]> getNextUpdatesBlockConsumer;
+	private MessageConsumer<ExecuteObject> executeConsumer;
 
 	@SuppressWarnings({"unchecked", "rawtypes"})
 	public AsyncTdMiddleEventBusServer(TdClusterManager clusterManager) {
@@ -89,23 +100,18 @@ public class AsyncTdMiddleEventBusServer extends AbstractVerticle {
 		this.local = local;
 		this.td = new AsyncTdDirectImpl(botAlias);
 
-		cluster.getEventBus().consumer(botAddress + ".ping", (Message<byte[]> msg) -> {
-			logger.error("Received ping. Replying...");
-			msg.reply(EMPTY);
-			logger.error("Replied.");
-		});
-
 		AtomicBoolean alreadyDeployed = new AtomicBoolean(false);
-		cluster.getEventBus().consumer(botAddress + ".start", (Message<byte[]> msg) -> {
+		this.startConsumer = cluster.getEventBus().consumer(botAddress + ".start", (Message<byte[]> msg) -> {
 			if (alreadyDeployed.compareAndSet(false, true)) {
 				td.initializeClient()
 						.then(this.listen())
 						.then(this.pipe())
 						.then(Mono.<Void>create(registrationSink -> {
 
-							cluster.getEventBus().consumer(botAddress + ".isWorking", (Message<byte[]> workingMsg) -> {
+							this.isWorkingConsumer = cluster.getEventBus().consumer(botAddress + ".isWorking", (Message<byte[]> workingMsg) -> {
 								workingMsg.reply(EMPTY, cluster.newDeliveryOpts().setLocalOnly(local));
-							}).completionHandler(MonoUtils.toHandler(registrationSink));
+							});
+							this.isWorkingConsumer.completionHandler(MonoUtils.toHandler(registrationSink));
 
 						}))
 						.subscribe(v -> {}, ex -> {
@@ -119,7 +125,8 @@ public class AsyncTdMiddleEventBusServer extends AbstractVerticle {
 			} else {
 				msg.reply(EMPTY);
 			}
-		}).completionHandler(h -> {
+		});
+		startConsumer.completionHandler(h -> {
 			logger.info(botAddress + " server deployed. succeeded: " + h.succeeded());
 			if (h.succeeded()) {
 				startPromise.complete(h.result());
@@ -127,30 +134,131 @@ public class AsyncTdMiddleEventBusServer extends AbstractVerticle {
 				startPromise.fail(h.cause());
 			}
 		});
+
+		logger.debug("Sending " + botAddress + ".readyToStart");
+		cluster.getEventBus().send(botAddress + ".readyToStart", EMPTY, cluster.newDeliveryOpts().setSendTimeout(10000));
+
+		var clientDeadCheckThread = new Thread(() -> {
+			Throwable ex = null;
+			try {
+				while (!Thread.interrupted()) {
+					Thread.sleep(5000);
+					Promise<Void> promise = Promise.promise();
+					cluster
+							.getEventBus()
+							.request(botAddress + ".readyToStart",
+									EMPTY,
+									cluster.newDeliveryOpts().setSendTimeout(10000),
+									r -> promise.handle(r.mapEmpty())
+							);
+					promise.future().toCompletionStage().toCompletableFuture().join();
+				}
+			} catch (Throwable e) {
+				ex = e;
+			}
+			var closed = tdClosed.blockFirst();
+			if (closed == null || !closed) {
+				if (ex != null && !ex.getMessage().contains("NO_HANDLERS")) {
+					logger.error(ex.getLocalizedMessage(), ex);
+				}
+				logger.error("TDLib client disconnected unexpectedly! Closing the server...");
+				undeploy(() -> {});
+			}
+		});
+		clientDeadCheckThread.setName("Client " + botAddress + " dead check");
+		clientDeadCheckThread.setDaemon(true);
+		clientDeadCheckThread.start();
+	}
+
+	public void onBeforeStop(Consumer<Promise<Void>> r) {
+		this.onBeforeStopListeners.add(r);
+	}
+
+	public void onAfterStop(Consumer<Promise<Void>> r) {
+		this.onAfterStopListeners.add(r);
 	}
 
 	@Override
 	public void stop(Promise<Void> stopPromise) {
-		tdClosed.onNext(true);
-		td.destroyClient().onErrorResume(ex -> {
-			logger.error("Can't destroy client", ex);
-			return Mono.empty();
-		}).doOnTerminate(() -> {
-			logger.debug("TdMiddle verticle stopped");
-		}).subscribe(MonoUtils.toSubscriber(stopPromise));
+		runAll(onBeforeStopListeners, onBeforeStopHandler -> {
+			if (onBeforeStopHandler.failed()) {
+				logger.error("A beforeStop listener failed: "+ onBeforeStopHandler.cause());
+			}
+
+			td.destroyClient().onErrorResume(ex -> {
+				logger.error("Can't destroy client", ex);
+				return Mono.empty();
+			}).doOnError(err -> {
+				logger.error("TdMiddle verticle failed during stop", err);
+			}).then(Mono.create(sink -> {
+				this.isWorkingConsumer.unregister(result -> {
+					if (result.failed()) {
+						logger.error("Can't unregister consumer", result.cause());
+					}
+					this.startConsumer.unregister(result2 -> {
+						if (result2.failed()) {
+							logger.error("Can't unregister consumer", result2.cause());
+						}
+
+						tdClosed.onNext(true);
+
+						this.getNextUpdatesBlockConsumer.unregister(result3 -> {
+							if (result3.failed()) {
+								logger.error("Can't unregister consumer", result3.cause());
+							}
+
+							this.executeConsumer.unregister(result4 -> {
+								if (result4.failed()) {
+									logger.error("Can't unregister consumer", result4.cause());
+								}
+
+								sink.success();
+							});
+						});
+					});
+				});
+			})).doFinally(signalType -> {
+				logger.info("TdMiddle verticle \"" + botAddress + "\" stopped");
+
+				runAll(onAfterStopListeners, onAfterStopHandler -> {
+					if (onAfterStopHandler.failed()) {
+						logger.error("An afterStop listener failed: " + onAfterStopHandler.cause());
+					}
+
+					stopPromise.complete();
+				});
+			}).subscribe();
+		});
+	}
+
+	private void runAll(List<Consumer<Promise<Void>>> actions, Handler<AsyncResult<Void>> resultHandler) {
+		if (actions.isEmpty()) {
+			resultHandler.handle(Future.succeededFuture());
+		} else {
+			var firstAction = actions.remove(0);
+			Promise<Void> promise = Promise.promise();
+			firstAction.accept(promise);
+			promise.future().onComplete(handler -> {
+				if (handler.succeeded()) {
+					runAll(new ArrayList<>(actions), resultHandler);
+				} else {
+					resultHandler.handle(Future.failedFuture(handler.cause()));
+				}
+			});
+		}
 	}
 
 	private Mono<Void> listen() {
 		return Mono.<Void>create(registrationSink -> {
-			cluster.getEventBus().consumer(botAddress + ".getNextUpdatesBlock", (Message<byte[]> msg) -> {
+			this.getNextUpdatesBlockConsumer = cluster.getEventBus().consumer(botAddress + ".getNextUpdatesBlock", (Message<byte[]> msg) -> {
 				// Run only if tdlib is not closed
 				Mono.from(tdClosed).single().filter(tdClosedVal -> !tdClosedVal)
 						// Get a list of updates
 						.flatMap(_v -> Mono
-										.<List<AsyncResult<TdResult<Update>>>>fromSupplier(() -> {
+										.<List<AsyncResult<TdResult<TdApi.Object>>>>fromSupplier(() -> {
 											// When a request is asked, read up to 1000 available updates in the queue
 											long requestTime = System.currentTimeMillis();
-											ArrayList<AsyncResult<TdResult<Update>>> updatesBatch = new ArrayList<>();
+											ArrayList<AsyncResult<TdResult<TdApi.Object>>> updatesBatch = new ArrayList<>();
 											try {
 												// Block until an update is found or 5 seconds passed
 												var item = queue.poll(5, TimeUnit.SECONDS);
@@ -207,20 +315,14 @@ public class AsyncTdMiddleEventBusServer extends AbstractVerticle {
 										if (received.succeeded() && received.result().getConstructor() == UpdateAuthorizationState.CONSTRUCTOR) {
 											var authState = (UpdateAuthorizationState) received.result();
 											if (authState.authorizationState.getConstructor() == AuthorizationStateClosed.CONSTRUCTOR) {
-												tdClosed.onNext(true);
-												vertx.undeploy(deploymentID(), undeployed -> {
-													if (undeployed.failed()) {
-														logger.error("Error when undeploying td verticle", undeployed.cause());
-													}
-													sink.success();
-												});
+												undeploy(sink::success);
 											} else {
 												sink.success();
 											}
 										} else {
 											sink.success();
 										}
-									}).then(Mono.<TdResult<Update>>create(sink -> {
+									}).then(Mono.<TdResult<TdApi.Object>>create(sink -> {
 										sink.success(received);
 									}));
 								} else {
@@ -237,11 +339,12 @@ public class AsyncTdMiddleEventBusServer extends AbstractVerticle {
 							logger.error("Error when processing a 'receiveUpdates' request", ex);
 							msg.fail(500, ex.getLocalizedMessage());
 						}, () -> {});
-			}).completionHandler(MonoUtils.toHandler(registrationSink));
+			});
+			getNextUpdatesBlockConsumer.completionHandler(MonoUtils.toHandler(registrationSink));
 
 		}).then(Mono.<Void>create(registrationSink -> {
 
-			cluster.getEventBus().<ExecuteObject>consumer(botAddress + ".execute", (Message<ExecuteObject> msg) -> {
+			this.executeConsumer = cluster.getEventBus().<ExecuteObject>consumer(botAddress + ".execute", (Message<ExecuteObject> msg) -> {
 				try {
 					if (OUTPUT_REQUESTS) {
 						System.out.println(":=> " + msg
@@ -276,9 +379,19 @@ public class AsyncTdMiddleEventBusServer extends AbstractVerticle {
 					logger.error("Error when deserializing a request", ex);
 					msg.fail(500, ex.getMessage());
 				}
-			}).completionHandler(MonoUtils.toHandler(registrationSink));
+			});
+			executeConsumer.completionHandler(MonoUtils.toHandler(registrationSink));
 
 		}));
+	}
+
+	private void undeploy(Runnable whenUndeployed) {
+		vertx.undeploy(deploymentID(), undeployed -> {
+			if (undeployed.failed()) {
+				logger.error("Error when undeploying td verticle", undeployed.cause());
+			}
+			whenUndeployed.run();
+		});
 	}
 
 	private Mono<Void> pipe() {
