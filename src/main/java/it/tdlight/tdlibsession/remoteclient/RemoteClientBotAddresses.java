@@ -6,12 +6,13 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
 import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.Set;
 import java.util.stream.Collectors;
 
 public class RemoteClientBotAddresses {
 
-	private final Set<String> addresses;
+	private final LinkedHashSet<String> addresses;
 	private final Path addressesFilePath;
 
 	public RemoteClientBotAddresses(Path addressesFilePath) throws IOException {
@@ -19,7 +20,11 @@ public class RemoteClientBotAddresses {
 		if (Files.notExists(addressesFilePath)) {
 			Files.createFile(addressesFilePath);
 		}
-		addresses = Files.readAllLines(addressesFilePath, StandardCharsets.UTF_8).stream().filter(address -> !address.isBlank()).collect(Collectors.toSet());
+		addresses = Files
+				.readAllLines(addressesFilePath, StandardCharsets.UTF_8)
+				.stream()
+				.filter(address -> !address.isBlank())
+				.collect(Collectors.toCollection(LinkedHashSet::new));
 	}
 
 	public synchronized void putAddress(String address) throws IOException {

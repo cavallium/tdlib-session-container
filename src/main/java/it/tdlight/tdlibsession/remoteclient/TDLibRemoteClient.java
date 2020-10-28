@@ -130,57 +130,16 @@ public class TDLibRemoteClient implements AutoCloseable {
 											var deploymentLock = lockAcquisitionResult.result();
 											putAllAsync(deployableBotAddresses, botAddresses.values(), (AsyncResult<Void> putAllResult) -> {
 												if (putAllResult.succeeded()) {
-													clusterManager
-															.getEventBus()
-															.consumer("tdlib.remoteclient.clients.deploy", (Message<String> msg) -> {
-																var botAddress = msg.body();
-																if (botAddresses.has(botAddress)) {
-																	deployBot(clusterManager, botAddress, deploymentResult -> {
-																		if (deploymentResult.failed()) {
-																			msg.fail(500, "Failed to deploy existing bot \"" + botAddress + "\": " + deploymentResult.cause().getLocalizedMessage());
-																			sink.error(deploymentResult.cause());
-																		} else {
-																			sink.next(botAddress);
-																		}
-																		deploymentLock.release();
-																	});
-																} else {
-																	logger.info("Deploying new bot at address \"" + botAddress + "\"");
-																	deployableBotAddresses.putIfAbsent(botAddress, netInterface, putResult -> {
-																		if (putResult.succeeded()) {
-																			if (putResult.result() == null) {
-																				try {
-																					botAddresses.putAddress(botAddress);
-																				} catch (IOException e) {
-																					logger.error("Can't save bot address \"" + botAddress + "\" to addresses file", e);
-																				}
-																				deployBot(clusterManager, botAddress, deploymentResult -> {
-																					if (deploymentResult.failed()) {
-																						msg.fail(500, "Failed to deploy new bot \"" + botAddress + "\": " + deploymentResult.cause().getLocalizedMessage());
-																						sink.error(deploymentResult.cause());
-																					} else {
-																						sink.next(botAddress);
-																					}
-																					deploymentLock.release();
-																				});
-																			} else {
-																				logger.error("Can't add new bot address \"" + botAddress + "\" because it's already present! Value: \"" + putResult.result() + "\"");
-																				sink.error(new UnsupportedOperationException("Can't add new bot address \"" + botAddress + "\" because it's already present! Value: \"" + putResult.result() + "\""));
-																				deploymentLock.release();
-																			}
-																		} else {
-																			logger.error("Can't update shared map", putResult.cause());
-																			sink.error(putResult.cause());
-																			deploymentLock.release();
-																		}
-																	});
-																}
-															});
+													listenForDeployRequests(botAddresses,
+															clusterManager,
+															sink,
+															deployableBotAddresses
+													);
 												} else {
 													logger.error("Can't update shared map", putAllResult.cause());
 													sink.error(putAllResult.cause());
-													deploymentLock.release();
 												}
+												deploymentLock.release();
 											});
 										} else {
 											logger.error("Can't obtain deployment lock", lockAcquisitionResult.cause());
@@ -200,6 +159,72 @@ public class TDLibRemoteClient implements AutoCloseable {
 		} catch (IOException ex) {
 			logger.error("Remote client error", ex);
 		}
+	}
+
+	private void listenForDeployRequests(RemoteClientBotAddresses botAddresses,
+			TdClusterManager clusterManager,
+			reactor.core.publisher.FluxSink<Object> sink,
+			AsyncMap<Object, Object> deployableBotAddresses) {
+		clusterManager.getEventBus().consumer("tdlib.remoteclient.clients.deploy", (Message<String> msg) -> {
+
+			clusterManager.getSharedData().getLockWithTimeout("deployment", 15000, lockAcquisitionResult -> {
+				if (lockAcquisitionResult.succeeded()) {
+					var deploymentLock = lockAcquisitionResult.result();
+					var botAddress = msg.body();
+					if (botAddresses.has(botAddress)) {
+						deployBot(clusterManager, botAddress, deploymentResult -> {
+							if (deploymentResult.failed()) {
+								msg.fail(500,
+										"Failed to deploy existing bot \"" + botAddress + "\": " + deploymentResult
+												.cause()
+												.getLocalizedMessage()
+								);
+								sink.error(deploymentResult.cause());
+							} else {
+								sink.next(botAddress);
+							}
+							deploymentLock.release();
+						});
+					} else {
+						deployableBotAddresses.putIfAbsent(botAddress, netInterface, putResult -> {
+							if (putResult.succeeded()) {
+								if (putResult.result() == null) {
+									logger.info("Deploying new bot at address \"" + botAddress + "\"");
+									try {
+										botAddresses.putAddress(botAddress);
+									} catch (IOException e) {
+										logger.error("Can't save bot address \"" + botAddress + "\" to addresses file", e);
+									}
+									deployBot(clusterManager, botAddress, deploymentResult -> {
+										if (deploymentResult.failed()) {
+											msg.fail(500,
+													"Failed to deploy new bot \"" + botAddress + "\": " + deploymentResult
+															.cause()
+															.getLocalizedMessage()
+											);
+											sink.error(deploymentResult.cause());
+										} else {
+											sink.next(botAddress);
+										}
+										deploymentLock.release();
+									});
+								} else {
+									// Ignore this bot because it's present on another cluster
+									deploymentLock.release();
+								}
+							} else {
+								logger.error("Can't update shared map", putResult.cause());
+								sink.error(putResult.cause());
+								deploymentLock.release();
+							}
+						});
+					}
+				} else {
+					logger.error("Can't obtain deployment lock", lockAcquisitionResult.cause());
+					sink.error(lockAcquisitionResult.cause());
+				}
+			});
+		});
 	}
 
 	private void deployBot(TdClusterManager clusterManager, String botAddress, Handler<AsyncResult<String>> deploymentHandler) {
