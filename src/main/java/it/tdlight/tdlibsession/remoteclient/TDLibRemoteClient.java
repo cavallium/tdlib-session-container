@@ -235,10 +235,10 @@ public class TDLibRemoteClient implements AutoCloseable {
 				if (lockAcquisitionResult.succeeded()) {
 					deploymentLock.set(lockAcquisitionResult.result());
 					var sharedData = clusterManager.getSharedData();
-					sharedData.getClusterWideMap("deployableBotAddresses", (AsyncResult<AsyncMap<String, String>> mapResult) -> {
+					sharedData.getClusterWideMap("runningBotAddresses", (AsyncResult<AsyncMap<String, String>> mapResult) -> {
 						if (mapResult.succeeded()) {
-							var deployableBotAddresses = mapResult.result();
-							deployableBotAddresses.removeIfPresent(botAddress, netInterface, putResult -> {
+							var runningBotAddresses = mapResult.result();
+							runningBotAddresses.removeIfPresent(botAddress, netInterface, putResult -> {
 								if (putResult.succeeded()) {
 									if (putResult.result() != null) {
 										handler.complete();
