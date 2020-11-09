@@ -102,7 +102,7 @@
         <dependency>
             <groupId>it.tdlight</groupId>
             <artifactId>tdlight-java</artifactId>
-            <version>3.169.108</version>
+            <version>3.169.109</version>
         </dependency>
         <dependency>
             <groupId>it.cavallium</groupId>
