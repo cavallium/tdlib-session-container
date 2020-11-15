@@ -72,7 +72,7 @@ public class AsyncTdMiddleEventBusClient extends AbstractVerticle implements Asy
 			}
 		}
 		this.deliveryOptions = cluster.newDeliveryOpts().setLocalOnly(local);
-		this.deliveryOptionsWithTimeout = cluster.newDeliveryOpts().setLocalOnly(local).setSendTimeout(10000);
+		this.deliveryOptionsWithTimeout = cluster.newDeliveryOpts().setLocalOnly(local).setSendTimeout(30000);
 	}
 
 	public static Mono<AsyncTdMiddleEventBusClient> getAndDeployInstance(TdClusterManager clusterManager, String botAlias, String botAddress, boolean local) throws InitializationException {
@@ -112,7 +112,7 @@ public class AsyncTdMiddleEventBusClient extends AbstractVerticle implements Asy
 		this.initTime = System.currentTimeMillis();
 
 		CircuitBreaker startBreaker = CircuitBreaker.create("bot-" + botAddress + "-server-online-check-circuit-breaker", vertx,
-				new CircuitBreakerOptions().setMaxFailures(1).setMaxRetries(4).setTimeout(10000)
+				new CircuitBreakerOptions().setMaxFailures(1).setMaxRetries(4).setTimeout(30000)
 		)
 				.retryPolicy(policy -> 4000L)
 				.openHandler(closed -> {
@@ -146,7 +146,7 @@ public class AsyncTdMiddleEventBusClient extends AbstractVerticle implements Asy
 												.getEventBus()
 												.request(botAddress + ".isWorking", EMPTY, deliveryOptionsWithTimeout, msg -> {
 													if (msg.succeeded()) {
-														this.listen().then(this.pipe()).timeout(Duration.ofSeconds(10)).subscribe(v -> {}, future::fail, future::complete);
+														this.listen().then(this.pipe()).timeout(Duration.ofSeconds(30)).subscribe(v -> {}, future::fail, future::complete);
 													} else {
 														future.fail(msg.cause());
 													}

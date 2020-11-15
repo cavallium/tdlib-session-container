@@ -136,7 +136,7 @@ public class AsyncTdMiddleEventBusServer extends AbstractVerticle {
 		});
 
 		logger.debug("Sending " + botAddress + ".readyToStart");
-		cluster.getEventBus().send(botAddress + ".readyToStart", EMPTY, cluster.newDeliveryOpts().setSendTimeout(10000));
+		cluster.getEventBus().send(botAddress + ".readyToStart", EMPTY, cluster.newDeliveryOpts().setSendTimeout(30000));
 
 		var clientDeadCheckThread = new Thread(() -> {
 			Throwable ex = null;
@@ -148,7 +148,7 @@ public class AsyncTdMiddleEventBusServer extends AbstractVerticle {
 							.getEventBus()
 							.request(botAddress + ".readyToStart",
 									EMPTY,
-									cluster.newDeliveryOpts().setSendTimeout(10000),
+									cluster.newDeliveryOpts().setSendTimeout(30000),
 									r -> promise.handle(r.mapEmpty())
 							);
 					promise.future().toCompletionStage().toCompletableFuture().join();
