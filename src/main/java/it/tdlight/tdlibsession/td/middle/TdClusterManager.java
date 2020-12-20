@@ -1,13 +1,12 @@
 package it.tdlight.tdlibsession.td.middle;
 
 import com.hazelcast.config.Config;
+import com.hazelcast.config.EvictionConfig;
 import com.hazelcast.config.EvictionPolicy;
-import com.hazelcast.config.GroupConfig;
 import com.hazelcast.config.MapConfig;
-import com.hazelcast.config.MaxSizeConfig;
-import com.hazelcast.config.MaxSizeConfig.MaxSizePolicy;
+import com.hazelcast.config.MaxSizePolicy;
 import com.hazelcast.config.MergePolicyConfig;
-import com.hazelcast.config.SemaphoreConfig;
+import com.hazelcast.config.cp.SemaphoreConfig;
 import io.vertx.core.DeploymentOptions;
 import io.vertx.core.Handler;
 import io.vertx.core.Vertx;
@@ -105,10 +104,12 @@ public class TdClusterManager {
 					.setBackupCount(1)
 					.setTimeToLiveSeconds(0)
 					.setMaxIdleSeconds(0)
-					.setEvictionPolicy(EvictionPolicy.NONE)
-					.setMaxSizeConfig(new MaxSizeConfig().setMaxSizePolicy(MaxSizePolicy.PER_NODE).setSize(0))
+					.setEvictionConfig(new EvictionConfig()
+							.setMaxSizePolicy(MaxSizePolicy.PER_NODE)
+							.setEvictionPolicy(EvictionPolicy.NONE)
+							.setSize(0))
 					.setMergePolicyConfig(new MergePolicyConfig().setPolicy("com.hazelcast.map.merge.LatestUpdateMapMergePolicy")));
-			cfg.setSemaphoreConfigs(Map.of("__vertx.*", new SemaphoreConfig().setInitialPermits(1)));
+			cfg.getCPSubsystemConfig().setSemaphoreConfigs(Map.of("__vertx.*", new SemaphoreConfig().setInitialPermits(1)));
 			cfg.getNetworkConfig().getJoin().getMulticastConfig().setEnabled(false);
 			cfg.getNetworkConfig().getJoin().getAwsConfig().setEnabled(false);
 			cfg.getNetworkConfig().getJoin().getTcpIpConfig().setEnabled(true);
@@ -122,7 +123,7 @@ public class TdClusterManager {
 			cfg.setProperty("hazelcast.wait.seconds.before.join", "0");
 			cfg.setProperty("hazelcast.tcp.join.port.try.count", "5");
 			cfg.setProperty("hazelcast.socket.bind.any", "false");
-			cfg.setGroupConfig(new GroupConfig().setName("dev").setPassword("HzPasswordsAreDeprecated"));
+			cfg.setClusterName("tdlib-session-container");
 			mgr = new HazelcastClusterManager(cfg);
 			vertxOptions.setClusterManager(mgr);
 			vertxOptions.getEventBusOptions().setConnectTimeout(120000);
@@ -139,7 +140,6 @@ public class TdClusterManager {
 		} else {
 			mgr = null;
 			vertxOptions.setClusterManager(null);
-			vertxOptions.getEventBusOptions().setClustered(false);
 		}
 
 		return Mono

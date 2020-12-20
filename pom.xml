@@ -9,9 +9,11 @@
     <properties>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <revision>0-SNAPSHOT</revision>
-        <!-- required for jdk9 -->
         <maven.compiler.source>11</maven.compiler.source>
         <maven.compiler.target>11</maven.compiler.target>
+
+        <vertx.version>4.0.0</vertx.version>
+        <junit-jupiter.version>5.4.0</junit-jupiter.version>
     </properties>
     <repositories>
         <repository>
@@ -47,26 +49,51 @@
         <developerConnection>scm:git:https://git.ignuranza.net/tdlight-team/tdlib-session-container.git</developerConnection>
         <tag>HEAD</tag>
     </scm>
+    <dependencyManagement>
+        <dependencies>
+            <dependency>
+                <groupId>io.vertx</groupId>
+                <artifactId>vertx-stack-depchain</artifactId>
+                <version>${vertx.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
     <dependencies>
         <dependency>
             <groupId>io.vertx</groupId>
-            <artifactId>vertx-core</artifactId>
-            <version>3.9.3</version>
-        </dependency>
-        <dependency>
-            <groupId>io.vertx</groupId>
             <artifactId>vertx-hazelcast</artifactId>
-            <version>3.9.3</version>
+            <version>${vertx.version}</version>
         </dependency>
         <dependency>
             <groupId>io.vertx</groupId>
-            <artifactId>vertx-reactive-streams</artifactId>
-            <version>3.9.3</version>
+            <artifactId>vertx-junit5</artifactId>
+            <version>${vertx.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter-api</artifactId>
+            <version>${junit-jupiter.version}</version>
+            <scope>test</scope>
+            <exclusions>
+                <exclusion>
+                    <groupId>org.hamcrest</groupId>
+                    <artifactId>hamcrest-core</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter-engine</artifactId>
+            <version>${junit-jupiter.version}</version>
+            <scope>test</scope>
         </dependency>
         <dependency>
             <groupId>io.vertx</groupId>
             <artifactId>vertx-circuit-breaker</artifactId>
-            <version>3.9.3</version>
+            <version>${vertx.version}</version>
         </dependency>
         <dependency>
             <groupId>io.projectreactor</groupId>
@@ -119,18 +146,6 @@
             <groupId>it.unimi.dsi</groupId>
             <artifactId>fastutil</artifactId>
             <version>8.3.1</version>
-        </dependency>
-        <dependency>
-            <groupId>org.junit.jupiter</groupId>
-            <artifactId>junit-jupiter-api</artifactId>
-            <version>RELEASE</version>
-            <scope>test</scope>
-            <exclusions>
-                <exclusion>
-                    <groupId>org.hamcrest</groupId>
-                    <artifactId>hamcrest-core</artifactId>
-                </exclusion>
-            </exclusions>
         </dependency>
         <dependency>
             <groupId>com.google.code.gson</groupId>
