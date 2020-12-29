@@ -4,7 +4,7 @@
     <modelVersion>4.0.0</modelVersion>
     <groupId>it.tdlight</groupId>
     <artifactId>tdlib-session-container</artifactId>
-    <version>4.0.${revision}</version>
+    <version>4.1.${revision}</version>
     <name>TDLib Session Container</name>
     <properties>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
