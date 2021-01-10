@@ -102,7 +102,7 @@ public class AsyncTdEasy {
 					}
 
 					// Register fatal error handler
-					fatalErrors.subscribe(settings.getFatalErrorHandler()::onFatalError);
+					fatalErrors.flatMap(settings.getFatalErrorHandler()::onFatalError).subscribe();
 
 					return true;
 				})
