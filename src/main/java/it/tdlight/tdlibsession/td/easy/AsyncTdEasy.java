@@ -329,6 +329,21 @@ public class AsyncTdEasy {
 				case "PASSWORD_HASH_INVALID":
 					globalErrors.onNext(error);
 					return Mono.just(new UpdateAuthorizationState(new AuthorizationStateWaitPassword()));
+				default:
+					globalErrors.onNext(error);
+					break;
+			}
+			analyzeFatalErrors(error);
+			return Mono.empty();
+		} else {
+			return Mono.just((Update) obj);
+		}
+	}
+
+	private void analyzeFatalErrors(Object obj) {
+		if (obj != null && obj.getConstructor() == Error.CONSTRUCTOR) {
+			var error = (Error) obj;
+			switch (error.message) {
 				case "PHONE_NUMBER_INVALID":
 					fatalErrors.onNext(FatalErrorType.PHONE_NUMBER_INVALID);
 					break;
@@ -341,13 +356,10 @@ public class AsyncTdEasy {
 				case "INVALID_UPDATE":
 					fatalErrors.onNext(FatalErrorType.INVALID_UPDATE);
 					break;
-				default:
-					globalErrors.onNext(error);
+				case "PHONE_NUMBER_BANNED":
+					fatalErrors.onNext(FatalErrorType.PHONE_NUMBER_BANNED);
 					break;
 			}
-			return Mono.empty();
-		} else {
-			return Mono.just((Update) obj);
 		}
 	}
 
@@ -364,7 +376,7 @@ public class AsyncTdEasy {
 				.flatMap(obj -> {
 					switch (obj.getConstructor()) {
 						case AuthorizationStateWaitTdlibParameters.CONSTRUCTOR:
-							return MonoUtils.thenOrError(Mono.from(this.settings).map(settings -> {
+							return thenOrFatalError(Mono.from(this.settings).map(settings -> {
 								var parameters = new TdlibParameters();
 								parameters.useTestDc = settings.useTestDc;
 								parameters.databaseDirectory = settings.databaseDirectory;
@@ -384,14 +396,13 @@ public class AsyncTdEasy {
 								return new SetTdlibParameters(parameters);
 							}).flatMap((SetTdlibParameters obj1) -> sendDirectly(obj1, false)));
 						case AuthorizationStateWaitEncryptionKey.CONSTRUCTOR:
-							return MonoUtils
-									.thenOrError(sendDirectly(new CheckDatabaseEncryptionKey(), false))
+							return thenOrFatalError(sendDirectly(new CheckDatabaseEncryptionKey(), false))
 									.onErrorResume((error) -> {
 										logger.error("Error while checking TDLib encryption key", error);
 										return sendDirectly(new TdApi.Close(), false).then();
 									});
 						case AuthorizationStateWaitPhoneNumber.CONSTRUCTOR:
-							return MonoUtils.thenOrError(Mono.from(this.settings).flatMap(settings -> {
+							return thenOrFatalError(Mono.from(this.settings).flatMap(settings -> {
 								if (settings.isPhoneNumberSet()) {
 									return sendDirectly(new SetAuthenticationPhoneNumber(String.valueOf(settings.getPhoneNumber()),
 											new PhoneNumberAuthenticationSettings(false, false, false)
@@ -519,5 +530,13 @@ public class AsyncTdEasy {
 					}
 				})
 				.then(Mono.justOrEmpty(updateObj.getConstructor() == Error.CONSTRUCTOR ? null : (Update) updateObj));
+	}
+
+	public <T extends TdApi.Object> Mono<Void> thenOrFatalError(Mono<TdResult<T>> optionalMono) {
+		return MonoUtils.thenOrError(optionalMono.doOnNext(result -> {
+			if (result.failed()) {
+				analyzeFatalErrors(result.cause());
+			}
+		}));
 	}
 }
