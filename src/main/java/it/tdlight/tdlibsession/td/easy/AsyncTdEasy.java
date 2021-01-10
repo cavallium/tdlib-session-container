@@ -158,7 +158,7 @@ public class AsyncTdEasy {
 	 * @param i level
 	 */
 	public Mono<Void> setVerbosityLevel(int i) {
-		return MonoUtils.thenOrError(sendDirectly(new TdApi.SetLogVerbosityLevel(i), true));
+		return thenOrFatalError(sendDirectly(new TdApi.SetLogVerbosityLevel(i), true));
 	}
 
 	/**
@@ -166,7 +166,7 @@ public class AsyncTdEasy {
 	 * @param name option name
 	 */
 	public Mono<Void> clearOption(String name) {
-		return MonoUtils.thenOrError(sendDirectly(new TdApi.SetOption(name, new TdApi.OptionValueEmpty()), false));
+		return thenOrFatalError(sendDirectly(new TdApi.SetOption(name, new TdApi.OptionValueEmpty()), false));
 	}
 
 	/**
@@ -175,7 +175,7 @@ public class AsyncTdEasy {
 	 * @param value option value
 	 */
 	public Mono<Void> setOptionString(String name, String value) {
-		return MonoUtils.thenOrError(sendDirectly(new TdApi.SetOption(name, new TdApi.OptionValueString(value)), false));
+		return thenOrFatalError(sendDirectly(new TdApi.SetOption(name, new TdApi.OptionValueString(value)), false));
 	}
 
 	/**
@@ -184,7 +184,7 @@ public class AsyncTdEasy {
 	 * @param value option value
 	 */
 	public Mono<Void> setOptionInteger(String name, long value) {
-		return MonoUtils.thenOrError(sendDirectly(new TdApi.SetOption(name, new TdApi.OptionValueInteger(value)), false));
+		return thenOrFatalError(sendDirectly(new TdApi.SetOption(name, new TdApi.OptionValueInteger(value)), false));
 	}
 
 	/**
@@ -193,7 +193,7 @@ public class AsyncTdEasy {
 	 * @param value option value
 	 */
 	public Mono<Void> setOptionBoolean(String name, boolean value) {
-		return MonoUtils.thenOrError(sendDirectly(new TdApi.SetOption(name, new TdApi.OptionValueBoolean(value)), false));
+		return thenOrFatalError(sendDirectly(new TdApi.SetOption(name, new TdApi.OptionValueBoolean(value)), false));
 	}
 
 	/**
