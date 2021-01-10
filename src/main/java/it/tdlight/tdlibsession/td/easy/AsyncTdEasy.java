@@ -100,6 +100,10 @@ public class AsyncTdEasy {
 							throw new InitializationException(ex);
 						}
 					}
+
+					// Register fatal error handler
+					fatalErrors.subscribe(settings.getFatalErrorHandler()::onFatalError);
+
 					return true;
 				})
 				.subscribeOn(Schedulers.boundedElastic())

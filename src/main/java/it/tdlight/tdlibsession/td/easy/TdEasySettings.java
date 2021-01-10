@@ -21,6 +21,7 @@ public class TdEasySettings {
 	private final Long phoneNumber;
 	private final String botToken;
 	private final ParameterRequestHandler parameterRequestHandler;
+	private final FatalErrorHandler fatalErrorHandler;
 
 	public TdEasySettings(boolean useTestDc,
 			String databaseDirectory,
@@ -38,7 +39,8 @@ public class TdEasySettings {
 			boolean ignoreFileNames,
 			@Nullable Long phoneNumber,
 			@Nullable String botToken,
-			@Nullable ParameterRequestHandler parameterRequestHandler) {
+			@Nullable ParameterRequestHandler parameterRequestHandler,
+			@Nullable FatalErrorHandler fatalErrorHandler) {
 		this.useTestDc = useTestDc;
 		this.databaseDirectory = databaseDirectory;
 		this.filesDirectory = filesDirectory;
@@ -66,6 +68,10 @@ public class TdEasySettings {
 			}
 		}
 		this.parameterRequestHandler = parameterRequestHandler;
+		if (fatalErrorHandler == null) {
+			fatalErrorHandler = error -> null;
+		}
+		this.fatalErrorHandler = fatalErrorHandler;
 	}
 
 	public boolean isPhoneNumberSet() {
@@ -86,6 +92,10 @@ public class TdEasySettings {
 
 	public ParameterRequestHandler getParameterRequestHandler() {
 		return Objects.requireNonNull(parameterRequestHandler, "You must set a parameter request handler");
+	}
+
+	public FatalErrorHandler getFatalErrorHandler() {
+		return Objects.requireNonNull(fatalErrorHandler, "You must set a fatal error handler");
 	}
 
 	public static Builder newBuilder() {
@@ -113,6 +123,8 @@ public class TdEasySettings {
 		@Nullable
 		private String botToken = null;
 		private ParameterRequestHandler parameterRequestHandler;
+		@Nullable
+		private FatalErrorHandler fatalErrorHandler;
 
 		private Builder() {
 
@@ -263,6 +275,15 @@ public class TdEasySettings {
 			return parameterRequestHandler;
 		}
 
+		public Builder setFatalErrorHandler(FatalErrorHandler fatalErrorHandler) {
+			this.fatalErrorHandler = fatalErrorHandler;
+			return this;
+		}
+
+		public FatalErrorHandler getFatalErrorHandler() {
+			return fatalErrorHandler;
+		}
+
 		public TdEasySettings build() {
 			return new TdEasySettings(useTestDc,
 					databaseDirectory,
@@ -280,7 +301,8 @@ public class TdEasySettings {
 					ignoreFileNames,
 					phoneNumber,
 					botToken,
-					parameterRequestHandler
+					parameterRequestHandler,
+					fatalErrorHandler
 			);
 		}
 	}
