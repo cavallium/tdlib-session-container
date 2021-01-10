@@ -4,5 +4,5 @@ import it.tdlight.tdlibsession.FatalErrorType;
 import reactor.core.publisher.Mono;
 
 public interface FatalErrorHandler {
-	Mono<String> onFatalError(FatalErrorType error);
+	Mono<Void> onFatalError(FatalErrorType error);
 }
