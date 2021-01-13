@@ -63,7 +63,7 @@ public class EventBusFlux {
 							subscriptionReady.unregister(subscriptionReadyUnregistered -> {
 								if (subscriptionReadyUnregistered.succeeded()) {
 									var subscription = flux.subscribe(item -> {
-										var request = eventBus.request(subscriptionAddress + ".signal", SignalMessage.<T>onNext(item), signalDeliveryOptions, msg2 -> {
+										eventBus.request(subscriptionAddress + ".signal", SignalMessage.<T>onNext(item), signalDeliveryOptions, msg2 -> {
 											if (msg2.failed()) {
 												logger.error("Failed to send onNext signal", msg2.cause());
 											}
@@ -83,15 +83,11 @@ public class EventBusFlux {
 									});
 
 									cancel.handler(msg3 -> {
-										if (!subscription.isDisposed()) {
-											subscription.dispose();
-										}
+										subscription.dispose();
 										msg3.reply(EMPTY, deliveryOptions);
 									});
 									dispose.handler(msg2 -> {
-										if (!subscription.isDisposed()) {
-											subscription.dispose();
-										}
+										subscription.dispose();
 										cancel.unregister(v -> {
 											if (v.failed()) {
 												logger.error("Failed to unregister cancel", v.cause());
@@ -181,20 +177,28 @@ public class EventBusFlux {
 						msg2.reply(EMPTY);
 					});
 					signalConsumer.completionHandler(h -> {
-						if (h.failed()) {
-							emitter.error(new IllegalStateException("Signal consumer registration failed", msg.cause()));
-						} else {
+						if (h.succeeded()) {
 							eventBus.<Long>request(fluxAddress + ".subscriptionReady", EMPTY, deliveryOptions, msg2 -> {
 								if (msg2.failed()) {
 									logger.error("Failed to tell that the subscription is ready");
 								}
 							});
+						} else {
+							emitter.error(new IllegalStateException("Signal consumer registration failed", msg.cause()));
 						}
 					});
 
-					emitter.onDispose(() -> eventBus.send(subscriptionAddress + ".dispose", EMPTY, deliveryOptions));
+					emitter.onDispose(() -> eventBus.request(subscriptionAddress + ".dispose", EMPTY, deliveryOptions, msg2 -> {
+						if (msg.failed()) {
+							logger.error("Failed to tell that the subscription is disposed");
+						}
+					}));
 
-					emitter.onCancel(() -> eventBus.send(subscriptionAddress + ".cancel", EMPTY, deliveryOptions));
+					emitter.onCancel(() -> eventBus.request(subscriptionAddress + ".cancel", EMPTY, deliveryOptions, msg2 -> {
+						if (msg.failed()) {
+							logger.error("Failed to tell that the subscription is cancelled");
+						}
+					}));
 				} else {
 					emitter.error(new IllegalStateException("Subscription failed", msg.cause()));
 				}

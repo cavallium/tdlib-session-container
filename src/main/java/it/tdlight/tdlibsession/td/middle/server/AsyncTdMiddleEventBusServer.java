@@ -33,8 +33,6 @@ import java.util.function.Consumer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import reactor.core.publisher.Mono;
-import reactor.core.scheduler.Scheduler;
-import reactor.core.scheduler.Schedulers;
 
 public class AsyncTdMiddleEventBusServer {
 
@@ -54,7 +52,6 @@ public class AsyncTdMiddleEventBusServer {
 	private boolean local;
 
 	protected AsyncTdDirectImpl td;
-	private final Scheduler tdSrvPoll;
 	/**
 	 * Value is not important, emits when a request is received
 	 */
@@ -68,7 +65,6 @@ public class AsyncTdMiddleEventBusServer {
 	public AsyncTdMiddleEventBusServer(TdClusterManager clusterManager) {
 		this.cluster = clusterManager;
 		this.tdOptions = new AsyncTdDirectOptions(WAIT_DURATION, 1000);
-		this.tdSrvPoll = Schedulers.single();
 		if (cluster.registerDefaultCodec(TdResultList.class, new TdResultListMessageCodec())) {
 			cluster.registerDefaultCodec(ExecuteObject.class, new TdExecuteObjectMessageCodec());
 			cluster.registerDefaultCodec(TdResultMessage.class, new TdResultMessageCodec());
@@ -99,7 +95,7 @@ public class AsyncTdMiddleEventBusServer {
 							workingMsg.reply(EMPTY, cluster.newDeliveryOpts().setLocalOnly(local));
 						});
 						this.isWorkingConsumer.completionHandler(MonoUtils.toHandler(registrationSink));
-					})).subscribeOn(this.tdSrvPoll)
+					}))
 							.subscribe(v -> {}, ex -> {
 								logger.info(botAddress + " server deployed and started. succeeded: false");
 								logger.error(ex.getLocalizedMessage(), ex);
@@ -123,7 +119,7 @@ public class AsyncTdMiddleEventBusServer {
 					sink.error(h.cause());
 				}
 			});
-		}).subscribeOn(tdSrvPoll);
+		});
 	}
 
 	public void onBeforeStop(Consumer<Promise<Void>> r) {
@@ -180,7 +176,7 @@ public class AsyncTdMiddleEventBusServer {
 								} catch (Exception ex) {
 									sink.error(ex);
 								}
-							}).subscribeOn(this.tdSrvPoll)
+							})
 							.subscribe(response -> {}, ex -> {
 								logger.error("Error when processing a request", ex);
 								msg.fail(500, ex.getLocalizedMessage());
@@ -191,7 +187,7 @@ public class AsyncTdMiddleEventBusServer {
 				}
 			});
 			executeConsumer.completionHandler(MonoUtils.toHandler(registrationSink));
-		}).subscribeOn(tdSrvPoll);
+		});
 	}
 
 	private void undeploy(Runnable whenUndeployed) {
@@ -227,7 +223,7 @@ public class AsyncTdMiddleEventBusServer {
 
 					whenUndeployed.run();
 				});
-			}).subscribeOn(this.tdSrvPoll).subscribe(v -> {}, ex -> {
+			}).subscribe(v -> {}, ex -> {
 				logger.error("Error when stopping", ex);
 			}, () -> {});
 		});
@@ -251,7 +247,7 @@ public class AsyncTdMiddleEventBusServer {
 						System.out.println("<=: end (3)");
 					}
 					this.undeploy(() -> {});
-				}).subscribeOn(tdSrvPoll);
+				});
 		var fluxCodec = new TdResultListMessageCodec();
 		return EventBusFlux.<TdResultList>serve(updatesFlux,
 				cluster.getEventBus(),
@@ -259,6 +255,6 @@ public class AsyncTdMiddleEventBusServer {
 				cluster.newDeliveryOpts().setLocalOnly(local),
 				fluxCodec,
 				Duration.ofSeconds(30)
-		).subscribeOn(tdSrvPoll);
+		);
 	}
 }

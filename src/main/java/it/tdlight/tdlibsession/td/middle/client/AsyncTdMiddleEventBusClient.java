@@ -39,8 +39,6 @@ import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.core.publisher.Sinks;
 import reactor.core.publisher.Sinks.Many;
-import reactor.core.scheduler.Scheduler;
-import reactor.core.scheduler.Schedulers;
 
 public class AsyncTdMiddleEventBusClient extends AbstractVerticle implements AsyncTdMiddle {
 
@@ -49,7 +47,6 @@ public class AsyncTdMiddleEventBusClient extends AbstractVerticle implements Asy
 	public static final boolean OUTPUT_REQUESTS = false;
 	public static final byte[] EMPTY = new byte[0];
 
-	private final Scheduler tdMiddleScheduler = Schedulers.single();
 	private final Many<Boolean> tdClosed = Sinks.many().replay().latestOrDefault(false);
 	private final DeliveryOptions deliveryOptions;
 	private final DeliveryOptions deliveryOptionsWithTimeout;
@@ -149,7 +146,6 @@ public class AsyncTdMiddleEventBusClient extends AbstractVerticle implements Asy
 													if (msg.succeeded()) {
 														this.listen()
 																.timeout(Duration.ofSeconds(30))
-																.subscribeOn(tdMiddleScheduler)
 																.subscribe(v -> {}, future::fail, future::complete);
 													} else {
 														future.fail(msg.cause());
@@ -244,7 +240,7 @@ public class AsyncTdMiddleEventBusClient extends AbstractVerticle implements Asy
 							tdClosed.tryEmitNext(true);
 						}
 					}
-				})).subscribeOn(tdMiddleScheduler);
+				}));
 	}
 
 	@Override
@@ -300,6 +296,6 @@ public class AsyncTdMiddleEventBusClient extends AbstractVerticle implements Asy
 			}
 		}).switchIfEmpty(Mono.fromSupplier(() -> {
 			return TdResult.failed(new TdApi.Error(500, "Client is closed or response is empty"));
-		})).subscribeOn(tdMiddleScheduler);
+		}));
 	}
 }

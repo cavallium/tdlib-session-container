@@ -45,7 +45,7 @@ public class AsyncTdDirectImpl implements AsyncTdDirect {
 					}
 					throw new IllegalStateException("TDLib client is destroyed");
 				}
-			}).publishOn(Schedulers.boundedElastic()).single().subscribeOn(tdScheduler));
+			}).publishOn(Schedulers.boundedElastic()).single());
 		} else {
 			return td.asMono().flatMap(td -> Mono.<TdResult<T>>create(sink -> {
 				if (td != null) {
@@ -60,7 +60,7 @@ public class AsyncTdDirectImpl implements AsyncTdDirect {
 					}
 					sink.error(new IllegalStateException("TDLib client is destroyed"));
 				}
-			})).single().subscribeOn(tdScheduler);
+			})).single();
 		}
 	}
 
@@ -89,8 +89,8 @@ public class AsyncTdDirectImpl implements AsyncTdDirect {
 				closedFromTd.asMono().take(Duration.ofMillis(10)).switchIfEmpty(Mono.fromRunnable(() -> client.send(new Close(),
 						result -> logger.trace("Close result: {}", result),
 						ex -> logger.trace("Error when disposing td client", ex)
-				))).subscribeOn(tdScheduler).subscribe();
+				))).subscribe();
 			});
-		}).subscribeOn(tdScheduler);
+		});
 	}
 }
