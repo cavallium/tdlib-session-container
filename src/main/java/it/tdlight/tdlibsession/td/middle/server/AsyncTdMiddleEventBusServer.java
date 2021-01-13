@@ -11,6 +11,7 @@ import io.vertx.core.eventbus.Message;
 import io.vertx.core.eventbus.MessageConsumer;
 import it.tdlight.common.ConstructorDetector;
 import it.tdlight.jni.TdApi;
+import it.tdlight.tdlibsession.EventBusFlux;
 import it.tdlight.tdlibsession.td.TdResult;
 import it.tdlight.tdlibsession.td.TdResultMessage;
 import it.tdlight.tdlibsession.td.direct.AsyncTdDirectImpl;
@@ -19,8 +20,8 @@ import it.tdlight.tdlibsession.td.middle.ExecuteObject;
 import it.tdlight.tdlibsession.td.middle.TdClusterManager;
 import it.tdlight.tdlibsession.td.middle.TdExecuteObjectMessageCodec;
 import it.tdlight.tdlibsession.td.middle.TdMessageCodec;
-import it.tdlight.tdlibsession.td.middle.TdOptListMessageCodec;
-import it.tdlight.tdlibsession.td.middle.TdOptionalList;
+import it.tdlight.tdlibsession.td.middle.TdResultList;
+import it.tdlight.tdlibsession.td.middle.TdResultListMessageCodec;
 import it.tdlight.tdlibsession.td.middle.TdResultMessageCodec;
 import it.tdlight.utils.MonoUtils;
 import java.time.Duration;
@@ -32,11 +33,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
-import reactor.core.publisher.Sinks;
-import reactor.core.publisher.Sinks.Empty;
-import reactor.core.publisher.Sinks.Many;
 import reactor.core.scheduler.Scheduler;
 import reactor.core.scheduler.Schedulers;
 
@@ -59,6 +56,7 @@ public class AsyncTdMiddleEventBusServer extends AbstractVerticle {
 
 	protected AsyncTdDirectImpl td;
 	private final Scheduler tdSrvPoll;
+	private final Scheduler vertxStatusScheduler = Schedulers.newSingle("VertxStatus", false);
 	/**
 	 * Value is not important, emits when a request is received
 	 */
@@ -66,7 +64,6 @@ public class AsyncTdMiddleEventBusServer extends AbstractVerticle {
 	private final List<Consumer<Promise<Void>>> onAfterStopListeners = new CopyOnWriteArrayList<>();
 	private MessageConsumer<?> startConsumer;
 	private MessageConsumer<byte[]> isWorkingConsumer;
-	private MessageConsumer<byte[]> getNextUpdatesBlockConsumer;
 	private MessageConsumer<ExecuteObject> executeConsumer;
 
 	@SuppressWarnings({"unchecked", "rawtypes"})
@@ -74,7 +71,7 @@ public class AsyncTdMiddleEventBusServer extends AbstractVerticle {
 		this.cluster = clusterManager;
 		this.tdOptions = new AsyncTdDirectOptions(WAIT_DURATION, 1000);
 		this.tdSrvPoll = Schedulers.newSingle("TdSrvPoll");
-		if (cluster.registerDefaultCodec(TdOptionalList.class, new TdOptListMessageCodec())) {
+		if (cluster.registerDefaultCodec(TdResultList.class, new TdResultListMessageCodec())) {
 			cluster.registerDefaultCodec(ExecuteObject.class, new TdExecuteObjectMessageCodec());
 			cluster.registerDefaultCodec(TdResultMessage.class, new TdResultMessageCodec());
 			for (Class<?> value : ConstructorDetector.getTDConstructorsUnsafe().values()) {
@@ -85,55 +82,57 @@ public class AsyncTdMiddleEventBusServer extends AbstractVerticle {
 
 	@Override
 	public void start(Promise<Void> startPromise) {
-		var botAddress = config().getString("botAddress");
-		if (botAddress == null || botAddress.isEmpty()) {
-			throw new IllegalArgumentException("botAddress is not set!");
-		}
-		this.botAddress = botAddress;
-		var botAlias = config().getString("botAlias");
-		if (botAlias == null || botAlias.isEmpty()) {
-			throw new IllegalArgumentException("botAlias is not set!");
-		}
-		this.botAlias = botAlias;
-		var local = config().getBoolean("local");
-		if (local == null) {
-			throw new IllegalArgumentException("local is not set!");
-		}
-		this.local = local;
-		this.td = new AsyncTdDirectImpl(botAlias);
+		vertxStatusScheduler.schedule(() -> {
+			var botAddress = config().getString("botAddress");
+			if (botAddress == null || botAddress.isEmpty()) {
+				throw new IllegalArgumentException("botAddress is not set!");
+			}
+			this.botAddress = botAddress;
+			var botAlias = config().getString("botAlias");
+			if (botAlias == null || botAlias.isEmpty()) {
+				throw new IllegalArgumentException("botAlias is not set!");
+			}
+			this.botAlias = botAlias;
+			var local = config().getBoolean("local");
+			if (local == null) {
+				throw new IllegalArgumentException("local is not set!");
+			}
+			this.local = local;
+			this.td = new AsyncTdDirectImpl(botAlias);
 
-		AtomicBoolean alreadyDeployed = new AtomicBoolean(false);
-		this.startConsumer = cluster.getEventBus().consumer(botAddress + ".start", (Message<byte[]> msg) -> {
-			if (alreadyDeployed.compareAndSet(false, true)) {
-				this.listen().then(this.pipe()).then(Mono.<Void>create(registrationSink -> {
-					this.isWorkingConsumer = cluster.getEventBus().consumer(botAddress + ".isWorking", (Message<byte[]> workingMsg) -> {
-						workingMsg.reply(EMPTY, cluster.newDeliveryOpts().setLocalOnly(local));
-					});
-					this.isWorkingConsumer.completionHandler(MonoUtils.toHandler(registrationSink));
-				})).subscribeOn(this.tdSrvPoll)
-				.subscribe(v -> {}, ex -> {
-					logger.info(botAddress + " server deployed and started. succeeded: false");
-					logger.error(ex.getLocalizedMessage(), ex);
-					msg.fail(500, ex.getLocalizedMessage());
-				}, () -> {
-					logger.info(botAddress + " server deployed and started. succeeded: true");
+			AtomicBoolean alreadyDeployed = new AtomicBoolean(false);
+			this.startConsumer = cluster.getEventBus().consumer(botAddress + ".start", (Message<byte[]> msg) -> {
+				if (alreadyDeployed.compareAndSet(false, true)) {
+					this.listen().then(this.pipe()).then(Mono.<Void>create(registrationSink -> {
+						this.isWorkingConsumer = cluster.getEventBus().consumer(botAddress + ".isWorking", (Message<byte[]> workingMsg) -> {
+							workingMsg.reply(EMPTY, cluster.newDeliveryOpts().setLocalOnly(local));
+						});
+						this.isWorkingConsumer.completionHandler(MonoUtils.toHandler(registrationSink));
+					})).subscribeOn(this.tdSrvPoll)
+							.subscribe(v -> {}, ex -> {
+								logger.info(botAddress + " server deployed and started. succeeded: false");
+								logger.error(ex.getLocalizedMessage(), ex);
+								msg.fail(500, ex.getLocalizedMessage());
+							}, () -> {
+								logger.info(botAddress + " server deployed and started. succeeded: true");
+								msg.reply(EMPTY);
+							});
+				} else {
 					msg.reply(EMPTY);
-				});
-			} else {
-				msg.reply(EMPTY);
-			}
+				}
+			});
+			startConsumer.completionHandler(h -> {
+				logger.info(botAddress + " server deployed. succeeded: " + h.succeeded());
+				if (h.succeeded()) {
+					logger.debug("Sending " + botAddress + ".readyToStart");
+					cluster.getEventBus().request(botAddress + ".readyToStart", EMPTY, cluster.newDeliveryOpts().setSendTimeout(30000), msg -> {
+						startPromise.complete(h.result());
+					});
+				} else {
+					startPromise.fail(h.cause());
+				}
+			});
 		});
-		startConsumer.completionHandler(h -> {
-			logger.info(botAddress + " server deployed. succeeded: " + h.succeeded());
-			if (h.succeeded()) {
-				startPromise.complete(h.result());
-			} else {
-				startPromise.fail(h.cause());
-			}
-		});
-
-		logger.debug("Sending " + botAddress + ".readyToStart");
-		cluster.getEventBus().send(botAddress + ".readyToStart", EMPTY, cluster.newDeliveryOpts().setSendTimeout(30000));
 	}
 
 	public void onBeforeStop(Consumer<Promise<Void>> r) {
@@ -146,23 +145,19 @@ public class AsyncTdMiddleEventBusServer extends AbstractVerticle {
 
 	@Override
 	public void stop(Promise<Void> stopPromise) {
-		runAll(onBeforeStopListeners, onBeforeStopHandler -> {
-			if (onBeforeStopHandler.failed()) {
-				logger.error("A beforeStop listener failed: "+ onBeforeStopHandler.cause());
-			}
-
-			Mono.create(sink -> this.isWorkingConsumer.unregister(result -> {
-				if (result.failed()) {
-					logger.error("Can't unregister consumer", result.cause());
+		vertxStatusScheduler.schedule(() -> {
+			runAll(onBeforeStopListeners, onBeforeStopHandler -> {
+				if (onBeforeStopHandler.failed()) {
+					logger.error("A beforeStop listener failed: "+ onBeforeStopHandler.cause());
 				}
-				this.startConsumer.unregister(result2 -> {
-					if (result2.failed()) {
-						logger.error("Can't unregister consumer", result2.cause());
-					}
 
-					this.getNextUpdatesBlockConsumer.unregister(result3 -> {
-						if (result3.failed()) {
-							logger.error("Can't unregister consumer", result3.cause());
+				Mono.create(sink -> this.isWorkingConsumer.unregister(result -> {
+					if (result.failed()) {
+						logger.error("Can't unregister consumer", result.cause());
+					}
+					this.startConsumer.unregister(result2 -> {
+						if (result2.failed()) {
+							logger.error("Can't unregister consumer", result2.cause());
 						}
 
 						this.executeConsumer.unregister(result4 -> {
@@ -173,20 +168,19 @@ public class AsyncTdMiddleEventBusServer extends AbstractVerticle {
 							sink.success();
 						});
 					});
-				});
-			})).doFinally(signalType -> {
-				logger.info("TdMiddle verticle \"" + botAddress + "\" stopped");
+				})).doFinally(signalType -> {
+					logger.info("TdMiddle verticle \"" + botAddress + "\" stopped");
 
-				runAll(onAfterStopListeners, onAfterStopHandler -> {
-					if (onAfterStopHandler.failed()) {
-						logger.error("An afterStop listener failed: " + onAfterStopHandler.cause());
-					}
-
-					stopPromise.complete();
-				});
-			}).subscribeOn(this.tdSrvPoll).subscribe(v -> {}, ex -> {
-				logger.error("Error when stopping", ex);
-			}, () -> {});
+					runAll(onAfterStopListeners, onAfterStopHandler -> {
+						if (onAfterStopHandler.failed()) {
+							logger.error("An afterStop listener failed: " + onAfterStopHandler.cause());
+						}
+						stopPromise.complete();
+					});
+				}).subscribeOn(this.tdSrvPoll).subscribe(v -> {}, ex -> {
+					logger.error("Error when stopping", ex);
+				}, () -> {});
+			});
 		});
 	}
 
@@ -261,66 +255,34 @@ public class AsyncTdMiddleEventBusServer extends AbstractVerticle {
 	}
 
 	private Mono<Void> pipe() {
-		return Mono.create(registeredSink -> {
-			Many<Boolean> getNextUpdatesBlockTrigger = Sinks.many().replay().latestOrDefault(true);
-			Flux<Message<byte[]>> getNextUpdatesBlockFlux = Flux.create(sink -> {
-				this.getNextUpdatesBlockConsumer = cluster.getEventBus().consumer(botAddress + ".getNextUpdatesBlock", (Message<byte[]> msg) -> {
-					getNextUpdatesBlockTrigger.tryEmitNext(true);
-					sink.next(msg);
+		var updatesFlux = td.receive(tdOptions).doOnNext(update -> {
+			if (OUTPUT_REQUESTS) {
+				System.out.println("<=: " + update
+						.toString()
+						.replace("\n", " ")
+						.replace("\t", "")
+						.replace("  ", "")
+						.replace(" = ", "="));
+			}
+		}).bufferTimeout(1000, local ? Duration.ofMillis(1) : Duration.ofMillis(100))
+				.windowTimeout(1, Duration.ofSeconds(5))
+				.flatMap(w -> w.defaultIfEmpty(Collections.emptyList()))
+				.map(TdResultList::new).doOnTerminate(() -> {
+					System.out.println("<=: end (1)");
+				}).doOnComplete(() -> {
+					System.out.println("<=: end (2)");
+				}).doFinally(s -> {
+					System.out.println("<=: end (3)");
+					this.undeploy(() -> {});
 				});
-				registeredSink.success();
-			});
-
-			Empty<Boolean> needClose = Sinks.empty();
-			Flux<TdOptionalList> updatesFlux = Flux.mergeSequential(td.receive(tdOptions)
-							.doOnSubscribe(s -> {
-								// After 60 seconds of not receiving request for updates, dispose td flux assuming the middle client died.
-								getNextUpdatesBlockTrigger.asFlux().timeout(Duration.ofSeconds(30), timeout -> {
-									needClose.tryEmitEmpty();
-									s.cancel();
-								}).subscribeOn(this.tdSrvPoll).subscribe(v -> {}, ex -> {
-									logger.error("Error when signalling that the next update block request has been received", ex);
-								}, () -> {
-									needClose.tryEmitEmpty();
-								});
-							})
-							.doOnNext(update -> {
-								if (OUTPUT_REQUESTS) {
-									System.out.println("<=: " + update
-											.toString()
-											.replace("\n", " ")
-											.replace("\t", "")
-											.replace("  ", "")
-											.replace(" = ", "="));
-								}
-							})
-							.bufferTimeout(1000, local ? Duration.ofMillis(1) : Duration.ofMillis(100))
-							.windowTimeout(1, Duration.ofSeconds(5))
-							.flatMap(w -> w.defaultIfEmpty(Collections.emptyList()))
-							.map(updatesGroup -> new TdOptionalList(true, updatesGroup)),
-					Mono.fromSupplier(() -> {
-						return new TdOptionalList(false, Collections.emptyList());
-					})
-			);
-
-			Flux.zip(updatesFlux, getNextUpdatesBlockFlux)
-					.subscribeOn(this.tdSrvPoll)
-					.subscribe(tuple -> {
-						var results = tuple.getT1();
-						var messageHandle = tuple.getT2();
-
-						if (!results.isSet()) {
-							System.out.println("<=: end (1)");
-						}
-
-						messageHandle.reply(results, cluster.newDeliveryOpts().setLocalOnly(local));
-					}, error -> logger.error("Error when receiving or forwarding updates", error), () -> {
-						needClose.tryEmitEmpty();
-					});
-			needClose.asMono().subscribeOn(this.tdSrvPoll).subscribe(v_ -> {}, e -> {}, () -> {
-				this.undeploy(() -> {});
-			});
-		});
-
+		var fluxCodec = new TdResultListMessageCodec();
+		EventBusFlux.registerFluxCodec(cluster.getEventBus(), fluxCodec);
+		return EventBusFlux.<TdResultList>serve(updatesFlux,
+				cluster.getEventBus(),
+				botAddress + ".updates",
+				cluster.newDeliveryOpts().setLocalOnly(local),
+				fluxCodec,
+				Duration.ofSeconds(30)
+		).subscribeOn(tdSrvPoll);
 	}
 }

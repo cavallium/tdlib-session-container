@@ -6,17 +6,11 @@ import java.util.List;
 import java.util.Objects;
 import java.util.StringJoiner;
 
-public class TdOptionalList {
-	private final boolean isSet;
+public class TdResultList {
 	private final List<TdResult<TdApi.Object>> values;
 
-	public TdOptionalList(boolean isSet, List<TdResult<TdApi.Object>> values) {
-		this.isSet = isSet;
+	public TdResultList(List<TdResult<TdApi.Object>> values) {
 		this.values = values;
-	}
-
-	public boolean isSet() {
-		return isSet;
 	}
 
 	public List<TdResult<TdApi.Object>> getValues() {
@@ -32,26 +26,18 @@ public class TdOptionalList {
 			return false;
 		}
 
-		TdOptionalList that = (TdOptionalList) o;
+		TdResultList that = (TdResultList) o;
 
-		if (isSet != that.isSet) {
-			return false;
-		}
 		return Objects.equals(values, that.values);
 	}
 
 	@Override
 	public int hashCode() {
-		int result = (isSet ? 1 : 0);
-		result = 31 * result + (values != null ? values.hashCode() : 0);
-		return result;
+		return values != null ? values.hashCode() : 0;
 	}
 
 	@Override
 	public String toString() {
-		return new StringJoiner(", ", TdOptionalList.class.getSimpleName() + "[", "]")
-				.add("isSet=" + isSet)
-				.add("values=" + values)
-				.toString();
+		return new StringJoiner(", ", TdResultList.class.getSimpleName() + "[", "]").add("values=" + values).toString();
 	}
 }

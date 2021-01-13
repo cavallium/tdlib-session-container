@@ -7,7 +7,6 @@ import io.vertx.core.eventbus.Message;
 import io.vertx.core.json.JsonObject;
 import io.vertx.core.net.JksOptions;
 import io.vertx.core.shareddata.AsyncMap;
-import io.vertx.core.shareddata.Lock;
 import it.tdlight.common.Init;
 import it.tdlight.common.utils.CantLoadLibrary;
 import it.tdlight.tdlibsession.td.middle.TdClusterManager;
@@ -19,13 +18,14 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.Set;
-import java.util.concurrent.atomic.AtomicReference;
 import org.apache.logging.log4j.LogManager;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Sinks;
 import reactor.core.publisher.Sinks.Many;
+import reactor.core.scheduler.Scheduler;
+import reactor.core.scheduler.Schedulers;
 
 public class TDLibRemoteClient implements AutoCloseable {
 
@@ -37,6 +37,7 @@ public class TDLibRemoteClient implements AutoCloseable {
 	private final int port;
 	private final Set<String> membersAddresses;
 	private final Many<TdClusterManager> clusterManager = Sinks.many().replay().latest();
+	private final Scheduler vertxStatusScheduler = Schedulers.newSingle("VertxStatus", false);
 
 	public TDLibRemoteClient(SecurityInfo securityInfo, String masterHostname, String netInterface, int port, Set<String> membersAddresses) {
 		this.securityInfo = securityInfo;
@@ -120,12 +121,11 @@ public class TDLibRemoteClient implements AutoCloseable {
 					.doOnError(clusterManager::tryEmitError)
 					.flatMapMany(clusterManager -> {
 						return Flux.create(sink -> {
-							var sharedData = clusterManager.getSharedData();
-							sharedData.getClusterWideMap("deployableBotAddresses", mapResult -> {
+							clusterManager.getSharedData().getClusterWideMap("deployableBotAddresses", mapResult -> {
 								if (mapResult.succeeded()) {
 									var deployableBotAddresses = mapResult.result();
 
-									sharedData.getLockWithTimeout("deployment", 15000, lockAcquisitionResult -> {
+									clusterManager.getSharedData().getLockWithTimeout("deployment", 15000, lockAcquisitionResult -> {
 										if (lockAcquisitionResult.succeeded()) {
 											var deploymentLock = lockAcquisitionResult.result();
 											putAllAsync(deployableBotAddresses, botAddresses.values(), (AsyncResult<Void> putAllResult) -> {
@@ -229,40 +229,40 @@ public class TDLibRemoteClient implements AutoCloseable {
 
 	private void deployBot(TdClusterManager clusterManager, String botAddress, Handler<AsyncResult<String>> deploymentHandler) {
 		AsyncTdMiddleEventBusServer verticle = new AsyncTdMiddleEventBusServer(clusterManager);
-		AtomicReference<Lock> deploymentLock = new AtomicReference<>();
 		verticle.onBeforeStop(handler -> {
-			clusterManager.getSharedData().getLockWithTimeout("deployment", 15000, lockAcquisitionResult -> {
-				if (lockAcquisitionResult.succeeded()) {
-					deploymentLock.set(lockAcquisitionResult.result());
-					var sharedData = clusterManager.getSharedData();
-					sharedData.getClusterWideMap("runningBotAddresses", (AsyncResult<AsyncMap<String, String>> mapResult) -> {
-						if (mapResult.succeeded()) {
-							var runningBotAddresses = mapResult.result();
-							runningBotAddresses.removeIfPresent(botAddress, netInterface, putResult -> {
-								if (putResult.succeeded()) {
-									if (putResult.result() != null) {
-										handler.complete();
-									} else {
-										handler.fail("Can't destroy bot with address \"" + botAddress + "\" because it has been already destroyed");
-									}
-								} else {
-									handler.fail(putResult.cause());
-								}
+			vertxStatusScheduler.schedule(() -> {
+				clusterManager.getSharedData().getLockWithTimeout("deployment", 15000, lockAcquisitionResult -> {
+					if (lockAcquisitionResult.succeeded()) {
+						var deploymentLock = lockAcquisitionResult.result();
+						verticle.onAfterStop(handler2 -> {
+							vertxStatusScheduler.schedule(() -> {
+								deploymentLock.release();
+								handler2.complete();
 							});
-						} else {
-							handler.fail(mapResult.cause());
-						}
-					});
-				} else {
-					handler.fail(lockAcquisitionResult.cause());
-				}
+						});
+						clusterManager.getSharedData().getClusterWideMap("runningBotAddresses", (AsyncResult<AsyncMap<String, String>> mapResult) -> {
+							if (mapResult.succeeded()) {
+								var runningBotAddresses = mapResult.result();
+								runningBotAddresses.removeIfPresent(botAddress, netInterface, putResult -> {
+									if (putResult.succeeded()) {
+										if (putResult.result() != null) {
+											handler.complete();
+										} else {
+											handler.fail("Can't destroy bot with address \"" + botAddress + "\" because it has been already destroyed");
+										}
+									} else {
+										handler.fail(putResult.cause());
+									}
+								});
+							} else {
+								handler.fail(mapResult.cause());
+							}
+						});
+					} else {
+						handler.fail(lockAcquisitionResult.cause());
+					}
+				});
 			});
-		});
-		verticle.onAfterStop(handler -> {
-			if (deploymentLock.get() != null) {
-				deploymentLock.get().release();
-			}
-			handler.complete();
 		});
 		clusterManager
 				.getVertx()
@@ -307,5 +307,6 @@ public class TDLibRemoteClient implements AutoCloseable {
 	@Override
 	public void close() {
 		clusterManager.asFlux().blockFirst();
+		vertxStatusScheduler.dispose();
 	}
 }

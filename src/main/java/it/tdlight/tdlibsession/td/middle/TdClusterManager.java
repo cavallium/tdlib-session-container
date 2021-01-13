@@ -40,13 +40,11 @@ public class TdClusterManager {
 	private final ClusterManager mgr;
 	private final VertxOptions vertxOptions;
 	private final Vertx vertx;
-	private final EventBus eb;
 
-	public TdClusterManager(ClusterManager mgr, VertxOptions vertxOptions, Vertx vertx, EventBus eventBus) {
+	public TdClusterManager(ClusterManager mgr, VertxOptions vertxOptions, Vertx vertx) {
 		this.mgr = mgr;
 		this.vertxOptions = vertxOptions;
 		this.vertx = vertx;
-		this.eb = eventBus;
 	}
 
 	public static Mono<TdClusterManager> ofMaster(JksOptions keyStoreOptions, JksOptions trustStoreOptions, boolean onlyLocal, String masterHostname, String netInterface, int port, Set<String> nodesAddresses) {
@@ -150,7 +148,7 @@ public class TdClusterManager {
 						sink.success(Vertx.vertx(vertxOptions));
 					}
 				})
-				.map(vertx -> new TdClusterManager(mgr, vertxOptions, vertx, vertx.eventBus()));
+				.map(vertx -> new TdClusterManager(mgr, vertxOptions, vertx));
 	}
 
 	public Vertx getVertx() {
@@ -158,7 +156,7 @@ public class TdClusterManager {
 	}
 
 	public EventBus getEventBus() {
-		return eb;
+		return vertx.eventBus();
 	}
 
 	public VertxOptions getVertxOptions() {
@@ -178,7 +176,7 @@ public class TdClusterManager {
 	 */
 	public <T> boolean registerDefaultCodec(Class<T> objectClass, MessageCodec<T, T> messageCodec) {
 		try {
-			eb.registerDefaultCodec(objectClass, messageCodec);
+			vertx.eventBus().registerDefaultCodec(objectClass, messageCodec);
 			return true;
 		} catch (IllegalStateException ex) {
 			if (ex.getMessage().startsWith("Already a default codec registered for class")) {
@@ -204,9 +202,9 @@ public class TdClusterManager {
 	 */
 	public <T> MessageConsumer<T> consumer(String address, boolean localOnly) {
 		if (localOnly) {
-			return eb.localConsumer(address);
+			return vertx.eventBus().localConsumer(address);
 		} else {
-			return eb.consumer(address);
+			return vertx.eventBus().consumer(address);
 		}
 	}
 
@@ -221,9 +219,9 @@ public class TdClusterManager {
 	 */
 	public <T> MessageConsumer<T> consumer(String address, boolean localOnly, Handler<Message<T>> handler) {
 		if (localOnly) {
-			return eb.localConsumer(address, handler);
+			return vertx.eventBus().localConsumer(address, handler);
 		} else {
-			return eb.consumer(address, handler);
+			return vertx.eventBus().consumer(address, handler);
 		}
 	}
 

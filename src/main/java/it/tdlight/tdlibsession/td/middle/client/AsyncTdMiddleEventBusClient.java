@@ -15,6 +15,7 @@ import it.tdlight.jni.TdApi.AuthorizationStateClosed;
 import it.tdlight.jni.TdApi.Error;
 import it.tdlight.jni.TdApi.Function;
 import it.tdlight.jni.TdApi.UpdateAuthorizationState;
+import it.tdlight.tdlibsession.EventBusFlux;
 import it.tdlight.tdlibsession.td.ResponseError;
 import it.tdlight.tdlibsession.td.TdResult;
 import it.tdlight.tdlibsession.td.TdResultMessage;
@@ -23,22 +24,21 @@ import it.tdlight.tdlibsession.td.middle.ExecuteObject;
 import it.tdlight.tdlibsession.td.middle.TdClusterManager;
 import it.tdlight.tdlibsession.td.middle.TdExecuteObjectMessageCodec;
 import it.tdlight.tdlibsession.td.middle.TdMessageCodec;
-import it.tdlight.tdlibsession.td.middle.TdOptListMessageCodec;
-import it.tdlight.tdlibsession.td.middle.TdOptionalList;
+import it.tdlight.tdlibsession.td.middle.TdResultList;
+import it.tdlight.tdlibsession.td.middle.TdResultListMessageCodec;
 import it.tdlight.tdlibsession.td.middle.TdResultMessageCodec;
 import it.tdlight.utils.MonoUtils;
 import java.time.Duration;
-import java.util.List;
 import java.util.Objects;
 import java.util.StringJoiner;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.logging.Level;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.warp.commonutils.error.InitializationException;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
-import reactor.core.publisher.ReplayProcessor;
+import reactor.core.publisher.Sinks;
+import reactor.core.publisher.Sinks.Many;
 
 public class AsyncTdMiddleEventBusClient extends AbstractVerticle implements AsyncTdMiddle {
 
@@ -47,11 +47,9 @@ public class AsyncTdMiddleEventBusClient extends AbstractVerticle implements Asy
 	public static final boolean OUTPUT_REQUESTS = false;
 	public static final byte[] EMPTY = new byte[0];
 
-	private final ReplayProcessor<Boolean> tdClosed = ReplayProcessor.cacheLastOrDefault(false);
+	private final Many<Boolean> tdClosed = Sinks.many().replay().latestOrDefault(false);
 	private final DeliveryOptions deliveryOptions;
 	private final DeliveryOptions deliveryOptionsWithTimeout;
-
-	private ReplayProcessor<Flux<TdApi.Object>> incomingUpdatesCo = ReplayProcessor.cacheLast();
 
 	private TdClusterManager cluster;
 
@@ -64,7 +62,7 @@ public class AsyncTdMiddleEventBusClient extends AbstractVerticle implements Asy
 	@SuppressWarnings({"unchecked", "rawtypes"})
 	public AsyncTdMiddleEventBusClient(TdClusterManager clusterManager) {
 		cluster = clusterManager;
-		if (cluster.registerDefaultCodec(TdOptionalList.class, new TdOptListMessageCodec())) {
+		if (cluster.registerDefaultCodec(TdResultList.class, new TdResultListMessageCodec())) {
 			cluster.registerDefaultCodec(ExecuteObject.class, new TdExecuteObjectMessageCodec());
 			cluster.registerDefaultCodec(TdResultMessage.class, new TdResultMessageCodec());
 			for (Class<?> value : ConstructorDetector.getTDConstructorsUnsafe().values()) {
@@ -146,7 +144,9 @@ public class AsyncTdMiddleEventBusClient extends AbstractVerticle implements Asy
 												.getEventBus()
 												.request(botAddress + ".isWorking", EMPTY, deliveryOptionsWithTimeout, msg -> {
 													if (msg.succeeded()) {
-														this.listen().then(this.pipe()).timeout(Duration.ofSeconds(30)).subscribe(v -> {}, future::fail, future::complete);
+														this.listen()
+																.timeout(Duration.ofSeconds(30))
+																.subscribe(v -> {}, future::fail, future::complete);
 													} else {
 														future.fail(msg.cause());
 													}
@@ -173,62 +173,13 @@ public class AsyncTdMiddleEventBusClient extends AbstractVerticle implements Asy
 	@Override
 	public void stop(Promise<Void> stopPromise) {
 		readyToStartConsumer.unregister(result -> {
-			tdClosed.onNext(true);
+			tdClosed.tryEmitNext(true);
 			stopPromise.complete();
 		});
 	}
 
 	private Mono<Void> listen() {
 		// Nothing to listen for now
-		return Mono.empty();
-	}
-
-	private Mono<Void> pipe() {
-		var updates = this.requestUpdatesBatchFromNetwork()
-				.repeatWhen(nFlux -> nFlux.takeWhile(n -> n > 0)) // Repeat when there is one batch with a flux of updates
-				.takeUntilOther(tdClosed.distinct().filter(tdClosed -> tdClosed)) // Stop when closed
-				.flatMap(batch -> batch)
-				.onErrorResume(error -> {
-					logger.error("Bot updates request failed! Marking as closed.", error);
-					if (error.getMessage().contains("Timed out")) {
-						return Flux.just(new Error(444, "CONNECTION_KILLED"));
-					} else {
-						return Flux.just(new Error(406, "INVALID_UPDATE"));
-					}
-				})
-				.flatMap(update -> {
-					return Mono.<TdApi.Object>create(sink -> {
-						if (update.getConstructor() == UpdateAuthorizationState.CONSTRUCTOR) {
-							var state = (UpdateAuthorizationState) update;
-							if (state.authorizationState.getConstructor() == AuthorizationStateClosed.CONSTRUCTOR) {
-
-								// Send tdClosed early to avoid errors
-								tdClosed.onNext(true);
-
-								this.getVertx().undeploy(this.deploymentID(), undeployed -> {
-									if (undeployed.failed()) {
-										logger.error("Error when undeploying td verticle", undeployed.cause());
-									}
-									sink.success(update);
-								});
-							} else {
-								sink.success(update);
-							}
-						} else {
-							sink.success(update);
-						}
-					});
-				})
-				.log("TdMiddle", Level.FINEST)
-				.takeUntilOther(tdClosed.distinct().filter(tdClosed -> tdClosed)) // Stop when closed
-				.publish()
-				.autoConnect(1);
-
-		updates.subscribe(t -> incomingUpdatesCo.onNext(Flux.just(t)),
-				incomingUpdatesCo::onError,
-				incomingUpdatesCo::onComplete
-		);
-
 		return Mono.empty();
 	}
 
@@ -250,63 +201,47 @@ public class AsyncTdMiddleEventBusClient extends AbstractVerticle implements Asy
 		}
 	}
 
-	private Mono<Flux<TdApi.Object>> requestUpdatesBatchFromNetwork() {
-		return Mono
-				.from(tdClosed.distinct())
-				.single()
-				.filter(tdClosed -> !tdClosed)
-				.flatMap(_x -> Mono.<Flux<TdApi.Object>>create(sink -> {
-					cluster.getEventBus().<TdOptionalList>request(botAddress + ".getNextUpdatesBlock",
-							EMPTY,
-							deliveryOptionsWithTimeout,
-							msg -> {
-								if (msg.failed()) {
-									//if (System.currentTimeMillis() - initTime <= 30000) {
-									//	// The serve has not been started
-									//	sink.success(Flux.empty());
-									//} else {
-									//	// Timeout
-									sink.error(msg.cause());
-									//}
-								} else {
-									var result = msg.result();
-									if (result.body() == null) {
-										sink.success();
-									} else {
-										var resultBody = msg.result().body();
-										if (resultBody.isSet()) {
-											List<TdResult<TdApi.Object>> updates = resultBody.getValues();
-											for (TdResult<TdApi.Object> updateObj : updates) {
-												if (updateObj.succeeded()) {
-													if (OUTPUT_REQUESTS) {
-														System.out.println(" <- " + updateObj.result()
-																.toString()
-																.replace("\n", " ")
-																.replace("\t", "")
-																.replace("  ", "")
-																.replace(" = ", "="));
-													}
-												} else {
-													logger.error("Received an errored update",
-															ResponseError.newResponseError("incoming update", botAlias, updateObj.cause())
-													);
-												}
-											}
-											sink.success(Flux.fromIterable(updates).filter(TdResult::succeeded).map(TdResult::result));
-										} else {
-											// the stream has ended
-											sink.success();
-										}
-									}
-								}
-							}
-					);
-				}));
-	}
-
 	@Override
 	public Flux<TdApi.Object> receive() {
-		return incomingUpdatesCo.filter(Objects::nonNull).flatMap(v -> v);
+		var fluxCodec = new TdResultListMessageCodec();
+		EventBusFlux.registerFluxCodec(cluster.getEventBus(), fluxCodec);
+		return Mono.from(tdClosed.asFlux()).single().filter(tdClosed -> !tdClosed).flatMapMany(_closed -> EventBusFlux
+				.<TdResultList>connect(cluster.getEventBus(),
+						botAddress + ".updates",
+						deliveryOptions,
+						fluxCodec,
+						Duration.ofMillis(deliveryOptionsWithTimeout.getSendTimeout())
+				)
+				.filter(Objects::nonNull)
+				.flatMap(block -> Flux.fromIterable(block.getValues()))
+				.filter(Objects::nonNull)
+				.onErrorResume(error -> {
+					logger.error("Bot updates request failed! Marking as closed.", error);
+					if (error.getMessage().contains("Timed out")) {
+						return Flux.just(TdResult.failed(new Error(444, "CONNECTION_KILLED")));
+					} else {
+						return Flux.just(TdResult.failed(new Error(406, "INVALID_UPDATE")));
+					}
+				}).flatMap(item -> Mono.fromCallable(item::orElseThrow))
+				.filter(Objects::nonNull)
+				.doOnNext(item -> {
+					if (OUTPUT_REQUESTS) {
+						System.out.println(" <- " + item.toString()
+								.replace("\n", " ")
+								.replace("\t", "")
+								.replace("  ", "")
+								.replace(" = ", "=")
+						);
+					}
+					if (item.getConstructor() == UpdateAuthorizationState.CONSTRUCTOR) {
+						var state = (UpdateAuthorizationState) item;
+						if (state.authorizationState.getConstructor() == AuthorizationStateClosed.CONSTRUCTOR) {
+
+							// Send tdClosed early to avoid errors
+							tdClosed.tryEmitNext(true);
+						}
+					}
+				}));
 	}
 
 	@Override
@@ -321,7 +256,7 @@ public class AsyncTdMiddleEventBusClient extends AbstractVerticle implements Asy
 					.replace(" = ", "="));
 		}
 
-		return Mono.from(tdClosed.distinct()).single().filter(tdClosed -> !tdClosed).<TdResult<T>>flatMap((_x) -> Mono.create(sink -> {
+		return Mono.from(tdClosed.asFlux()).single().filter(tdClosed -> !tdClosed).<TdResult<T>>flatMap((_x) -> Mono.create(sink -> {
 			try {
 				cluster
 						.getEventBus()

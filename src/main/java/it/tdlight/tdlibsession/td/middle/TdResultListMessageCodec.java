@@ -13,30 +13,26 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
 
-public class TdOptListMessageCodec implements MessageCodec<TdOptionalList, TdOptionalList> {
+public class TdResultListMessageCodec implements MessageCodec<TdResultList, TdResultList> {
 
-	public TdOptListMessageCodec() {
+	public TdResultListMessageCodec() {
 		super();
 	}
 
 	@Override
-	public void encodeToWire(Buffer buffer, TdOptionalList ts) {
+	public void encodeToWire(Buffer buffer, TdResultList ts) {
 		try (var bos = new FastByteArrayOutputStream()) {
 			try (var dos = new DataOutputStream(bos)) {
-				if (ts.isSet()) {
-					var t = ts.getValues();
-					dos.writeInt(t.size());
-					for (TdResult<TdApi.Object> t1 : t) {
-						if (t1.succeeded()) {
-							dos.writeBoolean(true);
-							t1.result().serialize(dos);
-						} else {
-							dos.writeBoolean(false);
-							t1.cause().serialize(dos);
-						}
+				var t = ts.getValues();
+				dos.writeInt(t.size());
+				for (TdResult<TdApi.Object> t1 : t) {
+					if (t1.succeeded()) {
+						dos.writeBoolean(true);
+						t1.result().serialize(dos);
+					} else {
+						dos.writeBoolean(false);
+						t1.cause().serialize(dos);
 					}
-				} else {
-					dos.writeInt(-1);
 				}
 			}
 			bos.trim();
@@ -47,32 +43,28 @@ public class TdOptListMessageCodec implements MessageCodec<TdOptionalList, TdOpt
 	}
 
 	@Override
-	public TdOptionalList decodeFromWire(int pos, Buffer buffer) {
+	public TdResultList decodeFromWire(int pos, Buffer buffer) {
 		try (var fis = new FastByteArrayInputStream(buffer.getBytes(pos, buffer.length()))) {
 			try (var dis = new DataInputStream(fis)) {
 				var size = dis.readInt();
-				if (size < 0) {
-					return new TdOptionalList(false, Collections.emptyList());
-				} else {
-					ArrayList<TdResult<TdApi.Object>> list = new ArrayList<>();
-					for (int i = 0; i < size; i++) {
-						if (dis.readBoolean()) {
-							list.add(TdResult.succeeded((TdApi.Object) TdApi.Deserializer.deserialize(dis)));
-						} else {
-							list.add(TdResult.failed((Error) TdApi.Deserializer.deserialize(dis)));
-						}
+				ArrayList<TdResult<TdApi.Object>> list = new ArrayList<>();
+				for (int i = 0; i < size; i++) {
+					if (dis.readBoolean()) {
+						list.add(TdResult.succeeded((TdApi.Object) TdApi.Deserializer.deserialize(dis)));
+					} else {
+						list.add(TdResult.failed((Error) TdApi.Deserializer.deserialize(dis)));
 					}
-					return new TdOptionalList(true, list);
 				}
+				return new TdResultList(list);
 			}
 		} catch (IOException | UnsupportedOperationException ex) {
 			ex.printStackTrace();
-			return new TdOptionalList(false, Collections.emptyList());
+			return new TdResultList(Collections.emptyList());
 		}
 	}
 
 	@Override
-	public TdOptionalList transform(TdOptionalList ts) {
+	public TdResultList transform(TdResultList ts) {
 		return ts;
 	}
 

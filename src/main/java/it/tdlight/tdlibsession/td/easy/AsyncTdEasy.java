@@ -51,12 +51,14 @@ import reactor.core.publisher.Mono;
 import reactor.core.publisher.ReplayProcessor;
 import reactor.core.publisher.Sinks;
 import reactor.core.publisher.Sinks.One;
+import reactor.core.scheduler.Scheduler;
 import reactor.core.scheduler.Schedulers;
 
 public class AsyncTdEasy {
 
 	private static final Logger logger = LoggerFactory.getLogger(AsyncTdEasy.class);
 
+	private final Scheduler scheduler = Schedulers.newSingle("TdEasyUpdates");
 	private final ReplayProcessor<AuthorizationState> authState = ReplayProcessor.create(1);
 	private final ReplayProcessor<Boolean> requestedDefinitiveExit = ReplayProcessor.cacheLastOrDefault(false);
 	private final ReplayProcessor<TdEasySettings> settings = ReplayProcessor.cacheLast();
@@ -70,13 +72,9 @@ public class AsyncTdEasy {
 		this.td = td;
 		this.logName = logName;
 
-		var sch = Schedulers.newSingle("TdEasyUpdates");
-
 		// todo: use Duration.ZERO instead of 10ms interval
 		this.incomingUpdatesCo = td.receive()
 				.filterWhen(update -> Mono.from(requestedDefinitiveExit).map(requestedDefinitiveExit -> !requestedDefinitiveExit))
-				.subscribeOn(sch)
-				.publishOn(sch)
 				.flatMap(this::preprocessUpdates)
 				.flatMap(update -> Mono.from(this.getState()).single().map(state -> new AsyncTdUpdateObj(state, update)))
 				.filter(upd -> upd.getState().getConstructor() == AuthorizationStateReady.CONSTRUCTOR)
@@ -88,6 +86,7 @@ public class AsyncTdEasy {
 				}).doOnComplete(() -> {
 					authState.onNext(new AuthorizationStateClosed());
 				})
+				.subscribeOn(scheduler)
 				.publish().refCount(1);
 	}
 
@@ -104,11 +103,12 @@ public class AsyncTdEasy {
 					}
 
 					// Register fatal error handler
-					fatalError.asMono().flatMap(settings.getFatalErrorHandler()::onFatalError).subscribe();
+					fatalError.asMono().flatMap(settings.getFatalErrorHandler()::onFatalError).subscribeOn(scheduler).subscribe();
 
 					return true;
 				})
 				.subscribeOn(Schedulers.boundedElastic())
+				.publishOn(scheduler)
 				.flatMap(_v -> {
 					this.settings.onNext(settings);
 					return Mono.empty();
@@ -119,7 +119,7 @@ public class AsyncTdEasy {
 	 * Get TDLib state
 	 */
 	public Flux<AuthorizationState> getState() {
-		return Flux.from(authState);
+		return Flux.from(authState).subscribeOn(scheduler);
 	}
 
 	/**
@@ -130,21 +130,21 @@ public class AsyncTdEasy {
 	}
 
 	private Flux<TdApi.Update> getIncomingUpdates(boolean includePreAuthUpdates) {
-		return Flux.from(incomingUpdatesCo);
+		return Flux.from(incomingUpdatesCo).subscribeOn(scheduler);
 	}
 
 	/**
 	 * Get generic error updates from TDLib (When they are not linked to a precise request).
 	 */
 	public Flux<TdApi.Error> getIncomingErrors() {
-		return Flux.from(globalErrors);
+		return Flux.from(globalErrors).subscribeOn(scheduler);
 	}
 
 	/**
 	 * Receives fatal errors from TDLib.
 	 */
 	public Mono<FatalErrorType> getFatalErrors() {
-		return fatalError.asMono();
+		return Mono.from(fatalError.asMono()).subscribeOn(scheduler);
 	}
 
 	/**
@@ -156,7 +156,7 @@ public class AsyncTdEasy {
 	}
 
 	private <T extends TdApi.Object> Mono<TdResult<T>> sendDirectly(TdApi.Function obj, boolean synchronous) {
-		return td.execute(obj, synchronous);
+		return td.<T>execute(obj, synchronous).subscribeOn(scheduler);
 	}
 
 	/**
@@ -164,7 +164,7 @@ public class AsyncTdEasy {
 	 * @param i level
 	 */
 	public Mono<Void> setVerbosityLevel(int i) {
-		return thenOrFatalError(sendDirectly(new TdApi.SetLogVerbosityLevel(i), true));
+		return thenOrFatalError(sendDirectly(new TdApi.SetLogVerbosityLevel(i), true)).subscribeOn(scheduler);
 	}
 
 	/**
@@ -172,7 +172,7 @@ public class AsyncTdEasy {
 	 * @param name option name
 	 */
 	public Mono<Void> clearOption(String name) {
-		return thenOrFatalError(sendDirectly(new TdApi.SetOption(name, new TdApi.OptionValueEmpty()), false));
+		return thenOrFatalError(sendDirectly(new TdApi.SetOption(name, new TdApi.OptionValueEmpty()), false)).subscribeOn(scheduler);
 	}
 
 	/**
@@ -181,7 +181,7 @@ public class AsyncTdEasy {
 	 * @param value option value
 	 */
 	public Mono<Void> setOptionString(String name, String value) {
-		return thenOrFatalError(sendDirectly(new TdApi.SetOption(name, new TdApi.OptionValueString(value)), false));
+		return thenOrFatalError(sendDirectly(new TdApi.SetOption(name, new TdApi.OptionValueString(value)), false)).subscribeOn(scheduler);
 	}
 
 	/**
@@ -190,7 +190,7 @@ public class AsyncTdEasy {
 	 * @param value option value
 	 */
 	public Mono<Void> setOptionInteger(String name, long value) {
-		return thenOrFatalError(sendDirectly(new TdApi.SetOption(name, new TdApi.OptionValueInteger(value)), false));
+		return thenOrFatalError(sendDirectly(new TdApi.SetOption(name, new TdApi.OptionValueInteger(value)), false)).subscribeOn(scheduler);
 	}
 
 	/**
@@ -199,7 +199,7 @@ public class AsyncTdEasy {
 	 * @param value option value
 	 */
 	public Mono<Void> setOptionBoolean(String name, boolean value) {
-		return thenOrFatalError(sendDirectly(new TdApi.SetOption(name, new TdApi.OptionValueBoolean(value)), false));
+		return thenOrFatalError(sendDirectly(new TdApi.SetOption(name, new TdApi.OptionValueBoolean(value)), false)).subscribeOn(scheduler);
 	}
 
 	/**
@@ -218,7 +218,7 @@ public class AsyncTdEasy {
 					return Mono.error(new UnsupportedOperationException("The option " + name + " is of type "
 							+ value.getClass().getSimpleName()));
 			}
-		});
+		}).subscribeOn(scheduler);
 	}
 
 	/**
@@ -237,7 +237,7 @@ public class AsyncTdEasy {
 					return Mono.error(new UnsupportedOperationException("The option " + name + " is of type "
 							+ value.getClass().getSimpleName()));
 			}
-		});
+		}).subscribeOn(scheduler);
 	}
 
 	/**
@@ -256,7 +256,7 @@ public class AsyncTdEasy {
 					return Mono.error(new UnsupportedOperationException("The option " + name + " is of type "
 							+ value.getClass().getSimpleName()));
 			}
-		});
+		}).subscribeOn(scheduler);
 	}
 
 	/**
@@ -267,7 +267,7 @@ public class AsyncTdEasy {
 	 * @return The request response.
 	 */
 	public <T extends Object> Mono<TdResult<T>> execute(TdApi.Function request) {
-		return td.execute(request, true);
+		return td.<T>execute(request, true).subscribeOn(scheduler);
 	}
 
 	/**
@@ -305,7 +305,8 @@ public class AsyncTdEasy {
 				.doOnNext(ok -> {
 					logger.info("Received AuthorizationStateClosed after TdApi.Close");
 				})
-				.then();
+				.then()
+				.subscribeOn(scheduler);
 	}
 
 	/**
@@ -325,25 +326,27 @@ public class AsyncTdEasy {
 	}
 
 	private Mono<Update> catchErrors(Object obj) {
-		if (obj.getConstructor() == Error.CONSTRUCTOR) {
-			var error = (Error) obj;
+		return Mono.<Update>fromCallable(() -> {
+			if (obj.getConstructor() == Error.CONSTRUCTOR) {
+				var error = (Error) obj;
 
-			switch (error.message) {
-				case "PHONE_CODE_INVALID":
-					globalErrors.onNext(error);
-					return Mono.just(new UpdateAuthorizationState(new AuthorizationStateWaitCode()));
-				case "PASSWORD_HASH_INVALID":
-					globalErrors.onNext(error);
-					return Mono.just(new UpdateAuthorizationState(new AuthorizationStateWaitPassword()));
-				default:
-					globalErrors.onNext(error);
-					break;
+				switch (error.message) {
+					case "PHONE_CODE_INVALID":
+						globalErrors.onNext(error);
+						return new UpdateAuthorizationState(new AuthorizationStateWaitCode());
+					case "PASSWORD_HASH_INVALID":
+						globalErrors.onNext(error);
+						return new UpdateAuthorizationState(new AuthorizationStateWaitPassword());
+					default:
+						globalErrors.onNext(error);
+						break;
+				}
+				analyzeFatalErrors(error);
+				return null;
+			} else {
+				return (Update) obj;
 			}
-			analyzeFatalErrors(error);
-			return Mono.empty();
-		} else {
-			return Mono.just((Update) obj);
-		}
+		}).subscribeOn(scheduler);
 	}
 
 	private void analyzeFatalErrors(Object obj) {
@@ -370,7 +373,7 @@ public class AsyncTdEasy {
 	}
 
 	public Mono<Boolean> isBot() {
-		return Mono.from(settings).single().map(TdEasySettings::isBotTokenSet);
+		return Mono.from(settings).single().map(TdEasySettings::isBotTokenSet).subscribeOn(scheduler);
 	}
 
 	private Publisher<TdApi.Update> preprocessUpdates(TdApi.Object updateObj) {
@@ -535,7 +538,8 @@ public class AsyncTdEasy {
 							return Mono.empty();
 					}
 				})
-				.then(Mono.justOrEmpty(updateObj.getConstructor() == Error.CONSTRUCTOR ? null : (Update) updateObj));
+				.then(Mono.justOrEmpty(updateObj.getConstructor() == Error.CONSTRUCTOR ? null : (Update) updateObj))
+				.subscribeOn(scheduler);
 	}
 
 	public <T extends TdApi.Object> Mono<Void> thenOrFatalError(Mono<TdResult<T>> optionalMono) {
