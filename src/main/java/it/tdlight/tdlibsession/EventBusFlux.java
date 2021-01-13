@@ -95,22 +95,25 @@ public class EventBusFlux {
 					if (h.succeeded()) {
 						dispose.completionHandler(h2 -> {
 							if (h2.succeeded()) {
-								sink.success();
+								msg.reply((Long) subscriptionId);
 							} else {
-								sink.error(h.cause());
+								logger.error("Failed to register dispose", h.cause());
+								msg.fail(500, "Failed to register dispose");
 							}
 						});
 					} else {
-						sink.error(h.cause());
+						logger.error("Failed to register cancel", h.cause());
+						msg.fail(500, "Failed to register cancel");
 					}
 				});
 
-				msg.reply((Long) subscriptionId);
 			});
 
 			subscribe.completionHandler(h -> {
 				if (h.failed()) {
 					sink.error(h.cause());
+				} else {
+					sink.success();
 				}
 			});
 		});
