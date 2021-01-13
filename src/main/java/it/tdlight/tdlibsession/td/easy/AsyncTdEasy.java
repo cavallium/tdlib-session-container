@@ -58,7 +58,7 @@ public class AsyncTdEasy {
 
 	private static final Logger logger = LoggerFactory.getLogger(AsyncTdEasy.class);
 
-	private final Scheduler scheduler = Schedulers.single();
+	private final Scheduler scheduler = Schedulers.newSingle("AsyncTdEasy", false);
 	private final ReplayProcessor<AuthorizationState> authState = ReplayProcessor.create(1);
 	private final ReplayProcessor<Boolean> requestedDefinitiveExit = ReplayProcessor.cacheLastOrDefault(false);
 	private final ReplayProcessor<TdEasySettings> settings = ReplayProcessor.cacheLast();
@@ -130,7 +130,7 @@ public class AsyncTdEasy {
 	}
 
 	private Flux<TdApi.Update> getIncomingUpdates(boolean includePreAuthUpdates) {
-		return Flux.from(incomingUpdatesCo).subscribeOn(scheduler);
+		return Flux.from(incomingUpdatesCo).subscribeOn(scheduler).doOnComplete(() -> requestedDefinitiveExit.onNext(true));
 	}
 
 	/**
@@ -294,10 +294,6 @@ public class AsyncTdEasy {
 				.then(Mono.from(requestedDefinitiveExit).single())
 				.filter(closeRequested -> !closeRequested)
 				.doOnSuccess(v -> requestedDefinitiveExit.onNext(true))
-				.then(td.execute(new TdApi.Close(), false))
-				.doOnNext(ok -> {
-					logger.debug("Received Ok after TdApi.Close");
-				})
 				.then(authState
 						.filter(authorizationState -> authorizationState.getConstructor() == AuthorizationStateClosed.CONSTRUCTOR)
 						.take(1)
