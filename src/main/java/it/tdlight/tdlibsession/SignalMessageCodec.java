@@ -63,10 +63,8 @@ public class SignalMessageCodec<T> implements MessageCodec<SignalMessage<T>, Sig
 					case 0x01:
 						return SignalMessage.onNext(typeCodec.decodeFromWire(pos + 1, buffer));
 					case 0x02:
-						var size = buffer.getInt(pos + 1);
-						return SignalMessage.onDecodedError(new String(buffer.getBytes(pos + 2, pos + 2 + size),
-								StandardCharsets.UTF_8
-						));
+						var size = dis.readInt();
+						return SignalMessage.onDecodedError(new String(dis.readNBytes(size), StandardCharsets.UTF_8));
 					case 0x03:
 						return SignalMessage.onComplete();
 					default:

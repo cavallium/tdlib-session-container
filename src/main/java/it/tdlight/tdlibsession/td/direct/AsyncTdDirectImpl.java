@@ -17,6 +17,7 @@ import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.core.publisher.Sinks;
 import reactor.core.publisher.Sinks.One;
+import reactor.core.scheduler.Scheduler;
 import reactor.core.scheduler.Schedulers;
 
 public class AsyncTdDirectImpl implements AsyncTdDirect {
@@ -24,6 +25,7 @@ public class AsyncTdDirectImpl implements AsyncTdDirect {
 	private static final Logger logger = LoggerFactory.getLogger(AsyncTdDirect.class);
 
 	private final One<TelegramClient> td = Sinks.one();
+	private final Scheduler tdScheduler = Schedulers.single();
 
 	private final String botAlias;
 
@@ -43,7 +45,7 @@ public class AsyncTdDirectImpl implements AsyncTdDirect {
 					}
 					throw new IllegalStateException("TDLib client is destroyed");
 				}
-			}).publishOn(Schedulers.boundedElastic()).single());
+			}).publishOn(Schedulers.boundedElastic()).single().subscribeOn(tdScheduler));
 		} else {
 			return td.asMono().flatMap(td -> Mono.<TdResult<T>>create(sink -> {
 				if (td != null) {
@@ -58,7 +60,7 @@ public class AsyncTdDirectImpl implements AsyncTdDirect {
 					}
 					sink.error(new IllegalStateException("TDLib client is destroyed"));
 				}
-			})).single();
+			})).single().subscribeOn(tdScheduler);
 		}
 	}
 
@@ -89,6 +91,6 @@ public class AsyncTdDirectImpl implements AsyncTdDirect {
 						ex -> logger.trace("Error when disposing td client", ex)
 				))).subscribe();
 			});
-		});
+		}).subscribeOn(tdScheduler);
 	}
 }
