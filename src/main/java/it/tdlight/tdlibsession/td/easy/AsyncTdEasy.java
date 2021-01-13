@@ -49,6 +49,8 @@ import reactor.core.publisher.EmitterProcessor;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.core.publisher.ReplayProcessor;
+import reactor.core.publisher.Sinks;
+import reactor.core.publisher.Sinks.One;
 import reactor.core.scheduler.Schedulers;
 
 public class AsyncTdEasy {
@@ -59,7 +61,7 @@ public class AsyncTdEasy {
 	private final ReplayProcessor<Boolean> requestedDefinitiveExit = ReplayProcessor.cacheLastOrDefault(false);
 	private final ReplayProcessor<TdEasySettings> settings = ReplayProcessor.cacheLast();
 	private final EmitterProcessor<Error> globalErrors = EmitterProcessor.create();
-	private final EmitterProcessor<FatalErrorType> fatalErrors = EmitterProcessor.create();
+	private final One<FatalErrorType> fatalError = Sinks.one();
 	private final AsyncTdMiddle td;
 	private final String logName;
 	private final Flux<Update> incomingUpdatesCo;
@@ -71,7 +73,7 @@ public class AsyncTdEasy {
 		var sch = Schedulers.newSingle("TdEasyUpdates");
 
 		// todo: use Duration.ZERO instead of 10ms interval
-		this.incomingUpdatesCo = td.getUpdates()
+		this.incomingUpdatesCo = td.receive()
 				.filterWhen(update -> Mono.from(requestedDefinitiveExit).map(requestedDefinitiveExit -> !requestedDefinitiveExit))
 				.subscribeOn(sch)
 				.publishOn(sch)
@@ -102,7 +104,7 @@ public class AsyncTdEasy {
 					}
 
 					// Register fatal error handler
-					fatalErrors.flatMap(settings.getFatalErrorHandler()::onFatalError).subscribe();
+					fatalError.asMono().flatMap(settings.getFatalErrorHandler()::onFatalError).subscribe();
 
 					return true;
 				})
@@ -141,8 +143,8 @@ public class AsyncTdEasy {
 	/**
 	 * Receives fatal errors from TDLib.
 	 */
-	public Flux<FatalErrorType> getFatalErrors() {
-		return Flux.from(fatalErrors).publishOn(Schedulers.boundedElastic());
+	public Mono<FatalErrorType> getFatalErrors() {
+		return fatalError.asMono();
 	}
 
 	/**
@@ -349,19 +351,19 @@ public class AsyncTdEasy {
 			var error = (Error) obj;
 			switch (error.message) {
 				case "PHONE_NUMBER_INVALID":
-					fatalErrors.onNext(FatalErrorType.PHONE_NUMBER_INVALID);
+					fatalError.tryEmitValue(FatalErrorType.PHONE_NUMBER_INVALID);
 					break;
 				case "ACCESS_TOKEN_INVALID":
-					fatalErrors.onNext(FatalErrorType.ACCESS_TOKEN_INVALID);
+					fatalError.tryEmitValue(FatalErrorType.ACCESS_TOKEN_INVALID);
 					break;
 				case "CONNECTION_KILLED":
-					fatalErrors.onNext(FatalErrorType.CONNECTION_KILLED);
+					fatalError.tryEmitValue(FatalErrorType.CONNECTION_KILLED);
 					break;
 				case "INVALID_UPDATE":
-					fatalErrors.onNext(FatalErrorType.INVALID_UPDATE);
+					fatalError.tryEmitValue(FatalErrorType.INVALID_UPDATE);
 					break;
 				case "PHONE_NUMBER_BANNED":
-					fatalErrors.onNext(FatalErrorType.PHONE_NUMBER_BANNED);
+					fatalError.tryEmitValue(FatalErrorType.PHONE_NUMBER_BANNED);
 					break;
 			}
 		}

@@ -305,7 +305,7 @@ public class AsyncTdMiddleEventBusClient extends AbstractVerticle implements Asy
 	}
 
 	@Override
-	public Flux<TdApi.Object> getUpdates() {
+	public Flux<TdApi.Object> receive() {
 		return incomingUpdatesCo.filter(Objects::nonNull).flatMap(v -> v);
 	}
 

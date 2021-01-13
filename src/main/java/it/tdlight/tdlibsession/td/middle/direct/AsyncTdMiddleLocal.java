@@ -55,8 +55,8 @@ public class AsyncTdMiddleLocal implements AsyncTdMiddle {
 	}
 
 	@Override
-	public Flux<TdApi.Object> getUpdates() {
-		return cli.filter(Objects::nonNull).single().flatMapMany(AsyncTdMiddleEventBusClient::getUpdates);
+	public Flux<TdApi.Object> receive() {
+		return cli.filter(Objects::nonNull).single().flatMapMany(AsyncTdMiddleEventBusClient::receive);
 	}
 
 	@Override

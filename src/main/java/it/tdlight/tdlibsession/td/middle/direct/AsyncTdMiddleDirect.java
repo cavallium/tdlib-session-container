@@ -11,6 +11,7 @@ import it.tdlight.jni.TdApi.Object;
 import it.tdlight.tdlibsession.td.ResponseError;
 import it.tdlight.tdlibsession.td.TdResult;
 import it.tdlight.tdlibsession.td.direct.AsyncTdDirectImpl;
+import it.tdlight.tdlibsession.td.direct.AsyncTdDirectOptions;
 import it.tdlight.tdlibsession.td.middle.AsyncTdMiddle;
 import it.tdlight.tdlibsession.td.middle.TdClusterManager;
 import it.tdlight.utils.MonoUtils;
@@ -19,17 +20,17 @@ import org.slf4j.LoggerFactory;
 import org.warp.commonutils.error.InitializationException;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
-import reactor.core.publisher.ReplayProcessor;
+import reactor.core.publisher.Sinks;
+import reactor.core.publisher.Sinks.Empty;
 
 public class AsyncTdMiddleDirect extends AbstractVerticle implements AsyncTdMiddle {
 
 	private static final Logger logger = LoggerFactory.getLogger(AsyncTdMiddleDirect.class);
 
-	protected final ReplayProcessor<Boolean> tdClosed = ReplayProcessor.cacheLastOrDefault(false);
 	protected AsyncTdDirectImpl td;
 	private String botAddress;
 	private String botAlias;
-	private Flux<TdApi.Object> updatesFluxCo;
+	private Empty<Object> closeRequest = Sinks.empty();
 
 	public AsyncTdMiddleDirect() {
 	}
@@ -67,44 +68,34 @@ public class AsyncTdMiddleDirect extends AbstractVerticle implements AsyncTdMidd
 
 		this.td = new AsyncTdDirectImpl(botAlias);
 
-		td.initializeClient().doOnSuccess(v -> {
-			updatesFluxCo = Mono.from(tdClosed).filter(closed -> !closed).flatMapMany(_x -> td.getUpdates(WAIT_DURATION, 1000).flatMap(result -> {
-				if (result.succeeded()) {
-					if (result.result().succeeded()) {
-						return Mono.just(result.result().result());
-					} else {
-						logger.error("Received an errored update",
-								ResponseError.newResponseError("incoming update", botAlias, result.result().cause())
-						);
-						return Mono.<TdApi.Object>empty();
-					}
-				} else {
-					logger.error("Received an errored update", result.cause());
-					return Mono.<TdApi.Object>empty();
-				}
-			})).publish().refCount(1);
-			startPromise.complete();
-		}).subscribe(success -> {
-		}, (ex) -> {
-			logger.error("Failure when starting bot " + botAlias + ", address " + botAddress, ex);
-			startPromise.fail(new InitializationException("Can't connect tdlib middle client to tdlib middle server!"));
-		}, () -> {});
+		startPromise.complete();
 	}
 
 	@Override
 	public void stop(Promise<Void> stopPromise) {
-		tdClosed.onNext(true);
-		td.destroyClient().onErrorResume(ex -> {
-			logger.error("Can't destroy client", ex);
-			return Mono.empty();
-		}).doOnTerminate(() -> {
-			logger.debug("TdMiddle verticle stopped");
-		}).subscribe(MonoUtils.toSubscriber(stopPromise));
+		closeRequest.tryEmitEmpty();
+		stopPromise.complete();
 	}
 
 	@Override
-	public Flux<TdApi.Object> getUpdates() {
-		return Flux.from(updatesFluxCo);
+	public Flux<TdApi.Object> receive() {
+		return td
+				.receive(new AsyncTdDirectOptions(WAIT_DURATION, 1000))
+				.takeUntilOther(closeRequest.asMono())
+				.doOnError(ex -> {
+					logger.info("TdMiddle verticle error", ex);
+				})
+				.doOnTerminate(() -> {
+					logger.debug("TdMiddle verticle stopped");
+				}).flatMap(result -> {
+					if (result.succeeded()) {
+						return Mono.just(result.result());
+					} else {
+						logger.error("Received an errored update",
+								ResponseError.newResponseError("incoming update", botAlias, result.cause()));
+						return Mono.<TdApi.Object>empty();
+					}
+				});
 	}
 
 	@Override
