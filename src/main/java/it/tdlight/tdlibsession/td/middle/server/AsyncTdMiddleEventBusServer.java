@@ -267,12 +267,10 @@ public class AsyncTdMiddleEventBusServer extends AbstractVerticle {
 		}).bufferTimeout(1000, local ? Duration.ofMillis(1) : Duration.ofMillis(100))
 				.windowTimeout(1, Duration.ofSeconds(5))
 				.flatMap(w -> w.defaultIfEmpty(Collections.emptyList()))
-				.map(TdResultList::new).doOnTerminate(() -> {
-					System.out.println("<=: end (1)");
-				}).doOnComplete(() -> {
-					System.out.println("<=: end (2)");
-				}).doFinally(s -> {
-					System.out.println("<=: end (3)");
+				.map(TdResultList::new).doFinally(s -> {
+					if (OUTPUT_REQUESTS) {
+						System.out.println("<=: end (3)");
+					}
 					this.undeploy(() -> {});
 				});
 		var fluxCodec = new TdResultListMessageCodec();
