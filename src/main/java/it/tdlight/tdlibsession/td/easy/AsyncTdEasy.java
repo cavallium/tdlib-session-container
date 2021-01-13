@@ -130,7 +130,7 @@ public class AsyncTdEasy {
 	}
 
 	private Flux<TdApi.Update> getIncomingUpdates(boolean includePreAuthUpdates) {
-		return Flux.from(incomingUpdatesCo).subscribeOn(scheduler).doOnComplete(() -> requestedDefinitiveExit.onNext(true));
+		return Flux.from(incomingUpdatesCo).doFinally(s -> requestedDefinitiveExit.onNext(true)).subscribeOn(scheduler);
 	}
 
 	/**
@@ -294,6 +294,10 @@ public class AsyncTdEasy {
 				.then(Mono.from(requestedDefinitiveExit).single())
 				.filter(closeRequested -> !closeRequested)
 				.doOnSuccess(v -> requestedDefinitiveExit.onNext(true))
+				.then(td.execute(new TdApi.Close(), false))
+				.doOnNext(ok -> {
+					logger.debug("Received Ok after TdApi.Close");
+				})
 				.then(authState
 						.filter(authorizationState -> authorizationState.getConstructor() == AuthorizationStateClosed.CONSTRUCTOR)
 						.take(1)

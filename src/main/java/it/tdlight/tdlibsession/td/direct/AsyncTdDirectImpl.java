@@ -87,9 +87,9 @@ public class AsyncTdDirectImpl implements AsyncTdDirect {
 			// Send close if the stream is disposed before tdlib is closed
 			emitter.onDispose(() -> {
 				closedFromTd.asMono().take(Duration.ofMillis(10)).switchIfEmpty(Mono.fromRunnable(() -> client.send(new Close(),
-						result -> logger.trace("Close result: {}", result),
-						ex -> logger.trace("Error when disposing td client", ex)
-				))).subscribe();
+						result -> logger.warn("Close result: {}", result),
+						ex -> logger.error("Error when disposing td client", ex)
+				))).subscribeOn(tdScheduler).subscribe();
 			});
 		}).subscribeOn(tdScheduler);
 	}
