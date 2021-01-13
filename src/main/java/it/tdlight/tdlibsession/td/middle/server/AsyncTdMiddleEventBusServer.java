@@ -253,7 +253,6 @@ public class AsyncTdMiddleEventBusServer {
 					this.undeploy(() -> {});
 				});
 		var fluxCodec = new TdResultListMessageCodec();
-		EventBusFlux.registerFluxCodec(cluster.getEventBus(), fluxCodec);
 		return EventBusFlux.<TdResultList>serve(updatesFlux,
 				cluster.getEventBus(),
 				botAddress + ".updates",

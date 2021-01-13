@@ -23,8 +23,6 @@ import org.slf4j.LoggerFactory;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Sinks;
 import reactor.core.publisher.Sinks.Many;
-import reactor.core.scheduler.Scheduler;
-import reactor.core.scheduler.Schedulers;
 
 public class TDLibRemoteClient implements AutoCloseable {
 
@@ -36,7 +34,6 @@ public class TDLibRemoteClient implements AutoCloseable {
 	private final int port;
 	private final Set<String> membersAddresses;
 	private final Many<TdClusterManager> clusterManager = Sinks.many().replay().latest();
-	private final Scheduler deploymentScheduler = Schedulers.single();
 
 	public TDLibRemoteClient(SecurityInfo securityInfo, String masterHostname, String netInterface, int port, Set<String> membersAddresses) {
 		this.securityInfo = securityInfo;
@@ -263,7 +260,7 @@ public class TDLibRemoteClient implements AutoCloseable {
 		});
 		verticle.start(botAddress, botAddress, false).doOnError(error -> {
 			logger.error("Can't deploy bot \"" + botAddress + "\"", error);
-		}).subscribeOn(deploymentScheduler).subscribe(v -> {}, err -> {
+		}).subscribe(v -> {}, err -> {
 			deploymentHandler.handle(Future.failedFuture(err));
 		}, () -> {
 			deploymentHandler.handle(Future.succeededFuture());

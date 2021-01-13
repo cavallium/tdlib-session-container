@@ -149,7 +149,6 @@ public class AsyncTdMiddleEventBusClient extends AbstractVerticle implements Asy
 													if (msg.succeeded()) {
 														this.listen()
 																.timeout(Duration.ofSeconds(30))
-																.subscribeOn(tdMiddleScheduler)
 																.subscribe(v -> {}, future::fail, future::complete);
 													} else {
 														future.fail(msg.cause());
@@ -208,7 +207,6 @@ public class AsyncTdMiddleEventBusClient extends AbstractVerticle implements Asy
 	@Override
 	public Flux<TdApi.Object> receive() {
 		var fluxCodec = new TdResultListMessageCodec();
-		EventBusFlux.registerFluxCodec(cluster.getEventBus(), fluxCodec);
 		return Mono.from(tdClosed.asFlux()).single().filter(tdClosed -> !tdClosed).flatMapMany(_closed -> EventBusFlux
 				.<TdResultList>connect(cluster.getEventBus(),
 						botAddress + ".updates",
@@ -245,7 +243,7 @@ public class AsyncTdMiddleEventBusClient extends AbstractVerticle implements Asy
 							tdClosed.tryEmitNext(true);
 						}
 					}
-				})).subscribeOn(tdMiddleScheduler);
+				}));
 	}
 
 	@Override
@@ -301,6 +299,6 @@ public class AsyncTdMiddleEventBusClient extends AbstractVerticle implements Asy
 			}
 		}).switchIfEmpty(Mono.fromSupplier(() -> {
 			return TdResult.failed(new TdApi.Error(500, "Client is closed or response is empty"));
-		})).subscribeOn(tdMiddleScheduler);
+		}));
 	}
 }

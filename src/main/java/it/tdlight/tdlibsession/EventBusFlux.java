@@ -34,6 +34,7 @@ public class EventBusFlux {
 			MessageCodec<T, T> itemsCodec,
 			Duration connectionTimeout) {
 		var signalsCodec = new SignalMessageCodec<T>(itemsCodec);
+		EventBusFlux.registerFluxCodec(eventBus, itemsCodec);
 		var deliveryOptions = new DeliveryOptions(baseDeliveryOptions)
 				.setSendTimeout(connectionTimeout.toMillis());
 		var signalDeliveryOptions = new DeliveryOptions(deliveryOptions)
@@ -52,70 +53,82 @@ public class EventBusFlux {
 				long subscriptionId = 0;
 				var subscriptionAddress = fluxAddress + "." + subscriptionId;
 
+				MessageConsumer<byte[]> subscriptionReady = eventBus.consumer(fluxAddress + ".subscriptionReady");
 				MessageConsumer<byte[]> dispose = eventBus.consumer(subscriptionAddress + ".dispose");
 				MessageConsumer<byte[]> cancel = eventBus.consumer(subscriptionAddress + ".cancel");
 
-				var subscription = flux.subscribe(item -> {
-					var request = eventBus.request(subscriptionAddress + ".signal", SignalMessage.<T>onNext(item), signalDeliveryOptions, msg2 -> {
-						if (msg2.failed()) {
-							logger.error("Failed to send onNext signal", msg2.cause());
-						}
-					});
-				}, error -> {
-					eventBus.request(subscriptionAddress + ".signal", SignalMessage.<T>onError(error), signalDeliveryOptions, msg2 -> {
-						if (msg2.failed()) {
-							logger.error("Failed to send onNext signal", msg2.cause());
-						}
-					});
-				}, () -> {
-					eventBus.request(subscriptionAddress + ".signal", SignalMessage.<T>onComplete(), signalDeliveryOptions, msg2 -> {
-						if (msg2.failed()) {
-							logger.error("Failed to send onNext signal", msg2.cause());
-						}
-					});
-				});
-
-				cancel.handler(msg3 -> {
-					if (!subscription.isDisposed()) {
-						subscription.dispose();
-					}
-					msg3.reply(EMPTY, deliveryOptions);
-				});
-				dispose.handler(msg2 -> {
-					if (!subscription.isDisposed()) {
-						subscription.dispose();
-					}
-					cancel.unregister(v -> {
-						if (v.failed()) {
-							logger.error("Failed to unregister cancel", v.cause());
-						}
-						dispose.unregister(v2 -> {
-							if (v.failed()) {
-								logger.error("Failed to unregister dispose", v2.cause());
+				subscriptionReady.<Long>handler(subscriptionReadyMsg -> {
+					var subscription = flux.subscribe(item -> {
+						var request = eventBus.request(subscriptionAddress + ".signal", SignalMessage.<T>onNext(item), signalDeliveryOptions, msg2 -> {
+							if (msg2.failed()) {
+								logger.error("Failed to send onNext signal", msg2.cause());
 							}
-							subscribe.unregister(v3 -> {
-								if (v2.failed()) {
-									logger.error("Failed to unregister subscribe", v3.cause());
+						});
+					}, error -> {
+						eventBus.request(subscriptionAddress + ".signal", SignalMessage.<T>onError(error), signalDeliveryOptions, msg2 -> {
+							if (msg2.failed()) {
+								logger.error("Failed to send onNext signal", msg2.cause());
+							}
+						});
+					}, () -> {
+						eventBus.request(subscriptionAddress + ".signal", SignalMessage.<T>onComplete(), signalDeliveryOptions, msg2 -> {
+							if (msg2.failed()) {
+								logger.error("Failed to send onNext signal", msg2.cause());
+							}
+						});
+					});
+
+					cancel.handler(msg3 -> {
+						if (!subscription.isDisposed()) {
+							subscription.dispose();
+						}
+						msg3.reply(EMPTY, deliveryOptions);
+					});
+					dispose.handler(msg2 -> {
+						if (!subscription.isDisposed()) {
+							subscription.dispose();
+						}
+						cancel.unregister(v -> {
+							if (v.failed()) {
+								logger.error("Failed to unregister cancel", v.cause());
+							}
+							dispose.unregister(v2 -> {
+								if (v.failed()) {
+									logger.error("Failed to unregister dispose", v2.cause());
 								}
-								msg2.reply(EMPTY);
+								subscribe.unregister(v3 -> {
+									if (v2.failed()) {
+										logger.error("Failed to unregister subscribe", v3.cause());
+									}
+									msg2.reply(EMPTY);
+								});
 							});
 						});
 					});
+
+					cancel.completionHandler(h -> {
+						if (h.succeeded()) {
+							dispose.completionHandler(h2 -> {
+								if (h2.succeeded()) {
+									subscriptionReadyMsg.reply((Long) subscriptionId);
+								} else {
+									logger.error("Failed to register dispose", h.cause());
+									subscriptionReadyMsg.fail(500, "Failed to register dispose");
+								}
+							});
+						} else {
+							logger.error("Failed to register cancel", h.cause());
+							subscriptionReadyMsg.fail(500, "Failed to register cancel");
+						}
+					});
 				});
 
-				cancel.completionHandler(h -> {
-					if (h.succeeded()) {
-						dispose.completionHandler(h2 -> {
-							if (h2.succeeded()) {
-								msg.reply((Long) subscriptionId);
-							} else {
-								logger.error("Failed to register dispose", h.cause());
-								msg.fail(500, "Failed to register dispose");
-							}
-						});
+				subscriptionReady.completionHandler(srh -> {
+					if (srh.succeeded()) {
+						msg.reply((Long) subscriptionId);
 					} else {
-						logger.error("Failed to register cancel", h.cause());
-						msg.fail(500, "Failed to register cancel");
+						logger.error("Failed to register \"subscription ready\"", srh.cause());
+						msg.fail(500, "Failed to register \"subscription ready\"");
 					}
 				});
 
@@ -136,6 +149,7 @@ public class EventBusFlux {
 			DeliveryOptions baseDeliveryOptions,
 			MessageCodec<T, T> itemsCodec,
 			Duration connectionTimeout) {
+		EventBusFlux.registerFluxCodec(eventBus, itemsCodec);
 		return Flux.<T>create(emitter -> {
 			var deliveryOptions = new DeliveryOptions(baseDeliveryOptions)
 					.setSendTimeout(connectionTimeout.toMillis());
@@ -163,6 +177,12 @@ public class EventBusFlux {
 					signalConsumer.completionHandler(h -> {
 						if (h.failed()) {
 							emitter.error(new IllegalStateException("Signal consumer registration failed", msg.cause()));
+						} else {
+							eventBus.<Long>request(fluxAddress + ".subscriptionReady", EMPTY, deliveryOptions, msg2 -> {
+								if (msg2.failed()) {
+									logger.error("Failed to tell that the subscription is ready");
+								}
+							});
 						}
 					});
 
