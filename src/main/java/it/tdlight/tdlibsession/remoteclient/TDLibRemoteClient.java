@@ -231,7 +231,7 @@ public class TDLibRemoteClient implements AutoCloseable {
 	private void deployBot(TdClusterManager clusterManager, String botAddress, Handler<AsyncResult<String>> deploymentHandler) {
 		AsyncTdMiddleEventBusServer verticle = new AsyncTdMiddleEventBusServer(clusterManager);
 		verticle.onBeforeStop(handler -> {
-			clusterManager.getSharedData().getLockWithTimeout("deployment", 15000, lockAcquisitionResult -> {
+			clusterManager.getSharedData().getLockWithTimeout("deployment", 30000, lockAcquisitionResult -> {
 				if (lockAcquisitionResult.succeeded()) {
 					var deploymentLock = lockAcquisitionResult.result();
 					verticle.onAfterStop(handler2 -> {
