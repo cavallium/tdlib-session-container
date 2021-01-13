@@ -25,7 +25,7 @@ public class AsyncTdDirectImpl implements AsyncTdDirect {
 	private static final Logger logger = LoggerFactory.getLogger(AsyncTdDirect.class);
 
 	private final One<TelegramClient> td = Sinks.one();
-	private final Scheduler tdScheduler = Schedulers.single();
+	private final Scheduler tdScheduler = Schedulers.newSingle("TdMain");
 
 	private final String botAlias;
 
@@ -89,7 +89,7 @@ public class AsyncTdDirectImpl implements AsyncTdDirect {
 				closedFromTd.asMono().take(Duration.ofMillis(10)).switchIfEmpty(Mono.fromRunnable(() -> client.send(new Close(),
 						result -> logger.trace("Close result: {}", result),
 						ex -> logger.trace("Error when disposing td client", ex)
-				))).subscribe();
+				))).subscribeOn(tdScheduler).subscribe();
 			});
 		}).subscribeOn(tdScheduler);
 	}

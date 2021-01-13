@@ -44,94 +44,100 @@ public class EventBusFlux {
 			MessageConsumer<byte[]> subscribe = eventBus.consumer(fluxAddress + ".subscribe");
 
 			subscribe.handler(msg -> {
-				if (subscriptionsCount.incrementAndGet() > 1) {
-					subscriptionsCount.decrementAndGet();
-					logger.error("Another client tried to connect to the same flux. Rejecting the request.");
-					msg.fail(500, "This flux is already in use!");
-					return;
-				}
-				long subscriptionId = 0;
-				var subscriptionAddress = fluxAddress + "." + subscriptionId;
-
-				MessageConsumer<byte[]> subscriptionReady = eventBus.consumer(fluxAddress + ".subscriptionReady");
-				MessageConsumer<byte[]> dispose = eventBus.consumer(subscriptionAddress + ".dispose");
-				MessageConsumer<byte[]> cancel = eventBus.consumer(subscriptionAddress + ".cancel");
-
-				subscriptionReady.<Long>handler(subscriptionReadyMsg -> {
-					var subscription = flux.subscribe(item -> {
-						var request = eventBus.request(subscriptionAddress + ".signal", SignalMessage.<T>onNext(item), signalDeliveryOptions, msg2 -> {
-							if (msg2.failed()) {
-								logger.error("Failed to send onNext signal", msg2.cause());
-							}
-						});
-					}, error -> {
-						eventBus.request(subscriptionAddress + ".signal", SignalMessage.<T>onError(error), signalDeliveryOptions, msg2 -> {
-							if (msg2.failed()) {
-								logger.error("Failed to send onNext signal", msg2.cause());
-							}
-						});
-					}, () -> {
-						eventBus.request(subscriptionAddress + ".signal", SignalMessage.<T>onComplete(), signalDeliveryOptions, msg2 -> {
-							if (msg2.failed()) {
-								logger.error("Failed to send onNext signal", msg2.cause());
-							}
-						});
-					});
-
-					cancel.handler(msg3 -> {
-						if (!subscription.isDisposed()) {
-							subscription.dispose();
+				subscribe.unregister(subscribeUnregistered -> {
+					if (subscribeUnregistered.succeeded()) {
+						if (subscriptionsCount.incrementAndGet() > 1) {
+							subscriptionsCount.decrementAndGet();
+							logger.error("Another client tried to connect to the same flux. Rejecting the request.");
+							msg.fail(500, "This flux is already in use!");
+							return;
 						}
-						msg3.reply(EMPTY, deliveryOptions);
-					});
-					dispose.handler(msg2 -> {
-						if (!subscription.isDisposed()) {
-							subscription.dispose();
-						}
-						cancel.unregister(v -> {
-							if (v.failed()) {
-								logger.error("Failed to unregister cancel", v.cause());
-							}
-							dispose.unregister(v2 -> {
-								if (v.failed()) {
-									logger.error("Failed to unregister dispose", v2.cause());
-								}
-								subscribe.unregister(v3 -> {
-									if (v2.failed()) {
-										logger.error("Failed to unregister subscribe", v3.cause());
-									}
-									msg2.reply(EMPTY);
-								});
-							});
-						});
-					});
+						long subscriptionId = 0;
+						var subscriptionAddress = fluxAddress + "." + subscriptionId;
 
-					cancel.completionHandler(h -> {
-						if (h.succeeded()) {
-							dispose.completionHandler(h2 -> {
-								if (h2.succeeded()) {
-									subscriptionReadyMsg.reply((Long) subscriptionId);
+						MessageConsumer<byte[]> subscriptionReady = eventBus.consumer(fluxAddress + ".subscriptionReady");
+						MessageConsumer<byte[]> dispose = eventBus.consumer(subscriptionAddress + ".dispose");
+						MessageConsumer<byte[]> cancel = eventBus.consumer(subscriptionAddress + ".cancel");
+
+						subscriptionReady.<Long>handler(subscriptionReadyMsg -> {
+							subscriptionReady.unregister(subscriptionReadyUnregistered -> {
+								if (subscriptionReadyUnregistered.succeeded()) {
+									var subscription = flux.subscribe(item -> {
+										var request = eventBus.request(subscriptionAddress + ".signal", SignalMessage.<T>onNext(item), signalDeliveryOptions, msg2 -> {
+											if (msg2.failed()) {
+												logger.error("Failed to send onNext signal", msg2.cause());
+											}
+										});
+									}, error -> {
+										eventBus.request(subscriptionAddress + ".signal", SignalMessage.<T>onError(error), signalDeliveryOptions, msg2 -> {
+											if (msg2.failed()) {
+												logger.error("Failed to send onNext signal", msg2.cause());
+											}
+										});
+									}, () -> {
+										eventBus.request(subscriptionAddress + ".signal", SignalMessage.<T>onComplete(), signalDeliveryOptions, msg2 -> {
+											if (msg2.failed()) {
+												logger.error("Failed to send onNext signal", msg2.cause());
+											}
+										});
+									});
+
+									cancel.handler(msg3 -> {
+										if (!subscription.isDisposed()) {
+											subscription.dispose();
+										}
+										msg3.reply(EMPTY, deliveryOptions);
+									});
+									dispose.handler(msg2 -> {
+										if (!subscription.isDisposed()) {
+											subscription.dispose();
+										}
+										cancel.unregister(v -> {
+											if (v.failed()) {
+												logger.error("Failed to unregister cancel", v.cause());
+											}
+											dispose.unregister(v2 -> {
+												if (v.failed()) {
+													logger.error("Failed to unregister dispose", v2.cause());
+												}
+												msg2.reply(EMPTY);
+											});
+										});
+									});
+
+									cancel.completionHandler(h -> {
+										if (h.succeeded()) {
+											dispose.completionHandler(h2 -> {
+												if (h2.succeeded()) {
+													subscriptionReadyMsg.reply((Long) subscriptionId);
+												} else {
+													logger.error("Failed to register dispose", h.cause());
+													subscriptionReadyMsg.fail(500, "Failed to register dispose");
+												}
+											});
+										} else {
+											logger.error("Failed to register cancel", h.cause());
+											subscriptionReadyMsg.fail(500, "Failed to register cancel");
+										}
+									});
 								} else {
-									logger.error("Failed to register dispose", h.cause());
-									subscriptionReadyMsg.fail(500, "Failed to register dispose");
+									logger.error("Failed to unregister \"subscription ready\"");
 								}
 							});
-						} else {
-							logger.error("Failed to register cancel", h.cause());
-							subscriptionReadyMsg.fail(500, "Failed to register cancel");
-						}
-					});
-				});
+						});
 
-				subscriptionReady.completionHandler(srh -> {
-					if (srh.succeeded()) {
-						msg.reply((Long) subscriptionId);
+						subscriptionReady.completionHandler(srh -> {
+							if (srh.succeeded()) {
+								msg.reply((Long) subscriptionId);
+							} else {
+								logger.error("Failed to register \"subscription ready\"", srh.cause());
+								msg.fail(500, "Failed to register \"subscription ready\"");
+							}
+						});
 					} else {
-						logger.error("Failed to register \"subscription ready\"", srh.cause());
-						msg.fail(500, "Failed to register \"subscription ready\"");
+						logger.error("Failed to unregister subscribe consumer");
 					}
 				});
-
 			});
 
 			subscribe.completionHandler(h -> {

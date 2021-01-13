@@ -251,7 +251,7 @@ public class AsyncTdMiddleEventBusServer {
 						System.out.println("<=: end (3)");
 					}
 					this.undeploy(() -> {});
-				});
+				}).subscribeOn(tdSrvPoll);
 		var fluxCodec = new TdResultListMessageCodec();
 		return EventBusFlux.<TdResultList>serve(updatesFlux,
 				cluster.getEventBus(),

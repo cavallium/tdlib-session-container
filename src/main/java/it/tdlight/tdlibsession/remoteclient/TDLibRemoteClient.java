@@ -263,7 +263,7 @@ public class TDLibRemoteClient implements AutoCloseable {
 		});
 		verticle.start(botAddress, botAddress, false).doOnError(error -> {
 			logger.error("Can't deploy bot \"" + botAddress + "\"", error);
-		}).subscribe(v -> {}, err -> {
+		}).subscribeOn(deploymentScheduler).subscribe(v -> {}, err -> {
 			deploymentHandler.handle(Future.failedFuture(err));
 		}, () -> {
 			deploymentHandler.handle(Future.succeededFuture());
