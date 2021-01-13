@@ -70,23 +70,27 @@ public class EventBusFlux {
 										});
 									}, error -> {
 										eventBus.request(subscriptionAddress + ".signal", SignalMessage.<T>onError(error), signalDeliveryOptions, msg2 -> {
+											logger.info("Errored flux \"" + fluxAddress + "\"");
 											if (msg2.failed()) {
-												logger.error("Failed to send onNext signal", msg2.cause());
+												logger.error("Failed to send onError signal", msg2.cause());
 											}
 										});
 									}, () -> {
 										eventBus.request(subscriptionAddress + ".signal", SignalMessage.<T>onComplete(), signalDeliveryOptions, msg2 -> {
+											logger.info("Completed flux \"" + fluxAddress + "\"");
 											if (msg2.failed()) {
-												logger.error("Failed to send onNext signal", msg2.cause());
+												logger.error("Failed to send onComplete signal", msg2.cause());
 											}
 										});
 									});
 
 									cancel.handler(msg3 -> {
+										logger.warn("Cancelling flux \"" + fluxAddress + "\"");
 										subscription.dispose();
 										msg3.reply(EMPTY, deliveryOptions);
 									});
 									dispose.handler(msg2 -> {
+										logger.warn("Disposing flux \"" + fluxAddress + "\"");
 										subscription.dispose();
 										cancel.unregister(v -> {
 											if (v.failed()) {
