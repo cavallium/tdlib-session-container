@@ -2,7 +2,6 @@ package it.tdlight.tdlibsession.td.middle.server;
 
 import static it.tdlight.tdlibsession.td.middle.client.AsyncTdMiddleEventBusClient.OUTPUT_REQUESTS;
 
-import io.vertx.core.AbstractVerticle;
 import io.vertx.core.AsyncResult;
 import io.vertx.core.Future;
 import io.vertx.core.Handler;
@@ -37,7 +36,7 @@ import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Scheduler;
 import reactor.core.scheduler.Schedulers;
 
-public class AsyncTdMiddleEventBusServer extends AbstractVerticle {
+public class AsyncTdMiddleEventBusServer {
 
 	private static final Logger logger = LoggerFactory.getLogger(AsyncTdMiddleEventBusServer.class);
 
@@ -69,7 +68,7 @@ public class AsyncTdMiddleEventBusServer extends AbstractVerticle {
 	public AsyncTdMiddleEventBusServer(TdClusterManager clusterManager) {
 		this.cluster = clusterManager;
 		this.tdOptions = new AsyncTdDirectOptions(WAIT_DURATION, 1000);
-		this.tdSrvPoll = Schedulers.newSingle("TdSrvPoll");
+		this.tdSrvPoll = Schedulers.single();
 		if (cluster.registerDefaultCodec(TdResultList.class, new TdResultListMessageCodec())) {
 			cluster.registerDefaultCodec(ExecuteObject.class, new TdExecuteObjectMessageCodec());
 			cluster.registerDefaultCodec(TdResultMessage.class, new TdResultMessageCodec());
@@ -79,57 +78,52 @@ public class AsyncTdMiddleEventBusServer extends AbstractVerticle {
 		}
 	}
 
-	@Override
-	public void start(Promise<Void> startPromise) {
-		var botAddress = config().getString("botAddress");
-		if (botAddress == null || botAddress.isEmpty()) {
-			throw new IllegalArgumentException("botAddress is not set!");
-		}
-		this.botAddress = botAddress;
-		var botAlias = config().getString("botAlias");
-		if (botAlias == null || botAlias.isEmpty()) {
-			throw new IllegalArgumentException("botAlias is not set!");
-		}
-		this.botAlias = botAlias;
-		var local = config().getBoolean("local");
-		if (local == null) {
-			throw new IllegalArgumentException("local is not set!");
-		}
-		this.local = local;
-		this.td = new AsyncTdDirectImpl(botAlias);
+	public Mono<Void> start(String botAddress, String botAlias, boolean local) {
+		return Mono.<Void>create(sink -> {
+			if (botAddress == null || botAddress.isEmpty()) {
+				sink.error(new IllegalArgumentException("botAddress is not set!"));
+			}
+			this.botAddress = botAddress;
+			if (botAlias == null || botAlias.isEmpty()) {
+				sink.error(new IllegalArgumentException("botAlias is not set!"));
+			}
+			this.botAlias = botAlias;
+			this.local = local;
+			this.td = new AsyncTdDirectImpl(botAlias);
 
-		AtomicBoolean alreadyDeployed = new AtomicBoolean(false);
-		this.startConsumer = cluster.getEventBus().consumer(botAddress + ".start", (Message<byte[]> msg) -> {
-			if (alreadyDeployed.compareAndSet(false, true)) {
-				this.listen().then(this.pipe()).then(Mono.<Void>create(registrationSink -> {
-					this.isWorkingConsumer = cluster.getEventBus().consumer(botAddress + ".isWorking", (Message<byte[]> workingMsg) -> {
-						workingMsg.reply(EMPTY, cluster.newDeliveryOpts().setLocalOnly(local));
-					});
-					this.isWorkingConsumer.completionHandler(MonoUtils.toHandler(registrationSink));
-				})).subscribeOn(this.tdSrvPoll)
-						.subscribe(v -> {}, ex -> {
-							logger.info(botAddress + " server deployed and started. succeeded: false");
-							logger.error(ex.getLocalizedMessage(), ex);
-							msg.fail(500, ex.getLocalizedMessage());
-						}, () -> {
-							logger.info(botAddress + " server deployed and started. succeeded: true");
-							msg.reply(EMPTY);
+			AtomicBoolean alreadyDeployed = new AtomicBoolean(false);
+			this.startConsumer = cluster.getEventBus().consumer(botAddress + ".start", (Message<byte[]> msg) -> {
+				if (alreadyDeployed.compareAndSet(false, true)) {
+					this.listen().then(this.pipe()).then(Mono.<Void>create(registrationSink -> {
+						this.isWorkingConsumer = cluster.getEventBus().consumer(botAddress + ".isWorking", (Message<byte[]> workingMsg) -> {
+							workingMsg.reply(EMPTY, cluster.newDeliveryOpts().setLocalOnly(local));
 						});
-			} else {
-				msg.reply(EMPTY);
-			}
-		});
-		startConsumer.completionHandler(h -> {
-			logger.info(botAddress + " server deployed. succeeded: " + h.succeeded());
-			if (h.succeeded()) {
-				logger.debug("Sending " + botAddress + ".readyToStart");
-				cluster.getEventBus().request(botAddress + ".readyToStart", EMPTY, cluster.newDeliveryOpts().setSendTimeout(30000), msg -> {
-					startPromise.complete(h.result());
-				});
-			} else {
-				startPromise.fail(h.cause());
-			}
-		});
+						this.isWorkingConsumer.completionHandler(MonoUtils.toHandler(registrationSink));
+					})).subscribeOn(this.tdSrvPoll)
+							.subscribe(v -> {}, ex -> {
+								logger.info(botAddress + " server deployed and started. succeeded: false");
+								logger.error(ex.getLocalizedMessage(), ex);
+								msg.fail(500, ex.getLocalizedMessage());
+							}, () -> {
+								logger.info(botAddress + " server deployed and started. succeeded: true");
+								msg.reply(EMPTY);
+							});
+				} else {
+					msg.reply(EMPTY);
+				}
+			});
+			startConsumer.completionHandler(h -> {
+				logger.info(botAddress + " server deployed. succeeded: " + h.succeeded());
+				if (h.succeeded()) {
+					logger.debug("Sending " + botAddress + ".readyToStart");
+					cluster.getEventBus().request(botAddress + ".readyToStart", EMPTY, cluster.newDeliveryOpts().setSendTimeout(30000), msg -> {
+						sink.success();
+					});
+				} else {
+					sink.error(h.cause());
+				}
+			});
+		}).subscribeOn(tdSrvPoll);
 	}
 
 	public void onBeforeStop(Consumer<Promise<Void>> r) {
@@ -138,11 +132,6 @@ public class AsyncTdMiddleEventBusServer extends AbstractVerticle {
 
 	public void onAfterStop(Consumer<Promise<Void>> r) {
 		this.onAfterStopListeners.add(r);
-	}
-
-	@Override
-	public void stop(Promise<Void> stopPromise) {
-		stopPromise.complete();
 	}
 
 	private void runAll(List<Consumer<Promise<Void>>> actions, Handler<AsyncResult<Void>> resultHandler) {
@@ -202,8 +191,7 @@ public class AsyncTdMiddleEventBusServer extends AbstractVerticle {
 				}
 			});
 			executeConsumer.completionHandler(MonoUtils.toHandler(registrationSink));
-
-		});
+		}).subscribeOn(tdSrvPoll);
 	}
 
 	private void undeploy(Runnable whenUndeployed) {
@@ -237,12 +225,7 @@ public class AsyncTdMiddleEventBusServer extends AbstractVerticle {
 						logger.error("An afterStop listener failed: " + onAfterStopHandler.cause());
 					}
 
-					vertx.undeploy(deploymentID(), undeployed -> {
-						if (undeployed.failed()) {
-							logger.error("Error when undeploying td verticle", undeployed.cause());
-						}
-						whenUndeployed.run();
-					});
+					whenUndeployed.run();
 				});
 			}).subscribeOn(this.tdSrvPoll).subscribe(v -> {}, ex -> {
 				logger.error("Error when stopping", ex);
@@ -260,7 +243,7 @@ public class AsyncTdMiddleEventBusServer extends AbstractVerticle {
 						.replace("  ", "")
 						.replace(" = ", "="));
 			}
-		}).bufferTimeout(1000, local ? Duration.ofMillis(1) : Duration.ofMillis(100))
+		}).bufferTimeout(tdOptions.getEventsSize(), local ? Duration.ofMillis(1) : Duration.ofMillis(100))
 				.windowTimeout(1, Duration.ofSeconds(5))
 				.flatMap(w -> w.defaultIfEmpty(Collections.emptyList()))
 				.map(TdResultList::new).doFinally(s -> {

@@ -1,6 +1,5 @@
 package it.tdlight.tdlibsession.td.middle.direct;
 
-import io.vertx.core.json.JsonObject;
 import it.tdlight.jni.TdApi;
 import it.tdlight.jni.TdApi.Function;
 import it.tdlight.jni.TdApi.Object;
@@ -10,7 +9,6 @@ import it.tdlight.tdlibsession.td.middle.AsyncTdMiddle;
 import it.tdlight.tdlibsession.td.middle.TdClusterManager;
 import it.tdlight.tdlibsession.td.middle.client.AsyncTdMiddleEventBusClient;
 import it.tdlight.tdlibsession.td.middle.server.AsyncTdMiddleEventBusServer;
-import it.tdlight.utils.MonoUtils;
 import java.util.Objects;
 import org.warp.commonutils.error.InitializationException;
 import reactor.core.publisher.Flux;
@@ -35,14 +33,7 @@ public class AsyncTdMiddleLocal implements AsyncTdMiddle {
 	}
 
 	public Mono<AsyncTdMiddleLocal> start() {
-		return Mono.<String>create(sink -> {
-			masterClusterManager
-					.getVertx()
-					.deployVerticle(srv,
-							masterClusterManager.newDeploymentOpts().setConfig(new JsonObject().put("botAddress", botAddress).put("botAlias", botAlias).put("local", true)),
-							MonoUtils.toHandler(sink)
-					);
-		}).onErrorMap(InitializationException::new).flatMap(_x -> {
+		return srv.start(botAddress, botAlias, true).onErrorMap(InitializationException::new).flatMap(_x -> {
 			try {
 				return AsyncTdMiddleEventBusClient.getAndDeployInstance(masterClusterManager, botAlias, botAddress, true).doOnNext(cli -> {
 					this.cli.onNext(cli);

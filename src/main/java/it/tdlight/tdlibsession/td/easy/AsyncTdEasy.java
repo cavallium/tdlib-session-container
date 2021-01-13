@@ -58,7 +58,7 @@ public class AsyncTdEasy {
 
 	private static final Logger logger = LoggerFactory.getLogger(AsyncTdEasy.class);
 
-	private final Scheduler scheduler = Schedulers.newSingle("TdEasyUpdates");
+	private final Scheduler scheduler = Schedulers.single();
 	private final ReplayProcessor<AuthorizationState> authState = ReplayProcessor.create(1);
 	private final ReplayProcessor<Boolean> requestedDefinitiveExit = ReplayProcessor.cacheLastOrDefault(false);
 	private final ReplayProcessor<TdEasySettings> settings = ReplayProcessor.cacheLast();

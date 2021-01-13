@@ -56,11 +56,23 @@ public class EventBusFlux {
 				MessageConsumer<byte[]> cancel = eventBus.consumer(subscriptionAddress + ".cancel");
 
 				var subscription = flux.subscribe(item -> {
-					eventBus.send(subscriptionAddress + ".signal", SignalMessage.<T>onNext(item), signalDeliveryOptions);
+					var request = eventBus.request(subscriptionAddress + ".signal", SignalMessage.<T>onNext(item), signalDeliveryOptions, msg2 -> {
+						if (msg2.failed()) {
+							logger.error("Failed to send onNext signal", msg2.cause());
+						}
+					});
 				}, error -> {
-					eventBus.send(subscriptionAddress + ".signal", SignalMessage.<T>onError(error), signalDeliveryOptions);
+					eventBus.request(subscriptionAddress + ".signal", SignalMessage.<T>onError(error), signalDeliveryOptions, msg2 -> {
+						if (msg2.failed()) {
+							logger.error("Failed to send onNext signal", msg2.cause());
+						}
+					});
 				}, () -> {
-					eventBus.send(subscriptionAddress + ".signal", SignalMessage.<T>onComplete(), signalDeliveryOptions);
+					eventBus.request(subscriptionAddress + ".signal", SignalMessage.<T>onComplete(), signalDeliveryOptions, msg2 -> {
+						if (msg2.failed()) {
+							logger.error("Failed to send onNext signal", msg2.cause());
+						}
+					});
 				});
 
 				cancel.handler(msg3 -> {
