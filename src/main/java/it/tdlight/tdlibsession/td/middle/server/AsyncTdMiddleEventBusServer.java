@@ -240,6 +240,7 @@ public class AsyncTdMiddleEventBusServer {
 						.replace(" = ", "="));
 			}
 		}).bufferTimeout(tdOptions.getEventsSize(), local ? Duration.ofMillis(1) : Duration.ofMillis(100))
+				.filter(l -> !l.isEmpty())
 				.windowTimeout(1, Duration.ofSeconds(5))
 				.flatMap(w -> w.defaultIfEmpty(Collections.emptyList()))
 				.map(TdResultList::new).doFinally(s -> {
