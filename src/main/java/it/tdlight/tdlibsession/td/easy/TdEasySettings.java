@@ -2,6 +2,7 @@ package it.tdlight.tdlibsession.td.easy;
 
 import java.util.Objects;
 import org.jetbrains.annotations.Nullable;
+import reactor.core.publisher.Mono;
 
 public class TdEasySettings {
 	public final boolean useTestDc;
@@ -69,7 +70,7 @@ public class TdEasySettings {
 		}
 		this.parameterRequestHandler = parameterRequestHandler;
 		if (fatalErrorHandler == null) {
-			fatalErrorHandler = error -> null;
+			fatalErrorHandler = error -> Mono.empty();
 		}
 		this.fatalErrorHandler = fatalErrorHandler;
 	}

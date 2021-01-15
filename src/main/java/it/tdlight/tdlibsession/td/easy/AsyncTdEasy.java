@@ -31,6 +31,7 @@ import it.tdlight.jni.TdApi.TdlibParameters;
 import it.tdlight.jni.TdApi.Update;
 import it.tdlight.jni.TdApi.UpdateAuthorizationState;
 import it.tdlight.tdlibsession.FatalErrorType;
+import it.tdlight.tdlibsession.td.TdError;
 import it.tdlight.tdlibsession.td.TdResult;
 import it.tdlight.tdlibsession.td.middle.AsyncTdMiddle;
 import it.tdlight.utils.MonoUtils;
@@ -79,9 +80,22 @@ public class AsyncTdEasy {
 				.filter(upd -> upd.getState().getConstructor() == AuthorizationStateReady.CONSTRUCTOR)
 				.map(upd -> (TdApi.Update) upd.getUpdate())
 				.doOnError(ex -> {
-					logger.error(ex.getLocalizedMessage(), ex);
+					if (ex instanceof TdError) {
+						var tdEx = (TdError) ex;
+						logger.error("Received an error update from telegram: " + tdEx.getTdCode() + " " + tdEx.getTdMessage());
+						FatalErrorType fatalErrorType;
+						try {
+							fatalErrorType = FatalErrorType.valueOf(tdEx.getTdMessage());
+						} catch (IllegalArgumentException ignored) {
+							fatalErrorType = FatalErrorType.INVALID_UPDATE;
+						}
+						this.fatalError.tryEmitValue(fatalErrorType);
+					} else {
+						logger.error(ex.getLocalizedMessage(), ex);
+					}
 				}).doOnComplete(() -> {
 					authState.asFlux().take(1).single().subscribe(authState -> {
+						onUpdatesTerminated();
 						if (authState.getConstructor() != AuthorizationStateClosed.CONSTRUCTOR) {
 							logger.warn("Updates stream has closed while"
 									+ " the current authorization state is"
@@ -89,13 +103,24 @@ public class AsyncTdEasy {
 							this.authState.onNext(new AuthorizationStateClosed());
 						}
 					});
-				})
-				.doOnTerminate(() -> {
-					logger.debug("Incoming updates flux terminated. Setting requestedDefinitiveExit: true");
-					requestedDefinitiveExit.onNext(true);
+				}).doOnError(ex -> {
+					authState.asFlux().take(1).single().subscribe(authState -> {
+						onUpdatesTerminated();
+						if (authState.getConstructor() != AuthorizationStateClosed.CONSTRUCTOR) {
+							logger.warn("Updates stream has terminated with an error while"
+									+ " the current authorization state is"
+									+ " still {}. Setting authorization state as closed!", authState.getClass().getSimpleName());
+							this.authState.onNext(new AuthorizationStateClosed());
+						}
+					});
 				})
 				.subscribeOn(scheduler)
 				.publish().refCount(1);
+	}
+
+	private void onUpdatesTerminated() {
+		logger.debug("Incoming updates flux terminated. Setting requestedDefinitiveExit: true");
+		requestedDefinitiveExit.onNext(true);
 	}
 
 	public Mono<Void> create(TdEasySettings settings) {

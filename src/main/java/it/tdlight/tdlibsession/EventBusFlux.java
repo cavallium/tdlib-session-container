@@ -7,6 +7,7 @@ import io.vertx.core.eventbus.MessageCodec;
 import io.vertx.core.eventbus.MessageConsumer;
 import io.vertx.core.eventbus.ReplyException;
 import it.tdlight.utils.MonoUtils;
+import java.net.ConnectException;
 import java.time.Duration;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
@@ -18,6 +19,7 @@ import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.core.publisher.Sinks;
 import reactor.core.publisher.Sinks.One;
+import reactor.core.scheduler.Schedulers;
 import reactor.util.function.Tuple2;
 import reactor.util.function.Tuples;
 
@@ -72,6 +74,7 @@ public class EventBusFlux {
 
 						MessageConsumer<byte[]> subscriptionReady = eventBus.consumer(fluxAddress + ".subscriptionReady");
 						MessageConsumer<byte[]> dispose = eventBus.consumer(subscriptionAddress + ".dispose");
+						MessageConsumer<byte[]> ping = eventBus.consumer(subscriptionAddress + ".ping");
 						MessageConsumer<byte[]> cancel = eventBus.consumer(subscriptionAddress + ".cancel");
 
 						subscriptionReady.<Long>handler(subscriptionReadyMsg -> {
@@ -91,17 +94,18 @@ public class EventBusFlux {
 												eventBus.request(subscriptionAddress + ".signal", SignalMessage.<T>onNext(item), signalDeliveryOptions, responseHandler);
 											})).subscribe(response -> {}, error -> {
 												if (error instanceof ReplyException) {
-													var errorMessage = error.getMessage();
-													if (errorMessage != null && errorMessage.contains("NO_HANDLERS")) {
+													var errorMessageCode = ((ReplyException) error).failureCode();
+													// -1 == NO_HANDLERS
+													if (errorMessageCode == -1) {
 														logger.error("Can't send a signal of flux \"" + fluxAddress + "\" because the connection was lost");
 													} else {
-														logger.error("Error when sending a signal of flux \"" + fluxAddress + "\": {}", error.getLocalizedMessage());
+														logger.error("Error when sending a signal of flux \"" + fluxAddress + "\": {}", error.toString());
 													}
 												} else {
 													logger.error("Error when sending a signal of flux \"" + fluxAddress + "\"", error);
 												}
 												fatalErrorSink.tryEmitValue(error);
-												disposeFlux(atomicSubscription.get(), fatalErrorSink, cancel, dispose, fluxAddress, () -> {
+												disposeFlux(atomicSubscription.get(), fatalErrorSink, ping, cancel, dispose, fluxAddress, () -> {
 													logger.warn("Forcefully disposed \"" + fluxAddress + "\" caused by the previous error");
 												});
 											}, () -> {
@@ -115,29 +119,49 @@ public class EventBusFlux {
 											});
 									atomicSubscription.set(subscription);
 
-									cancel.handler(msg3 -> {
+									ping.handler(msg2 -> {
+										logger.trace("Client is still alive");
+										msg2.reply(EMPTY, deliveryOptions);
+									});
+
+									cancel.handler(msg2 -> {
 										logger.trace("Cancelling flux \"" + fluxAddress + "\"");
 										subscription.dispose();
 										logger.debug("Cancelled flux \"" + fluxAddress + "\"");
-										msg3.reply(EMPTY, deliveryOptions);
-									});
-									dispose.handler(msg2 -> {
-										disposeFlux(subscription, fatalErrorSink, cancel, dispose, fluxAddress, () -> msg2.reply(EMPTY));
+										msg2.reply(EMPTY, deliveryOptions);
 									});
 
-									cancel.completionHandler(h -> {
-										if (h.succeeded()) {
-											dispose.completionHandler(h2 -> {
-												if (h2.succeeded()) {
-													subscriptionReadyMsg.reply((Long) subscriptionId);
+									dispose.handler(msg2 -> {
+										disposeFlux(subscription,
+												fatalErrorSink,
+												ping,
+												cancel,
+												dispose,
+												fluxAddress,
+												() -> msg2.reply(EMPTY)
+										);
+									});
+
+									ping.completionHandler(h0 -> {
+										if (h0.succeeded()) {
+											cancel.completionHandler(h1 -> {
+												if (h1.succeeded()) {
+													dispose.completionHandler(h2 -> {
+														if (h2.succeeded()) {
+															subscriptionReadyMsg.reply((Long) subscriptionId);
+														} else {
+															logger.error("Failed to register dispose", h1.cause());
+															subscriptionReadyMsg.fail(500, "Failed to register dispose");
+														}
+													});
 												} else {
-													logger.error("Failed to register dispose", h.cause());
-													subscriptionReadyMsg.fail(500, "Failed to register dispose");
+													logger.error("Failed to register cancel", h1.cause());
+													subscriptionReadyMsg.fail(500, "Failed to register cancel");
 												}
 											});
 										} else {
-											logger.error("Failed to register cancel", h.cause());
-											subscriptionReadyMsg.fail(500, "Failed to register cancel");
+											logger.error("Failed to register ping", h0.cause());
+											subscriptionReadyMsg.fail(500, "Failed to register ping");
 										}
 									});
 								} else {
@@ -174,6 +198,7 @@ public class EventBusFlux {
 
 	private static void disposeFlux(@Nullable Disposable subscription,
 			One<Throwable> fatalErrorSink,
+			MessageConsumer<byte[]> ping,
 			MessageConsumer<byte[]> cancel,
 			MessageConsumer<byte[]> dispose,
 			String fluxAddress,
@@ -183,16 +208,21 @@ public class EventBusFlux {
 		if (subscription != null) {
 			subscription.dispose();
 		}
-		cancel.unregister(v -> {
-			if (v.failed()) {
-				logger.error("Failed to unregister cancel", v.cause());
+		ping.unregister(v0 -> {
+			if (v0.failed()) {
+				logger.error("Failed to unregister ping", v0.cause());
 			}
-			dispose.unregister(v2 -> {
-				if (v.failed()) {
-					logger.error("Failed to unregister dispose", v2.cause());
+			cancel.unregister(v1 -> {
+				if (v1.failed()) {
+					logger.error("Failed to unregister cancel", v1.cause());
 				}
-				logger.debug("Disposed flux \"" + fluxAddress + "\"");
-				after.run();
+				dispose.unregister(v2 -> {
+					if (v2.failed()) {
+						logger.error("Failed to unregister dispose", v2.cause());
+					}
+					logger.debug("Disposed flux \"" + fluxAddress + "\"");
+					after.run();
+				});
 			});
 		});
 	}
@@ -239,17 +269,49 @@ public class EventBusFlux {
 						}
 					});
 
-					emitter.onDispose(() -> eventBus.request(subscriptionAddress + ".dispose", EMPTY, deliveryOptions, msg2 -> {
-						if (msg.failed()) {
-							logger.error("Failed to tell that the subscription is disposed");
-						}
-					}));
+					var pingSubscription = Flux.interval(Duration.ofSeconds(10)).flatMap(n -> Mono.create(pingSink ->
+							eventBus.<byte[]>request(subscriptionAddress + ".ping", EMPTY, deliveryOptions, pingMsg -> {
+								if (pingMsg.succeeded()) {
+									pingSink.success(pingMsg.result().body());
+								} else {
+									var pingError = pingMsg.cause();
+									if (pingError instanceof ReplyException) {
+										var pingReplyException = (ReplyException) pingError;
+										// -1 = NO_HANDLERS
+										if (pingReplyException.failureCode() == -1) {
+											pingSink.error(new ConnectException( "Can't send a ping to flux \"" + fluxAddress + "\" because the connection was lost"));
+										} else {
+											pingSink.error(new ConnectException("Ping failed:" + pingReplyException.toString()));
+										}
+									} else {
+										pingSink.error(new IllegalStateException("Ping failed", pingError));
+									}
+								}
+							})))
+							.subscribeOn(Schedulers.single())
+							.subscribe(v -> {}, emitter::error);
 
-					emitter.onCancel(() -> eventBus.request(subscriptionAddress + ".cancel", EMPTY, deliveryOptions, msg2 -> {
-						if (msg.failed()) {
-							logger.error("Failed to tell that the subscription is cancelled");
+					emitter.onDispose(() -> {
+						if (!pingSubscription.isDisposed()) {
+							pingSubscription.dispose();
 						}
-					}));
+						eventBus.request(subscriptionAddress + ".dispose", EMPTY, deliveryOptions, msg2 -> {
+							if (msg.failed()) {
+								logger.error("Failed to tell that the subscription is disposed");
+							}
+						});
+					});
+
+					emitter.onCancel(() -> {
+						if (!pingSubscription.isDisposed()) {
+							pingSubscription.dispose();
+						}
+						eventBus.request(subscriptionAddress + ".cancel", EMPTY, deliveryOptions, msg2 -> {
+							if (msg.failed()) {
+								logger.error("Failed to tell that the subscription is cancelled");
+							}
+						});
+					});
 				} else {
 					emitter.error(new IllegalStateException("Subscription failed", msg.cause()));
 				}

@@ -28,6 +28,7 @@ import it.tdlight.tdlibsession.td.middle.TdResultList;
 import it.tdlight.tdlibsession.td.middle.TdResultListMessageCodec;
 import it.tdlight.tdlibsession.td.middle.TdResultMessageCodec;
 import it.tdlight.utils.MonoUtils;
+import java.net.ConnectException;
 import java.time.Duration;
 import java.util.Objects;
 import java.util.StringJoiner;
@@ -238,10 +239,12 @@ public class AsyncTdMiddleEventBusClient extends AbstractVerticle implements Asy
 				.flatMap(block -> Flux.fromIterable(block.getValues()))
 				.filter(Objects::nonNull)
 				.onErrorResume(error -> {
-					logger.error("Bot updates request failed! Marking as closed.", error);
-					if (error.getMessage().contains("Timed out")) {
+					if (error instanceof ConnectException) {
+						return Flux.just(TdResult.failed(new Error(444, "CONNECTION_KILLED")));
+					} else if (error.getMessage().contains("Timed out")) {
 						return Flux.just(TdResult.failed(new Error(444, "CONNECTION_KILLED")));
 					} else {
+						logger.error("Bot updates request failed! Marking as closed.", error);
 						return Flux.just(TdResult.failed(new Error(406, "INVALID_UPDATE")));
 					}
 				}).flatMap(item -> Mono.fromCallable(item::orElseThrow))
