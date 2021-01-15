@@ -3,6 +3,7 @@ package it.tdlight.tdlibsession.remoteclient;
 import io.vertx.core.AsyncResult;
 import io.vertx.core.Future;
 import io.vertx.core.Handler;
+import io.vertx.core.Promise;
 import io.vertx.core.eventbus.Message;
 import io.vertx.core.net.JksOptions;
 import io.vertx.core.shareddata.AsyncMap;
@@ -17,6 +18,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.apache.logging.log4j.LogManager;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -37,6 +39,7 @@ public class TDLibRemoteClient implements AutoCloseable {
 	private final Set<String> membersAddresses;
 	private final Many<TdClusterManager> clusterManager = Sinks.many().replay().latest();
 	private final Scheduler deploymentScheduler = Schedulers.newSingle("TDLib", false);
+	private final AtomicInteger statsActiveDeployments = new AtomicInteger();
 
 	public TDLibRemoteClient(SecurityInfo securityInfo, String masterHostname, String netInterface, int port, Set<String> membersAddresses) {
 		this.securityInfo = securityInfo;
@@ -124,7 +127,7 @@ public class TDLibRemoteClient implements AutoCloseable {
 								if (mapResult.succeeded()) {
 									var deployableBotAddresses = mapResult.result();
 
-									clusterManager.getSharedData().getLockWithTimeout("deployment", 15000, lockAcquisitionResult -> {
+									clusterManager.getSharedData().getLock("deployment", lockAcquisitionResult -> {
 										if (lockAcquisitionResult.succeeded()) {
 											var deploymentLock = lockAcquisitionResult.result();
 											putAllAsync(deployableBotAddresses, botAddresses.values(), (AsyncResult<Void> putAllResult) -> {
@@ -168,7 +171,7 @@ public class TDLibRemoteClient implements AutoCloseable {
 			AsyncMap<Object, Object> deployableBotAddresses) {
 		clusterManager.getEventBus().consumer("tdlib.remoteclient.clients.deploy", (Message<String> msg) -> {
 
-			clusterManager.getSharedData().getLockWithTimeout("deployment", 15000, lockAcquisitionResult -> {
+			clusterManager.getSharedData().getLock("deployment", lockAcquisitionResult -> {
 				if (lockAcquisitionResult.succeeded()) {
 					var deploymentLock = lockAcquisitionResult.result();
 					var botAddress = msg.body();
@@ -229,14 +232,23 @@ public class TDLibRemoteClient implements AutoCloseable {
 	}
 
 	private void deployBot(TdClusterManager clusterManager, String botAddress, Handler<AsyncResult<String>> deploymentHandler) {
+		logger.info("Active deployments: " + statsActiveDeployments.incrementAndGet());
 		AsyncTdMiddleEventBusServer verticle = new AsyncTdMiddleEventBusServer(clusterManager);
-		verticle.onBeforeStop(handler -> {
-			clusterManager.getSharedData().getLockWithTimeout("deployment", 30000, lockAcquisitionResult -> {
+		var afterStopPromise = Promise.promise();
+		if (verticle.onAfterStop(handler -> {
+			afterStopPromise.complete();
+			handler.complete();
+		}, true).isFailure()) {
+			deploymentHandler.handle(Future.failedFuture(new IllegalStateException("Failed to register to event onAfterStop")));
+			return;
+		}
+		if (verticle.onBeforeStop(handler -> {
+			clusterManager.getSharedData().getLock("deployment", lockAcquisitionResult -> {
 				if (lockAcquisitionResult.succeeded()) {
 					var deploymentLock = lockAcquisitionResult.result();
-					verticle.onAfterStop(handler2 -> {
+					afterStopPromise.future().onComplete(handler2 -> {
 						deploymentLock.release();
-						handler2.complete();
+						logger.info("Active deployments: " + statsActiveDeployments.decrementAndGet());
 					});
 					clusterManager.getSharedData().getClusterWideMap("runningBotAddresses", (AsyncResult<AsyncMap<String, String>> mapResult) -> {
 						if (mapResult.succeeded()) {
@@ -260,7 +272,10 @@ public class TDLibRemoteClient implements AutoCloseable {
 					handler.fail(lockAcquisitionResult.cause());
 				}
 			});
-		});
+		}, false).isFailure()) {
+			deploymentHandler.handle(Future.failedFuture(new IllegalStateException("Failed to register to event onBeforeStop")));
+			return;
+		}
 		verticle.start(botAddress, botAddress, false).doOnError(error -> {
 			logger.error("Can't deploy bot \"" + botAddress + "\"", error);
 		}).subscribeOn(deploymentScheduler).subscribe(v -> {}, err -> {

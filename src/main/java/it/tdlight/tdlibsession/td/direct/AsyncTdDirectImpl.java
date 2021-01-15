@@ -10,7 +10,6 @@ import it.tdlight.jni.TdApi.Ok;
 import it.tdlight.jni.TdApi.UpdateAuthorizationState;
 import it.tdlight.tdlibsession.td.TdResult;
 import it.tdlight.tdlight.ClientManager;
-import java.time.Duration;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import reactor.core.publisher.Flux;
@@ -36,7 +35,7 @@ public class AsyncTdDirectImpl implements AsyncTdDirect {
 	@Override
 	public <T extends TdApi.Object> Mono<TdResult<T>> execute(Function request, boolean synchronous) {
 		if (synchronous) {
-			return td.asMono().flatMap(td -> Mono.fromCallable(() -> {
+			return td.asMono().single().flatMap(td -> Mono.fromCallable(() -> {
 				if (td != null) {
 					return TdResult.<T>of(td.execute(request));
 				} else {
@@ -47,18 +46,17 @@ public class AsyncTdDirectImpl implements AsyncTdDirect {
 				}
 			}).publishOn(Schedulers.boundedElastic()).single()).subscribeOn(tdScheduler);
 		} else {
-			return td.asMono().flatMap(td -> Mono.<TdResult<T>>create(sink -> {
+			return td.asMono().single().flatMap(td -> Mono.<TdResult<T>>create(sink -> {
 				if (td != null) {
-					try {
-						td.send(request, v -> sink.success(TdResult.of(v)), sink::error);
-					} catch (Throwable t) {
-						sink.error(t);
-					}
+					td.send(request, v -> sink.success(TdResult.of(v)), sink::error);
 				} else {
 					if (request.getConstructor() == Close.CONSTRUCTOR) {
+						logger.trace("Sending close success to sink " + sink.toString());
 						sink.success(TdResult.<T>of(new Ok()));
+					} else {
+						logger.trace("Sending close error to sink " + sink.toString());
+						sink.error(new IllegalStateException("TDLib client is destroyed"));
 					}
-					sink.error(new IllegalStateException("TDLib client is destroyed"));
 				}
 			})).single().subscribeOn(tdScheduler);
 		}
@@ -66,15 +64,17 @@ public class AsyncTdDirectImpl implements AsyncTdDirect {
 
 	@Override
 	public Flux<TdResult<TdApi.Object>> receive(AsyncTdDirectOptions options) {
+		// If closed it will be either true or false
+		final One<Boolean> closedFromTd = Sinks.one();
 		return Flux.<TdResult<TdApi.Object>>create(emitter -> {
-			One<java.lang.Object> closedFromTd = Sinks.one();
 			var client = ClientManager.create((Object object) -> {
 				emitter.next(TdResult.of(object));
 				// Close the emitter if receive closed state
 				if (object.getConstructor() == UpdateAuthorizationState.CONSTRUCTOR
 						&& ((UpdateAuthorizationState) object).authorizationState.getConstructor()
 						== AuthorizationStateClosed.CONSTRUCTOR) {
-					closedFromTd.tryEmitValue(new java.lang.Object());
+					logger.debug("Received closed status from tdlib");
+					closedFromTd.tryEmitValue(true);
 					emitter.complete();
 				}
 			}, emitter::error, emitter::error);
@@ -86,10 +86,21 @@ public class AsyncTdDirectImpl implements AsyncTdDirect {
 
 			// Send close if the stream is disposed before tdlib is closed
 			emitter.onDispose(() -> {
-				closedFromTd.asMono().take(Duration.ofMillis(10)).switchIfEmpty(Mono.fromRunnable(() -> client.send(new Close(),
-						result -> logger.warn("Close result: {}", result),
-						ex -> logger.error("Error when disposing td client", ex)
-				))).subscribeOn(tdScheduler).subscribe();
+				// Try to emit false, so that if it has not been closed from tdlib, now it is explicitly false.
+				closedFromTd.tryEmitValue(false);
+
+				closedFromTd.asMono()
+						.doOnNext(isClosedFromTd -> {
+							if (!isClosedFromTd) {
+								logger.warn("The stream has been disposed without closing tdlib. Sending TdApi.Close()...");
+								client.send(new Close(),
+										result -> logger.warn("Close result: {}", result),
+										ex -> logger.error("Error when disposing td client", ex)
+								);
+							}
+						})
+						.subscribeOn(tdScheduler)
+						.subscribe();
 			});
 		}).subscribeOn(tdScheduler);
 	}

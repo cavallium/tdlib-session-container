@@ -7,7 +7,7 @@
      <http://logging.apache.org/log4j/2.x/manual/appenders.html>.
 -->
 
-<Configuration status="INFO">
+<Configuration status="TRACE">
     <Appenders>
 
         <!-- DEFAULT APPENDERS -->
@@ -27,7 +27,7 @@
     <Loggers>
         <Logger name="com.hazelcast.internal.diagnostics.HealthMonitor" level="WARN" />
         <Logger name="com.hazelcast" level="INFO" />
-        <Root level="info">
+        <Root level="TRACE">
             <filters>
                 <MarkerFilter marker="NETWORK_PACKETS" onMatch="DENY"
                   onMismatch="NEUTRAL" />

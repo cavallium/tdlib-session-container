@@ -37,7 +37,7 @@ public class AsyncTdMiddleLocal implements AsyncTdMiddle {
 			try {
 				return AsyncTdMiddleEventBusClient.getAndDeployInstance(masterClusterManager, botAlias, botAddress, true).doOnNext(cli -> {
 					this.cli.onNext(cli);
-				}).doOnError(error -> this.cli.onError(error)).doFinally(_v -> this.cli.onComplete());
+				}).doOnError(error -> this.cli.onError(error)).doOnSuccess(_v -> this.cli.onComplete());
 			} catch (InitializationException e) {
 				this.cli.onError(e);
 				return Mono.error(e);

@@ -66,25 +66,33 @@ public class AsyncTdEasy {
 	private final One<FatalErrorType> fatalError = Sinks.one();
 	private final AsyncTdMiddle td;
 	private final String logName;
-	private final Flux<Update> incomingUpdatesCo;
+	private final Flux<Update> incomingUpdates;
 
 	public AsyncTdEasy(AsyncTdMiddle td, String logName) {
 		this.td = td;
 		this.logName = logName;
 
 		// todo: use Duration.ZERO instead of 10ms interval
-		this.incomingUpdatesCo = td.receive()
-				.filterWhen(update -> Mono.from(requestedDefinitiveExit).map(requestedDefinitiveExit -> !requestedDefinitiveExit))
+		this.incomingUpdates = td.receive()
 				.flatMap(this::preprocessUpdates)
 				.flatMap(update -> Mono.from(this.getState()).single().map(state -> new AsyncTdUpdateObj(state, update)))
 				.filter(upd -> upd.getState().getConstructor() == AuthorizationStateReady.CONSTRUCTOR)
 				.map(upd -> (TdApi.Update) upd.getUpdate())
 				.doOnError(ex -> {
 					logger.error(ex.getLocalizedMessage(), ex);
-				}).doOnNext(v -> {
-					if (logger.isDebugEnabled()) logger.debug(v.toString());
 				}).doOnComplete(() -> {
-					authState.onNext(new AuthorizationStateClosed());
+					authState.asFlux().take(1).single().subscribe(authState -> {
+						if (authState.getConstructor() != AuthorizationStateClosed.CONSTRUCTOR) {
+							logger.warn("Updates stream has closed while"
+									+ " the current authorization state is"
+									+ " still {}. Setting authorization state as closed!", authState.getClass().getSimpleName());
+							this.authState.onNext(new AuthorizationStateClosed());
+						}
+					});
+				})
+				.doOnTerminate(() -> {
+					logger.debug("Incoming updates flux terminated. Setting requestedDefinitiveExit: true");
+					requestedDefinitiveExit.onNext(true);
 				})
 				.subscribeOn(scheduler)
 				.publish().refCount(1);
@@ -130,7 +138,7 @@ public class AsyncTdEasy {
 	}
 
 	private Flux<TdApi.Update> getIncomingUpdates(boolean includePreAuthUpdates) {
-		return Flux.from(incomingUpdatesCo).doFinally(s -> requestedDefinitiveExit.onNext(true)).subscribeOn(scheduler);
+		return incomingUpdates.subscribeOn(scheduler);
 	}
 
 	/**
@@ -291,19 +299,27 @@ public class AsyncTdEasy {
 							return true;
 					}
 				})
-				.then(Mono.from(requestedDefinitiveExit).single())
+				.then(requestedDefinitiveExit.asFlux().take(1).single())
 				.filter(closeRequested -> !closeRequested)
-				.doOnSuccess(v -> requestedDefinitiveExit.onNext(true))
-				.then(td.execute(new TdApi.Close(), false))
-				.doOnNext(ok -> {
-					logger.debug("Received Ok after TdApi.Close");
+				.doOnSuccess(s -> {
+					logger.debug("Setting requestedDefinitiveExit: true");
+					requestedDefinitiveExit.onNext(true);
 				})
+				.then(td.execute(new TdApi.Close(), false).doOnSubscribe(s -> {
+					logger.debug("Sending TdApi.Close");
+				}))
+				.doOnNext(closeResponse -> logger.debug("TdApi.Close response is: \"{}\"",
+						closeResponse.toString().replace('\n', ' ')
+				))
 				.then(authState
 						.filter(authorizationState -> authorizationState.getConstructor() == AuthorizationStateClosed.CONSTRUCTOR)
 						.take(1)
 						.singleOrEmpty())
 				.doOnNext(ok -> {
-					logger.info("Received AuthorizationStateClosed after TdApi.Close");
+					logger.debug("Received AuthorizationStateClosed after TdApi.Close");
+				})
+				.doOnSuccess(s -> {
+					logger.info("AsyncTdEasy closed successfully");
 				})
 				.then()
 				.subscribeOn(scheduler);
@@ -495,14 +511,18 @@ public class AsyncTdEasy {
 							this.authState.onNext(new AuthorizationStateReady());
 							return Mono.empty();
 						}
+						case AuthorizationStateClosing.CONSTRUCTOR:
+							logger.debug("Received AuthorizationStateClosing from td");
+							return Mono.empty();
 						case AuthorizationStateClosed.CONSTRUCTOR:
+							logger.debug("Received AuthorizationStateClosed from td");
 							return Mono.from(requestedDefinitiveExit).doOnNext(closeRequested -> {
 								if (closeRequested) {
-									logger.info("AsyncTdEasy closed successfully");
+									logger.debug("td closed successfully");
 								} else {
-									logger.warn("AsyncTdEasy closed unexpectedly: " + logName);
-									authState.onNext(obj);
+									logger.warn("td closed unexpectedly: {}", logName);
 								}
+								authState.onNext(obj);
 							}).flatMap(closeRequested -> {
 								if (closeRequested) {
 									return Mono

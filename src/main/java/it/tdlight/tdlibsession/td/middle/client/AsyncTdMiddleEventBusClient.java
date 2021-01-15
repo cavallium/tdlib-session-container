@@ -37,6 +37,7 @@ import org.slf4j.LoggerFactory;
 import org.warp.commonutils.error.InitializationException;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
+import reactor.core.publisher.SignalType;
 import reactor.core.publisher.Sinks;
 import reactor.core.publisher.Sinks.Many;
 
@@ -47,6 +48,7 @@ public class AsyncTdMiddleEventBusClient extends AbstractVerticle implements Asy
 	public static final boolean OUTPUT_REQUESTS = false;
 	public static final byte[] EMPTY = new byte[0];
 
+	private final Many<Boolean> tdCloseRequested = Sinks.many().replay().latestOrDefault(false);
 	private final Many<Boolean> tdClosed = Sinks.many().replay().latestOrDefault(false);
 	private final DeliveryOptions deliveryOptions;
 	private final DeliveryOptions deliveryOptionsWithTimeout;
@@ -172,9 +174,30 @@ public class AsyncTdMiddleEventBusClient extends AbstractVerticle implements Asy
 
 	@Override
 	public void stop(Promise<Void> stopPromise) {
+		logger.debug("Stopping AsyncTdMiddle client verticle...");
 		readyToStartConsumer.unregister(result -> {
-			tdClosed.tryEmitNext(true);
-			stopPromise.complete();
+			if (result.failed()) {
+				logger.error("Failed to unregister readyToStart consumer");
+			} else {
+				logger.debug("Unregistered readyToStart consumer");
+			}
+			tdCloseRequested.asFlux().take(1).single().flatMap(closeRequested -> {
+				if (!closeRequested) {
+					logger.warn("Verticle is being stopped before closing TDLib with Close()! Sending Close() before stopping...");
+					return this.execute(new TdApi.Close(), false).doOnTerminate(() -> {
+						logger.debug("Close() sent to td");
+						markCloseRequested();
+					}).then();
+				} else {
+					return Mono.empty();
+				}
+			}).thenMany(tdClosed.asFlux()).filter(closed -> closed).take(1).subscribe(v -> {}, cause -> {
+				logger.debug("Failed to stop AsyncTdMiddle client verticle");
+				stopPromise.fail(cause);
+			}, () -> {
+				logger.debug("Stopped AsyncTdMiddle client verticle");
+				stopPromise.complete();
+			});
 		});
 	}
 
@@ -204,7 +227,7 @@ public class AsyncTdMiddleEventBusClient extends AbstractVerticle implements Asy
 	@Override
 	public Flux<TdApi.Object> receive() {
 		var fluxCodec = new TdResultListMessageCodec();
-		return Mono.from(tdClosed.asFlux()).single().filter(tdClosed -> !tdClosed).flatMapMany(_closed -> EventBusFlux
+		return tdCloseRequested.asFlux().take(1).single().filter(close -> !close).flatMapMany(_closed -> EventBusFlux
 				.<TdResultList>connect(cluster.getEventBus(),
 						botAddress + ".updates",
 						deliveryOptions,
@@ -235,12 +258,38 @@ public class AsyncTdMiddleEventBusClient extends AbstractVerticle implements Asy
 					if (item.getConstructor() == UpdateAuthorizationState.CONSTRUCTOR) {
 						var state = (UpdateAuthorizationState) item;
 						if (state.authorizationState.getConstructor() == AuthorizationStateClosed.CONSTRUCTOR) {
-
 							// Send tdClosed early to avoid errors
-							tdClosed.tryEmitNext(true);
+							logger.debug("Received AuthorizationStateClosed from td. Marking td as closed");
+							markCloseRequested();
+							markClosed();
 						}
 					}
-				}));
+				})).doFinally(s -> {
+					if (s == SignalType.ON_ERROR) {
+						// Send tdClosed early to avoid errors
+						logger.debug("Updates flux terminated with an error signal. Marking td as closed");
+						markCloseRequested();
+						markClosed();
+					}
+		});
+	}
+
+	private void markCloseRequested() {
+		if (tdCloseRequested.tryEmitNext(true).isFailure()) {
+			logger.error("Failed to set tdCloseRequested");
+			if (tdCloseRequested.tryEmitComplete().isFailure()) {
+				logger.error("Failed to complete tdCloseRequested");
+			}
+		}
+	}
+
+	private void markClosed() {
+		if (tdClosed.tryEmitNext(true).isFailure()) {
+			logger.error("Failed to set tdClosed");
+			if (tdClosed.tryEmitComplete().isFailure()) {
+				logger.error("Failed to complete tdClosed");
+			}
+		}
 	}
 
 	@Override
@@ -255,7 +304,7 @@ public class AsyncTdMiddleEventBusClient extends AbstractVerticle implements Asy
 					.replace(" = ", "="));
 		}
 
-		return Mono.from(tdClosed.asFlux()).single().filter(tdClosed -> !tdClosed).<TdResult<T>>flatMap((_x) -> Mono.create(sink -> {
+		return tdCloseRequested.asFlux().take(1).single().filter(close -> !close).<TdResult<T>>flatMap((_x) -> Mono.create(sink -> {
 			try {
 				cluster
 						.getEventBus()

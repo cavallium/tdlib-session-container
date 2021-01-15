@@ -8,7 +8,6 @@ import it.tdlight.jni.TdApi;
 import it.tdlight.jni.TdApi.Object;
 import it.tdlight.tdlibsession.td.TdError;
 import it.tdlight.tdlibsession.td.TdResult;
-import it.tdlight.tdlibsession.td.middle.direct.AsyncTdMiddleDirect;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.BiConsumer;
