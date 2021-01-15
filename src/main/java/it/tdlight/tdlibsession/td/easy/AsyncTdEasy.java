@@ -562,6 +562,9 @@ public class AsyncTdEasy {
 													sessionPath.resolve("thumbnails"),
 													sessionPath.resolve("wallpapers")
 											))
+											.filterWhen(file -> Mono
+													.fromCallable(() -> Files.exists(file))
+													.subscribeOn(Schedulers.boundedElastic()))
 											.doOnNext(directory -> {
 												try {
 													if (!Files.walk(directory)
