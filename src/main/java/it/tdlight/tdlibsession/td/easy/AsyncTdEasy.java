@@ -152,7 +152,7 @@ public class AsyncTdEasy {
 	 * Get TDLib state
 	 */
 	public Flux<AuthorizationState> getState() {
-		return Flux.from(authState).subscribeOn(scheduler);
+		return authState.distinct().subscribeOn(scheduler);
 	}
 
 	/**
