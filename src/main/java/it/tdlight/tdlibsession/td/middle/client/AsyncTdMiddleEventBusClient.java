@@ -41,6 +41,7 @@ import reactor.core.publisher.Mono;
 import reactor.core.publisher.SignalType;
 import reactor.core.publisher.Sinks;
 import reactor.core.publisher.Sinks.Many;
+import reactor.core.scheduler.Schedulers;
 
 public class AsyncTdMiddleEventBusClient extends AbstractVerticle implements AsyncTdMiddle {
 
@@ -149,6 +150,7 @@ public class AsyncTdMiddleEventBusClient extends AbstractVerticle implements Asy
 													if (msg.succeeded()) {
 														this.listen()
 																.timeout(Duration.ofSeconds(30))
+																.subscribeOn(Schedulers.single())
 																.subscribe(v -> {}, future::fail, future::complete);
 													} else {
 														future.fail(msg.cause());
