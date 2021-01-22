@@ -40,6 +40,12 @@ public class EventBusFlux {
 	}
 
 	/**
+	 * If the flux is fast and you are on a network, please do this:
+	 *
+	 * <pre>flux
+  .bufferTimeout(Duration.ofMillis(100))
+  .windowTimeout(1, Duration.ofSeconds(5))
+  .flatMap(w -> w.defaultIfEmpty(Collections.emptyList()))</pre>
 	 *
 	 * @return tuple. T1 = flux served, T2 = error that caused cancelling of the subscription
 	 */
@@ -72,7 +78,7 @@ public class EventBusFlux {
 						long subscriptionId = 0;
 						var subscriptionAddress = fluxAddress + "." + subscriptionId;
 
-						MessageConsumer<byte[]> subscriptionReady = eventBus.consumer(fluxAddress + ".subscriptionReady");
+						MessageConsumer<byte[]> subscriptionReady = eventBus.consumer(subscriptionAddress + ".subscriptionReady");
 						MessageConsumer<byte[]> dispose = eventBus.consumer(subscriptionAddress + ".dispose");
 						MessageConsumer<byte[]> ping = eventBus.consumer(subscriptionAddress + ".ping");
 						MessageConsumer<byte[]> cancel = eventBus.consumer(subscriptionAddress + ".cancel");
@@ -105,9 +111,17 @@ public class EventBusFlux {
 													logger.error("Error when sending a signal of flux \"" + fluxAddress + "\"", error);
 												}
 												fatalErrorSink.tryEmitValue(error);
-												disposeFlux(atomicSubscription.get(), fatalErrorSink, ping, cancel, dispose, fluxAddress, () -> {
-													logger.warn("Forcefully disposed \"" + fluxAddress + "\" caused by the previous error");
-												});
+												disposeFlux(atomicSubscription.get(),
+														fatalErrorSink,
+														subscriptionReady,
+														ping,
+														cancel,
+														dispose,
+														fluxAddress,
+														() -> {
+															logger.warn("Forcefully disposed \"" + fluxAddress + "\" caused by the previous error");
+														}
+												);
 											}, () -> {
 												eventBus.request(subscriptionAddress + ".signal", SignalMessage.<T>onComplete(), signalDeliveryOptions, msg2 -> {
 													logger.info("Completed flux \"" + fluxAddress + "\"");
@@ -134,6 +148,7 @@ public class EventBusFlux {
 									dispose.handler(msg2 -> {
 										disposeFlux(subscription,
 												fatalErrorSink,
+												subscriptionReady,
 												ping,
 												cancel,
 												dispose,
@@ -191,13 +206,14 @@ public class EventBusFlux {
 					sink.success();
 				}
 			});
-		});
+		}).subscribeOn(Schedulers.single()).share();
 
 		return Tuples.of(servedMono, fatalErrorSink.asMono());
 	}
 
 	private static void disposeFlux(@Nullable Disposable subscription,
 			One<Throwable> fatalErrorSink,
+			MessageConsumer<byte[]> subscriptionReady,
 			MessageConsumer<byte[]> ping,
 			MessageConsumer<byte[]> cancel,
 			MessageConsumer<byte[]> dispose,
@@ -208,20 +224,25 @@ public class EventBusFlux {
 		if (subscription != null) {
 			subscription.dispose();
 		}
-		ping.unregister(v0 -> {
+		subscriptionReady.unregister(v0 -> {
 			if (v0.failed()) {
-				logger.error("Failed to unregister ping", v0.cause());
+				logger.error("Failed to unregister subscriptionReady", v0.cause());
 			}
-			cancel.unregister(v1 -> {
+			ping.unregister(v1 -> {
 				if (v1.failed()) {
-					logger.error("Failed to unregister cancel", v1.cause());
+					logger.error("Failed to unregister ping", v1.cause());
 				}
-				dispose.unregister(v2 -> {
+				cancel.unregister(v2 -> {
 					if (v2.failed()) {
-						logger.error("Failed to unregister dispose", v2.cause());
+						logger.error("Failed to unregister cancel", v2.cause());
 					}
-					logger.debug("Disposed flux \"" + fluxAddress + "\"");
-					after.run();
+					dispose.unregister(v3 -> {
+						if (v3.failed()) {
+							logger.error("Failed to unregister dispose", v3.cause());
+						}
+						logger.debug("Disposed flux \"" + fluxAddress + "\"");
+						after.run();
+					});
 				});
 			});
 		});
@@ -259,7 +280,7 @@ public class EventBusFlux {
 					});
 					signalConsumer.completionHandler(h -> {
 						if (h.succeeded()) {
-							eventBus.<Long>request(fluxAddress + ".subscriptionReady", EMPTY, deliveryOptions, msg2 -> {
+							eventBus.<Long>request(subscriptionAddress + ".subscriptionReady", EMPTY, deliveryOptions, msg2 -> {
 								if (msg2.failed()) {
 									logger.error("Failed to tell that the subscription is ready");
 								}

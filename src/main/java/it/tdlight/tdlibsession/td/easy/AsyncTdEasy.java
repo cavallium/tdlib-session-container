@@ -59,7 +59,7 @@ public class AsyncTdEasy {
 
 	private static final Logger logger = LoggerFactory.getLogger(AsyncTdEasy.class);
 
-	private final Scheduler scheduler = Schedulers.newSingle("AsyncTdEasy", false);
+	private static final Scheduler scheduler = Schedulers.newSingle("AsyncTdEasy", false);
 	private final ReplayProcessor<AuthorizationState> authState = ReplayProcessor.create(1);
 	private final ReplayProcessor<Boolean> requestedDefinitiveExit = ReplayProcessor.cacheLastOrDefault(false);
 	private final ReplayProcessor<TdEasySettings> settings = ReplayProcessor.cacheLast();
@@ -141,7 +141,6 @@ public class AsyncTdEasy {
 					return true;
 				})
 				.subscribeOn(Schedulers.boundedElastic())
-				.publishOn(scheduler)
 				.flatMap(_v -> {
 					this.settings.onNext(settings);
 					return Mono.empty();
