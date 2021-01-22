@@ -17,7 +17,6 @@ import it.tdlight.tdlibsession.td.middle.TdClusterManager;
 import it.tdlight.utils.MonoUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.warp.commonutils.error.InitializationException;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.core.publisher.Sinks;
@@ -30,27 +29,23 @@ public class AsyncTdMiddleDirect extends AbstractVerticle implements AsyncTdMidd
 	protected AsyncTdDirectImpl td;
 	private String botAddress;
 	private String botAlias;
-	private Empty<Object> closeRequest = Sinks.empty();
+	private final Empty<Object> closeRequest = Sinks.empty();
 
 	public AsyncTdMiddleDirect() {
 	}
 
-	public static Mono<AsyncTdMiddleDirect> getAndDeployInstance(TdClusterManager clusterManager,
+	public static Mono<AsyncTdMiddle> getAndDeployInstance(TdClusterManager clusterManager,
 			String botAlias,
-			String botAddress) throws InitializationException {
-		try {
+			String botAddress) {
 			var instance = new AsyncTdMiddleDirect();
 			var options = clusterManager.newDeploymentOpts().setConfig(new JsonObject()
 					.put("botAlias", botAlias)
 					.put("botAddress", botAddress));
-			return MonoUtils.<String>executeAsFuture(promise -> {
-				clusterManager.getVertx().deployVerticle(instance, options, promise);
-			}).doOnNext(_v -> {
-				logger.trace("Deployed verticle for bot " + botAlias + ", address: " + botAddress);
-			}).thenReturn(instance);
-		} catch (RuntimeException e) {
-			throw new InitializationException(e);
-		}
+		return clusterManager.getVertx()
+				.rxDeployVerticle(instance, options)
+				.as(MonoUtils::toMono)
+				.doOnNext(_v -> logger.trace("Deployed verticle for bot " + botAlias + ", address: " + botAddress))
+				.thenReturn(instance);
 	}
 
 	@Override
@@ -82,30 +77,21 @@ public class AsyncTdMiddleDirect extends AbstractVerticle implements AsyncTdMidd
 		return td
 				.receive(new AsyncTdDirectOptions(WAIT_DURATION, 1000))
 				.takeUntilOther(closeRequest.asMono())
-				.doOnError(ex -> {
-					logger.info("TdMiddle verticle error", ex);
-				})
-				.doOnTerminate(() -> {
-					logger.debug("TdMiddle verticle stopped");
-				}).flatMap(result -> {
-					if (result.succeeded()) {
-						return Mono.just(result.result());
-					} else {
-						logger.error("Received an errored update",
-								ResponseError.newResponseError("incoming update", botAlias, result.cause()));
-						return Mono.<TdApi.Object>empty();
+				.doOnError(ex -> logger.info("TdMiddle verticle error", ex))
+				.doOnTerminate(() -> logger.debug("TdMiddle verticle stopped"))
+				.doOnNext(result -> {
+					if (result.failed()) {
+						logger.error("Received an errored update: {}", result.cause());
 					}
-				});
+				})
+				.filter(TdResult::succeeded)
+				.map(TdResult::result);
 	}
 
 	@Override
 	public <T extends Object> Mono<TdResult<T>> execute(Function requestFunction, boolean executeDirectly) {
-		return td.<T>execute(requestFunction, executeDirectly).onErrorMap(error -> {
-			return ResponseError.newResponseError(
-					requestFunction,
-					botAlias,
-					error
-			);
-		});
+		return td
+				.<T>execute(requestFunction, executeDirectly)
+				.onErrorMap(error -> ResponseError.newResponseError(requestFunction, botAlias, error));
 	}
 }

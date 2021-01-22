@@ -1,14 +1,12 @@
 package it.tdlight.tdlibsession.td.middle.client;
 
-import io.vertx.circuitbreaker.CircuitBreaker;
+import io.reactivex.Completable;
 import io.vertx.circuitbreaker.CircuitBreakerOptions;
-import io.vertx.core.AbstractVerticle;
-import io.vertx.core.AsyncResult;
-import io.vertx.core.Promise;
 import io.vertx.core.eventbus.DeliveryOptions;
-import io.vertx.core.eventbus.Message;
 import io.vertx.core.json.JsonObject;
-import it.tdlight.common.ConstructorDetector;
+import io.vertx.reactivex.circuitbreaker.CircuitBreaker;
+import io.vertx.reactivex.core.AbstractVerticle;
+import io.vertx.reactivex.core.eventbus.Message;
 import it.tdlight.jni.TdApi;
 import it.tdlight.jni.TdApi.AuthorizationStateClosed;
 import it.tdlight.jni.TdApi.Error;
@@ -21,16 +19,12 @@ import it.tdlight.tdlibsession.td.TdResultMessage;
 import it.tdlight.tdlibsession.td.middle.AsyncTdMiddle;
 import it.tdlight.tdlibsession.td.middle.ExecuteObject;
 import it.tdlight.tdlibsession.td.middle.TdClusterManager;
-import it.tdlight.tdlibsession.td.middle.TdExecuteObjectMessageCodec;
-import it.tdlight.tdlibsession.td.middle.TdMessageCodec;
 import it.tdlight.tdlibsession.td.middle.TdResultList;
 import it.tdlight.tdlibsession.td.middle.TdResultListMessageCodec;
-import it.tdlight.tdlibsession.td.middle.TdResultMessageCodec;
 import it.tdlight.utils.MonoUtils;
 import java.net.ConnectException;
 import java.time.Duration;
 import java.util.Objects;
-import java.util.StringJoiner;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.warp.commonutils.error.InitializationException;
@@ -38,7 +32,7 @@ import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.core.publisher.SignalType;
 import reactor.core.publisher.Sinks;
-import reactor.core.publisher.Sinks.Many;
+import reactor.core.publisher.Sinks.Empty;
 import reactor.core.publisher.Sinks.One;
 import reactor.core.scheduler.Schedulers;
 
@@ -49,69 +43,43 @@ public class AsyncTdMiddleEventBusClient extends AbstractVerticle implements Asy
 	public static final boolean OUTPUT_REQUESTS = false;
 	public static final byte[] EMPTY = new byte[0];
 
-	private final Many<Boolean> tdCloseRequested = Sinks.many().replay().latestOrDefault(false);
-	private final Many<Boolean> tdClosed = Sinks.many().replay().latestOrDefault(false);
-	private final One<Error> tdCrash = Sinks.one();
+	private final TdClusterManager cluster;
 	private final DeliveryOptions deliveryOptions;
 	private final DeliveryOptions deliveryOptionsWithTimeout;
 
-	private TdClusterManager cluster;
+	private final Empty<Void> tdCloseRequested = Sinks.empty();
+	private final Empty<Void> tdClosed = Sinks.empty();
+	private final One<Error> tdCrashed = Sinks.one();
 
 	private String botAddress;
 	private String botAlias;
 	private boolean local;
 	private long initTime;
 
-	@SuppressWarnings({"unchecked", "rawtypes"})
 	public AsyncTdMiddleEventBusClient(TdClusterManager clusterManager) {
 		cluster = clusterManager;
-		if (cluster.registerDefaultCodec(TdResultList.class, new TdResultListMessageCodec())) {
-			cluster.registerDefaultCodec(ExecuteObject.class, new TdExecuteObjectMessageCodec());
-			cluster.registerDefaultCodec(TdResultMessage.class, new TdResultMessageCodec());
-			for (Class<?> value : ConstructorDetector.getTDConstructorsUnsafe().values()) {
-				cluster.registerDefaultCodec(value, new TdMessageCodec(value));
-			}
-		}
 		this.deliveryOptions = cluster.newDeliveryOpts().setLocalOnly(local);
 		this.deliveryOptionsWithTimeout = cluster.newDeliveryOpts().setLocalOnly(local).setSendTimeout(30000);
 	}
 
-	public static Mono<AsyncTdMiddleEventBusClient> getAndDeployInstance(TdClusterManager clusterManager, String botAlias, String botAddress, boolean local) throws InitializationException {
-		try {
-			var instance = new AsyncTdMiddleEventBusClient(clusterManager);
-			var options = clusterManager.newDeploymentOpts().setConfig(new JsonObject()
-					.put("botAddress", botAddress)
-					.put("botAlias", botAlias)
-					.put("local", local));
-			return MonoUtils.<String>executeAsFuture(promise -> {
-				clusterManager.getVertx().deployVerticle(instance, options, promise);
-			}).doOnNext(_v -> {
-				logger.trace("Deployed verticle for bot address: " + botAddress);
-			}).thenReturn(instance);
-		} catch (RuntimeException e) {
-			throw new InitializationException(e);
-		}
+	public static Mono<AsyncTdMiddle> getAndDeployInstance(TdClusterManager clusterManager,
+			String botAlias,
+			String botAddress,
+			boolean local) {
+		var instance = new AsyncTdMiddleEventBusClient(clusterManager);
+		var options = clusterManager
+				.newDeploymentOpts()
+				.setConfig(new JsonObject().put("botAddress", botAddress).put("botAlias", botAlias).put("local", local));
+		return clusterManager
+				.getVertx()
+				.rxDeployVerticle(instance, options)
+				.as(MonoUtils::toMono)
+				.doOnSuccess(s -> logger.trace("Deployed verticle for bot address: " + botAddress))
+				.thenReturn(instance);
 	}
 
 	@Override
-	public void start(Promise<Void> startPromise) {
-		var botAddress = config().getString("botAddress");
-		if (botAddress == null || botAddress.isEmpty()) {
-			throw new IllegalArgumentException("botAddress is not set!");
-		}
-		this.botAddress = botAddress;
-		var botAlias = config().getString("botAlias");
-		if (botAlias == null || botAlias.isEmpty()) {
-			throw new IllegalArgumentException("botAlias is not set!");
-		}
-		this.botAlias = botAlias;
-		var local = config().getBoolean("local");
-		if (local == null) {
-			throw new IllegalArgumentException("local is not set!");
-		}
-		this.local = local;
-		this.initTime = System.currentTimeMillis();
-
+	public Completable rxStart() {
 		CircuitBreaker startBreaker = CircuitBreaker.create("bot-" + botAddress + "-server-online-check-circuit-breaker", vertx,
 				new CircuitBreakerOptions().setMaxFailures(1).setMaxRetries(4).setTimeout(30000)
 		)
@@ -123,238 +91,204 @@ public class AsyncTdMiddleEventBusClient extends AbstractVerticle implements Asy
 					logger.error("Circuit closed! " + botAddress);
 				});
 
-		startBreaker.execute(future -> {
-			try {
-				logger.debug("Requesting tdlib.remoteclient.clients.deploy.existing");
-				cluster.getEventBus().publish("tdlib.remoteclient.clients.deploy", botAddress, deliveryOptions);
-
-
-				logger.debug("Waiting for " + botAddress + ".readyToStart");
-				var readyToStartConsumer = cluster.getEventBus().<byte[]>consumer(botAddress + ".readyToStart");
-				readyToStartConsumer.handler((Message<byte[]> pingMsg) -> {
-					logger.debug("Received ping reply (succeeded)");
-					readyToStartConsumer.unregister(unregistered -> {
-						// Reply instantly
-						pingMsg.reply(new byte[0]);
-						if (unregistered.succeeded()) {
-							logger.debug("Requesting " + botAddress + ".start");
-							cluster
-									.getEventBus()
-									.request(botAddress + ".start", EMPTY, deliveryOptionsWithTimeout, startMsg -> {
-										if (startMsg.succeeded()) {
-											logger.debug("Requesting " + botAddress + ".isWorking");
-											cluster
-													.getEventBus()
-													.request(botAddress + ".isWorking", EMPTY, deliveryOptionsWithTimeout, msg -> {
-														if (msg.succeeded()) {
-															this.listen()
-																	.timeout(Duration.ofSeconds(30))
-																	.subscribeOn(Schedulers.single())
-																	.subscribe(v -> {}, future::fail, future::complete);
-														} else {
-															future.fail(msg.cause());
-														}
-													});
-										} else {
-											future.fail(startMsg.cause());
-										}
-									});
-						} else {
-							logger.error("Failed to unregister readyToStartConsumer", unregistered.cause());
-						}
-					});
-				});
-			} catch (Exception ex) {
-				future.fail(ex);
-			}
-		})
-				.onFailure(ex -> {
-					logger.error("Failure when starting bot " + botAddress, ex);
-					startPromise.fail(new InitializationException("Can't connect tdlib middle client to tdlib middle server!"));
+		return Mono
+				.fromCallable(() -> {
+					var botAddress = config().getString("botAddress");
+					if (botAddress == null || botAddress.isEmpty()) {
+						throw new IllegalArgumentException("botAddress is not set!");
+					}
+					this.botAddress = botAddress;
+					var botAlias = config().getString("botAlias");
+					if (botAlias == null || botAlias.isEmpty()) {
+						throw new IllegalArgumentException("botAlias is not set!");
+					}
+					this.botAlias = botAlias;
+					var local = config().getBoolean("local");
+					if (local == null) {
+						throw new IllegalArgumentException("local is not set!");
+					}
+					this.local = local;
+					this.initTime = System.currentTimeMillis();
+					return null;
 				})
-				.onSuccess(v -> startPromise.complete());
+				.then(startBreaker.rxExecute(future -> {
+					logger.debug("Waiting for " + botAddress + ".readyToStart");
+					var readyToStartConsumer = cluster.getEventBus().<byte[]>consumer(botAddress + ".readyToStart");
+					readyToStartConsumer.handler((Message<byte[]> pingMsg) -> {
+						logger.debug("Received ping reply (succeeded)");
+						readyToStartConsumer
+								.rxUnregister()
+								.as(MonoUtils::toMono)
+								.doOnError(ex -> {
+									logger.error("Failed to unregister readyToStartConsumer", ex);
+								})
+								.then(Mono.fromCallable(() -> {
+									pingMsg.reply(new byte[0]);
+									logger.debug("Requesting " + botAddress + ".start");
+									return null;
+								}))
+								.then(cluster
+										.getEventBus()
+										.rxRequest(botAddress + ".start", EMPTY, deliveryOptionsWithTimeout)
+										.as(MonoUtils::toMono)
+										.doOnError(ex -> logger.error("Failed to request bot start", ex)))
+								.doOnNext(msg -> logger.debug("Requesting " + botAddress + ".isWorking"))
+								.then(cluster.getEventBus()
+										.rxRequest(botAddress + ".isWorking", EMPTY, deliveryOptionsWithTimeout)
+										.as(MonoUtils::toMono)
+										.doOnError(ex -> logger.error("Failed to request isWorking", ex)))
+								.subscribe(v -> {}, future::fail, future::complete);
+					});
+
+					readyToStartConsumer
+							.rxCompletionHandler()
+							.as(MonoUtils::toMono)
+							.doOnSuccess(s -> logger.debug("Requesting tdlib.remoteclient.clients.deploy.existing"))
+							.then(Mono.fromCallable(() -> cluster.getEventBus().publish("tdlib.remoteclient.clients.deploy", botAddress, deliveryOptions)))
+							.subscribeOn(Schedulers.single())
+							.subscribe(v -> {}, future::fail);
+					}).as(MonoUtils::toMono)
+				)
+				.onErrorMap(ex -> {
+					logger.error("Failure when starting bot " + botAddress, ex);
+					return new InitializationException("Can't connect tdlib middle client to tdlib middle server!");
+				})
+				.as(MonoUtils::toCompletable);
 	}
 
 	@Override
-	public void stop(Promise<Void> stopPromise) {
-		logger.debug("Stopping AsyncTdMiddle client verticle...");
-		tdCloseRequested.asFlux().take(1).single().flatMap(closeRequested -> {
-			if (!closeRequested) {
-				return tdCrash.asMono().switchIfEmpty(Mono
-						.fromRunnable(() -> logger.warn("Verticle is being stopped before closing TDLib with Close()! Sending Close() before stopping..."))
-						.then(this.execute(new TdApi.Close(), false)
-						).then()
-						.cast(TdApi.Error.class)
-				).doOnTerminate(() -> {
-					logger.debug("Close() sent to td");
-					markCloseRequested();
-				}).then();
-			} else {
-				return Mono.empty();
-			}
-		}).thenMany(tdClosed.asFlux()).filter(closed -> closed).take(1).subscribe(v -> {}, cause -> {
-			logger.debug("Failed to stop AsyncTdMiddle client verticle");
-			stopPromise.fail(cause);
-		}, () -> {
-			logger.debug("Stopped AsyncTdMiddle client verticle");
-			stopPromise.complete();
-		});
-	}
-
-	private Mono<Void> listen() {
-		// Nothing to listen for now
-		return Mono.empty();
-	}
-
-	private static class UpdatesBatchResult {
-		public final Flux<TdApi.Object> updatesFlux;
-		public final boolean completed;
-
-		private UpdatesBatchResult(Flux<TdApi.Object> updatesFlux, boolean completed) {
-			this.updatesFlux = updatesFlux;
-			this.completed = completed;
-		}
-
-		@Override
-		public String toString() {
-			return new StringJoiner(", ", UpdatesBatchResult.class.getSimpleName() + "[", "]")
-					.add("updatesFlux=" + updatesFlux)
-					.add("completed=" + completed)
-					.toString();
-		}
+	public Completable rxStop() {
+		return Mono
+				.fromRunnable(() -> logger.debug("Stopping AsyncTdMiddle client verticle..."))
+				.then(Mono
+						.firstWithSignal(
+								tdCloseRequested.asMono(),
+								tdClosed.asMono(),
+								Mono.firstWithSignal(
+										tdCrashed.asMono(),
+										Mono
+												.fromRunnable(() -> logger.warn("Verticle is being stopped before closing TDLib with Close()! Sending Close() before stopping..."))
+												.then(this.execute(new TdApi.Close(), false))
+												.then()
+								)
+								.doOnTerminate(() -> {
+									logger.debug("Close() sent to td");
+									markCloseRequested();
+								})
+								.then(tdClosed.asMono())
+						)
+				)
+				.doOnError(ex -> logger.debug("Failed to stop AsyncTdMiddle client verticle"))
+				.doOnSuccess(s -> logger.debug("Stopped AsyncTdMiddle client verticle"))
+				.as(MonoUtils::toCompletable);
 	}
 
 	@Override
 	public Flux<TdApi.Object> receive() {
 		var fluxCodec = new TdResultListMessageCodec();
-		return tdCloseRequested.asFlux().take(1).single().filter(close -> !close).flatMapMany(_closed -> EventBusFlux
-				.<TdResultList>connect(cluster.getEventBus(),
-						botAddress + ".updates",
-						deliveryOptions,
-						fluxCodec,
-						Duration.ofMillis(deliveryOptionsWithTimeout.getSendTimeout())
-				)
-				.filter(Objects::nonNull)
-				.flatMap(block -> Flux.fromIterable(block.getValues()))
-				.filter(Objects::nonNull)
-				.onErrorResume(error -> {
-					TdApi.Error theError;
-					if (error instanceof ConnectException) {
-						theError = new Error(444, "CONNECTION_KILLED");
-					} else if (error.getMessage().contains("Timed out")) {
-						theError = new Error(444, "CONNECTION_KILLED");
-					} else {
-						theError = new Error(406, "INVALID_UPDATE");
-						logger.error("Bot updates request failed! Marking as closed.", error);
-					}
-					tdCrash.tryEmitValue(theError);
-					return Flux.just(TdResult.failed(theError));
-				}).flatMap(item -> Mono.fromCallable(item::orElseThrow))
-				.filter(Objects::nonNull)
-				.doOnNext(item -> {
-					if (OUTPUT_REQUESTS) {
-						System.out.println(" <- " + item.toString()
-								.replace("\n", " ")
-								.replace("\t", "")
-								.replace("  ", "")
-								.replace(" = ", "=")
-						);
-					}
-					if (item.getConstructor() == UpdateAuthorizationState.CONSTRUCTOR) {
-						var state = (UpdateAuthorizationState) item;
-						if (state.authorizationState.getConstructor() == AuthorizationStateClosed.CONSTRUCTOR) {
-							// Send tdClosed early to avoid errors
-							logger.debug("Received AuthorizationStateClosed from td. Marking td as closed");
-							markCloseRequested();
-							markClosed();
-						}
-					}
-				})).doFinally(s -> {
-					if (s == SignalType.ON_ERROR) {
-						// Send tdClosed early to avoid errors
-						logger.debug("Updates flux terminated with an error signal. Marking td as closed");
-						markCloseRequested();
-						markClosed();
-					}
-		});
+		return Flux
+				.firstWithSignal(
+						tdCloseRequested.asMono().flux().cast(TdApi.Object.class),
+						tdClosed.asMono().flux().cast(TdApi.Object.class),
+						EventBusFlux
+								.<TdResultList>connect(cluster.getEventBus(),
+										botAddress + ".updates",
+										deliveryOptions,
+										fluxCodec,
+										Duration.ofMillis(deliveryOptionsWithTimeout.getSendTimeout())
+								)
+								.filter(Objects::nonNull)
+								.flatMap(block -> Flux.fromIterable(block.getValues()))
+								.filter(Objects::nonNull)
+								.onErrorResume(error -> {
+									TdApi.Error theError;
+									if (error instanceof ConnectException) {
+										theError = new Error(444, "CONNECTION_KILLED");
+									} else if (error.getMessage().contains("Timed out")) {
+										theError = new Error(444, "CONNECTION_KILLED");
+									} else {
+										theError = new Error(406, "INVALID_UPDATE");
+										logger.error("Bot updates request failed! Marking as closed.", error);
+									}
+									tdCrashed.tryEmitValue(theError);
+									return Flux.just(TdResult.failed(theError));
+								}).flatMap(item -> Mono.fromCallable(item::orElseThrow))
+								.filter(Objects::nonNull)
+								.doOnNext(item -> {
+									if (OUTPUT_REQUESTS) {
+										System.out.println(" <- " + item.toString()
+												.replace("\n", " ")
+												.replace("\t", "")
+												.replace("  ", "")
+												.replace(" = ", "=")
+										);
+									}
+									if (item.getConstructor() == UpdateAuthorizationState.CONSTRUCTOR) {
+										var state = (UpdateAuthorizationState) item;
+										if (state.authorizationState.getConstructor() == AuthorizationStateClosed.CONSTRUCTOR) {
+											// Send tdClosed early to avoid errors
+											logger.debug("Received AuthorizationStateClosed from td. Marking td as closed");
+											markCloseRequested();
+											markClosed();
+										}
+									}
+								}).doFinally(s -> {
+							if (s == SignalType.ON_ERROR) {
+								// Send tdClosed early to avoid errors
+								logger.debug("Updates flux terminated with an error signal. Marking td as closed");
+								markCloseRequested();
+								markClosed();
+							}
+						})
+				);
 	}
 
 	private void markCloseRequested() {
-		if (tdCloseRequested.tryEmitNext(true).isFailure()) {
+		if (tdCloseRequested.tryEmitEmpty().isFailure()) {
 			logger.error("Failed to set tdCloseRequested");
-			if (tdCloseRequested.tryEmitComplete().isFailure()) {
-				logger.error("Failed to complete tdCloseRequested");
-			}
 		}
 	}
 
 	private void markClosed() {
-		if (tdCrash.tryEmitEmpty().isFailure()) {
-			logger.debug("TDLib already crashed");
-		}
-		if (tdClosed.tryEmitNext(true).isFailure()) {
+		if (tdClosed.tryEmitEmpty().isFailure()) {
 			logger.error("Failed to set tdClosed");
-			if (tdClosed.tryEmitComplete().isFailure()) {
-				logger.error("Failed to complete tdClosed");
-			}
+		}
+		if (tdCrashed.tryEmitEmpty().isFailure()) {
+			logger.debug("TDLib already crashed");
 		}
 	}
 
 	@Override
 	public <T extends TdApi.Object> Mono<TdResult<T>> execute(Function request, boolean executeDirectly) {
-
 		var req = new ExecuteObject(executeDirectly, request);
-		if (OUTPUT_REQUESTS) {
-			System.out.println(" -> " + request.toString()
-					.replace("\n", " ")
-					.replace("\t", "")
-					.replace("  ", "")
-					.replace(" = ", "="));
-		}
-
-		var crashMono = tdCrash.asMono().<TdResult<T>>map(TdResult::failed);
-		var executeMono = tdCloseRequested.asFlux().take(1).single().filter(close -> !close).<TdResult<T>>flatMap((_x) -> Mono.create(sink -> {
-			try {
-				cluster
-						.getEventBus()
-						.request(botAddress + ".execute",
-								req,
-								deliveryOptions,
-								(AsyncResult<Message<TdResultMessage>> event) -> {
-									try {
-										if (event.succeeded()) {
-											if (event.result().body() == null) {
-												sink.error(new NullPointerException("Response is empty"));
-											} else {
-												sink.success(Objects.requireNonNull(event.result().body()).toTdResult());
-											}
-										} else {
-											sink.error(ResponseError.newResponseError(request, botAlias, event.cause()));
-										}
-									} catch (Throwable t) {
-										sink.error(t);
+		return Mono
+				.fromRunnable(() -> {
+					if (OUTPUT_REQUESTS) {
+						System.out.println(" -> " + request.toString()
+								.replace("\n", " ")
+								.replace("\t", "")
+								.replace("  ", "")
+								.replace(" = ", "="));
+					}
+				})
+				.then(Mono.firstWithSignal(
+						tdCloseRequested.asMono().flatMap(t -> Mono.empty()),
+						tdClosed.asMono().flatMap(t -> Mono.empty()),
+						cluster.getEventBus()
+								.<TdResultMessage>rxRequest(botAddress + ".execute", req, deliveryOptions)
+								.as(MonoUtils::toMono)
+								.onErrorMap(ex -> ResponseError.newResponseError(request, botAlias, ex))
+								.<TdResult<T>>flatMap(resp -> resp.body() == null ? Mono.<TdResult<T>>error(new NullPointerException("Response is empty")) : Mono.just(resp.body().toTdResult()))
+								.switchIfEmpty(Mono.defer(() -> Mono.just(TdResult.<T>failed(new TdApi.Error(500, "Client is closed or response is empty")))))
+								.doOnNext(response -> {
+									if (OUTPUT_REQUESTS) {
+										System.out.println(" <- " + response.toString()
+												.replace("\n", " ")
+												.replace("\t", "")
+												.replace("  ", "")
+												.replace(" = ", "="));
 									}
-								}
-						);
-			} catch (Throwable t) {
-				sink.error(t);
-			}
-		})).<TdResult<T>>switchIfEmpty(Mono.defer(() -> Mono.just(TdResult.<T>failed(new TdApi.Error(500,
-				"Client is closed or response is empty"
-		))))).<TdResult<T>>handle((response, sink) -> {
-			try {
-				Objects.requireNonNull(response);
-				if (OUTPUT_REQUESTS) {
-					System.out.println(
-							" <- " + response.toString().replace("\n", " ").replace("\t", "").replace("  ", "").replace(" = ", "="));
-				}
-				sink.next(response);
-			} catch (Exception e) {
-				sink.error(e);
-			}
-		}).switchIfEmpty(Mono.fromSupplier(() -> {
-			return TdResult.failed(new TdApi.Error(500, "Client is closed or response is empty"));
-		}));
-		return Mono.firstWithValue(crashMono, executeMono);
+								})
+				));
 	}
 }

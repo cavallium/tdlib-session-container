@@ -9,18 +9,20 @@ import com.hazelcast.config.MergePolicyConfig;
 import com.hazelcast.config.cp.SemaphoreConfig;
 import io.vertx.core.DeploymentOptions;
 import io.vertx.core.Handler;
-import io.vertx.core.Vertx;
 import io.vertx.core.VertxOptions;
 import io.vertx.core.eventbus.DeliveryOptions;
-import io.vertx.core.eventbus.EventBus;
-import io.vertx.core.eventbus.Message;
 import io.vertx.core.eventbus.MessageCodec;
-import io.vertx.core.eventbus.MessageConsumer;
 import io.vertx.core.http.ClientAuth;
 import io.vertx.core.net.JksOptions;
-import io.vertx.core.shareddata.SharedData;
 import io.vertx.core.spi.cluster.ClusterManager;
+import io.vertx.reactivex.core.Vertx;
+import io.vertx.reactivex.core.eventbus.EventBus;
+import io.vertx.reactivex.core.eventbus.Message;
+import io.vertx.reactivex.core.eventbus.MessageConsumer;
+import io.vertx.reactivex.core.shareddata.SharedData;
 import io.vertx.spi.cluster.hazelcast.HazelcastClusterManager;
+import it.tdlight.common.ConstructorDetector;
+import it.tdlight.tdlibsession.td.TdResultMessage;
 import it.tdlight.utils.MonoUtils;
 import java.nio.channels.AlreadyBoundException;
 import java.util.ArrayList;
@@ -45,6 +47,18 @@ public class TdClusterManager {
 		this.mgr = mgr;
 		this.vertxOptions = vertxOptions;
 		this.vertx = vertx;
+
+		if (vertx != null && vertx.eventBus() != null) {
+			vertx
+					.eventBus()
+					.getDelegate()
+					.registerDefaultCodec(TdResultList.class, new TdResultListMessageCodec())
+					.registerDefaultCodec(ExecuteObject.class, new TdExecuteObjectMessageCodec())
+					.registerDefaultCodec(TdResultMessage.class, new TdResultMessageCodec());
+			for (Class<?> value : ConstructorDetector.getTDConstructorsUnsafe().values()) {
+				vertx.eventBus().getDelegate().registerDefaultCodec(value, new TdMessageCodec(value));
+			}
+		}
 	}
 
 	public static Mono<TdClusterManager> ofMaster(JksOptions keyStoreOptions, JksOptions trustStoreOptions, boolean onlyLocal, String masterHostname, String netInterface, int port, Set<String> nodesAddresses) {
@@ -169,14 +183,13 @@ public class TdClusterManager {
 
 	/**
 	 *
-	 * @param objectClass
 	 * @param messageCodec
 	 * @param <T>
 	 * @return true if registered, false if already registered
 	 */
-	public <T> boolean registerDefaultCodec(Class<T> objectClass, MessageCodec<T, T> messageCodec) {
+	public <T> boolean registerCodec(MessageCodec<T, T> messageCodec) {
 		try {
-			vertx.eventBus().registerDefaultCodec(objectClass, messageCodec);
+			vertx.eventBus().registerCodec(messageCodec);
 			return true;
 		} catch (IllegalStateException ex) {
 			if (ex.getMessage().startsWith("Already a default codec registered for class")) {

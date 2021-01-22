@@ -1,16 +1,18 @@
 package it.tdlight.utils;
 
+import io.reactivex.Completable;
+import io.reactivex.Maybe;
+import io.reactivex.Single;
 import io.vertx.core.AsyncResult;
+import io.vertx.core.Future;
 import io.vertx.core.Handler;
 import io.vertx.core.Promise;
-import io.vertx.core.Vertx;
 import it.tdlight.jni.TdApi;
 import it.tdlight.jni.TdApi.Object;
 import it.tdlight.tdlibsession.td.TdError;
 import it.tdlight.tdlibsession.td.TdResult;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
-import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
 import org.reactivestreams.Subscription;
@@ -57,22 +59,6 @@ public class MonoUtils {
 
 	public static <T> SynchronousSink<T> toSink(Context context, Promise<T> promise) {
 		return PromiseSink.of(context, promise);
-	}
-
-	public static <T, R> BiConsumer<? super T, SynchronousSink<R>> executeBlockingSink(Vertx vertx, BiConsumer<? super T, SynchronousSink<R>> handler) {
-		return (value, sink) -> {
-			vertx.executeBlocking((Promise<R> finished) -> {
-				handler.accept(value, PromiseSink.of(sink.currentContext(), finished));
-			}, toHandler(sink));
-		};
-	}
-
-	public static <T> Mono<T> executeBlocking(Vertx vertx, Consumer<SynchronousSink<T>> action) {
-		return Mono.create((MonoSink<T> sink) -> {
-			vertx.executeBlocking((Promise<T> finished) -> {
-				action.accept(toSink(sink.currentContext(), finished));
-			}, toHandler(sink));
-		});
 	}
 
 	public static <T> Mono<T> executeAsFuture(Consumer<Handler<AsyncResult<T>>> action) {
@@ -205,5 +191,31 @@ public class MonoUtils {
 			cf.completeExceptionally(ex);
 		}, () -> cf.complete(null));
 		return cf;
+	}
+
+	public static <T> Mono<T> toMono(Future<T> future) {
+		return Mono.<T>create(sink -> future.onComplete(result -> {
+			if (result.succeeded()) {
+				sink.success(result.result());
+			} else {
+				sink.error(result.cause());
+			}
+		}));
+	}
+
+	public static <T> Mono<T> toMono(Single<T> single) {
+		return Mono.fromDirect(single.toFlowable());
+	}
+
+	public static <T> Mono<T> toMono(Maybe<T> single) {
+		return Mono.fromDirect(single.toFlowable());
+	}
+
+	public static <T> Mono<T> toMono(Completable completable) {
+		return Mono.fromDirect(completable.toFlowable());
+	}
+
+	public static <T> Completable toCompletable(Mono<T> s) {
+		return Completable.fromPublisher(s);
 	}
 }

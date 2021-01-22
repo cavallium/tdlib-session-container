@@ -6,9 +6,8 @@ import io.vertx.core.AsyncResult;
 import io.vertx.core.Future;
 import io.vertx.core.Handler;
 import io.vertx.core.Promise;
-import io.vertx.core.eventbus.Message;
-import io.vertx.core.eventbus.MessageConsumer;
-import it.tdlight.common.ConstructorDetector;
+import io.vertx.reactivex.core.eventbus.Message;
+import io.vertx.reactivex.core.eventbus.MessageConsumer;
 import it.tdlight.jni.TdApi;
 import it.tdlight.jni.TdApi.AuthorizationStateClosed;
 import it.tdlight.jni.TdApi.Error;
@@ -21,11 +20,8 @@ import it.tdlight.tdlibsession.td.direct.AsyncTdDirectImpl;
 import it.tdlight.tdlibsession.td.direct.AsyncTdDirectOptions;
 import it.tdlight.tdlibsession.td.middle.ExecuteObject;
 import it.tdlight.tdlibsession.td.middle.TdClusterManager;
-import it.tdlight.tdlibsession.td.middle.TdExecuteObjectMessageCodec;
-import it.tdlight.tdlibsession.td.middle.TdMessageCodec;
 import it.tdlight.tdlibsession.td.middle.TdResultList;
 import it.tdlight.tdlibsession.td.middle.TdResultListMessageCodec;
-import it.tdlight.tdlibsession.td.middle.TdResultMessageCodec;
 import it.tdlight.utils.MonoUtils;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -71,13 +67,6 @@ public class AsyncTdMiddleEventBusServer {
 	public AsyncTdMiddleEventBusServer(TdClusterManager clusterManager) {
 		this.cluster = clusterManager;
 		this.tdOptions = new AsyncTdDirectOptions(WAIT_DURATION, 1000);
-		if (cluster.registerDefaultCodec(TdResultList.class, new TdResultListMessageCodec())) {
-			cluster.registerDefaultCodec(ExecuteObject.class, new TdExecuteObjectMessageCodec());
-			cluster.registerDefaultCodec(TdResultMessage.class, new TdResultMessageCodec());
-			for (Class<?> value : ConstructorDetector.getTDConstructorsUnsafe().values()) {
-				cluster.registerDefaultCodec(value, new TdMessageCodec(value));
-			}
-		}
 	}
 
 	public Mono<AsyncTdMiddleEventBusServer> start(String botAddress, String botAlias, boolean local) {
