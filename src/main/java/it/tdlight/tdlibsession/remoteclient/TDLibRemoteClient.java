@@ -190,6 +190,7 @@ public class TDLibRemoteClient implements AutoCloseable {
 							deploymentLock.release();
 						});
 					} else {
+						botAddresses.putTempAddress(botAddress);
 						deployableBotAddresses.putIfAbsent(botAddress, netInterface, putResult -> {
 							if (putResult.succeeded()) {
 								if (putResult.result() == null) {

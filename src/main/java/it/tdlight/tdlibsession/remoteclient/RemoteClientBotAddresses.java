@@ -13,6 +13,7 @@ import java.util.stream.Collectors;
 public class RemoteClientBotAddresses {
 
 	private final LinkedHashSet<String> addresses;
+	private final LinkedHashSet<String> tempAddresses;
 	private final Path addressesFilePath;
 
 	public RemoteClientBotAddresses(Path addressesFilePath) throws IOException {
@@ -20,6 +21,7 @@ public class RemoteClientBotAddresses {
 		if (Files.notExists(addressesFilePath)) {
 			Files.createFile(addressesFilePath);
 		}
+		tempAddresses = new LinkedHashSet<>();
 		addresses = Files
 				.readAllLines(addressesFilePath, StandardCharsets.UTF_8)
 				.stream()
@@ -28,17 +30,23 @@ public class RemoteClientBotAddresses {
 	}
 
 	public synchronized void putAddress(String address) throws IOException {
+		tempAddresses.remove(address);
 		addresses.add(address);
 		Files.write(addressesFilePath, addresses, StandardCharsets.UTF_8, StandardOpenOption.CREATE, StandardOpenOption.SYNC);
 	}
 
+	public synchronized void putTempAddress(String address) {
+		tempAddresses.add(address);
+	}
+
 	public synchronized void removeAddress(String address) throws IOException {
+		tempAddresses.remove(address);
 		addresses.remove(address);
 		Files.write(addressesFilePath, addresses, StandardCharsets.UTF_8, StandardOpenOption.CREATE, StandardOpenOption.SYNC);
 	}
 
 	public synchronized boolean has(String botAddress) {
-		return addresses.contains(botAddress);
+		return addresses.contains(botAddress) || tempAddresses.contains(botAddress);
 	}
 
 	public synchronized Set<String> values() {
