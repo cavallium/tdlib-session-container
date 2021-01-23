@@ -1,5 +1,8 @@
 package it.tdlight.tdlibsession.td.middle.direct;
 
+import io.vertx.core.DeploymentOptions;
+import io.vertx.core.json.JsonObject;
+import io.vertx.reactivex.core.Vertx;
 import it.tdlight.jni.TdApi;
 import it.tdlight.jni.TdApi.Function;
 import it.tdlight.jni.TdApi.Object;
@@ -8,6 +11,8 @@ import it.tdlight.tdlibsession.td.middle.AsyncTdMiddle;
 import it.tdlight.tdlibsession.td.middle.TdClusterManager;
 import it.tdlight.tdlibsession.td.middle.client.AsyncTdMiddleEventBusClient;
 import it.tdlight.tdlibsession.td.middle.server.AsyncTdMiddleEventBusServer;
+import it.tdlight.utils.MonoUtils;
+import java.nio.file.Path;
 import org.warp.commonutils.error.InitializationException;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
@@ -16,26 +21,38 @@ import reactor.core.publisher.Sinks.One;
 
 public class AsyncTdMiddleLocal implements AsyncTdMiddle {
 
-	private final AsyncTdMiddleEventBusServer srv;
 	private final TdClusterManager masterClusterManager;
-	private final One<AsyncTdMiddle> cli = Sinks.one();
 	private final String botAlias;
-	private final String botAddress;
+	private final int botId;
+	private final DeploymentOptions deploymentOptions;
+	private final Vertx vertx;
 
-	public AsyncTdMiddleLocal(TdClusterManager masterClusterManager, String botAlias, String botAddress) {
-		this.srv = new AsyncTdMiddleEventBusServer(masterClusterManager);
+	private final AsyncTdMiddleEventBusServer srv;
+	private final One<AsyncTdMiddle> cli = Sinks.one();
+
+
+	public AsyncTdMiddleLocal(TdClusterManager masterClusterManager, String botAlias, int botId) {
 		this.masterClusterManager = masterClusterManager;
 		this.botAlias = botAlias;
-		this.botAddress = botAddress;
+		this.botId = botId;
+		this.vertx = masterClusterManager.getVertx();
+		this.deploymentOptions = masterClusterManager
+				.newDeploymentOpts()
+				.setConfig(new JsonObject()
+						.put("botId", botId)
+						.put("botAlias", botAlias)
+						.put("local", true));
+		this.srv = new AsyncTdMiddleEventBusServer();
 	}
 
 	public Mono<AsyncTdMiddleLocal> start() {
-		return srv
-				.start(botAddress, botAlias, true)
+		return vertx
+				.rxDeployVerticle(srv, deploymentOptions).as(MonoUtils::toMono)
+				.single()
+				.then(Mono.fromSupplier(() -> new AsyncTdMiddleEventBusClient(masterClusterManager)))
+				.zipWith(AsyncTdMiddleEventBusClient.retrieveBinlog(vertx, Path.of("binlogs"), botId))
+				.flatMap(tuple -> tuple.getT1().start(botId, botAlias, true, tuple.getT2()).thenReturn(tuple.getT1()))
 				.onErrorMap(InitializationException::new)
-				.single()
-				.then(AsyncTdMiddleEventBusClient.getAndDeployInstance(masterClusterManager, botAlias, botAddress, true))
-				.single()
 				.doOnNext(this.cli::tryEmitValue)
 				.doOnError(this.cli::tryEmitError)
 				.thenReturn(this);

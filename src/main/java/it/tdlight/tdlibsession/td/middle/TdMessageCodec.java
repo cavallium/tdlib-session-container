@@ -3,11 +3,11 @@ package it.tdlight.tdlibsession.td.middle;
 import io.vertx.core.buffer.Buffer;
 import io.vertx.core.eventbus.MessageCodec;
 import it.tdlight.jni.TdApi;
-import it.unimi.dsi.fastutil.io.FastByteArrayInputStream;
+import it.tdlight.utils.VertxBufferInputStream;
 import it.unimi.dsi.fastutil.io.FastByteArrayOutputStream;
-import java.io.DataInputStream;
 import java.io.DataOutputStream;
 import java.io.IOException;
+import org.warp.commonutils.stream.SafeDataInputStream;
 
 public class TdMessageCodec<T extends TdApi.Object> implements MessageCodec<T, T> {
 
@@ -35,8 +35,8 @@ public class TdMessageCodec<T extends TdApi.Object> implements MessageCodec<T, T
 
 	@Override
 	public T decodeFromWire(int pos, Buffer buffer) {
-		try (var fis = new FastByteArrayInputStream(buffer.getBytes(pos, buffer.length()))) {
-			try (var dis = new DataInputStream(fis)) {
+		try (var fis = new VertxBufferInputStream(buffer, pos)) {
+			try (var dis = new SafeDataInputStream(fis)) {
 				//noinspection unchecked
 				return (T) TdApi.Deserializer.deserialize(dis);
 			}

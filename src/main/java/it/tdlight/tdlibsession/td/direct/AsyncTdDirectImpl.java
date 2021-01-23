@@ -10,13 +10,13 @@ import it.tdlight.jni.TdApi.Ok;
 import it.tdlight.jni.TdApi.UpdateAuthorizationState;
 import it.tdlight.tdlibsession.td.TdResult;
 import it.tdlight.tdlight.ClientManager;
+import it.tdlight.utils.MonoUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.core.publisher.Sinks;
 import reactor.core.publisher.Sinks.One;
-import reactor.core.scheduler.Scheduler;
 import reactor.core.scheduler.Schedulers;
 
 public class AsyncTdDirectImpl implements AsyncTdDirect {
@@ -24,7 +24,6 @@ public class AsyncTdDirectImpl implements AsyncTdDirect {
 	private static final Logger logger = LoggerFactory.getLogger(AsyncTdDirect.class);
 
 	private final One<TelegramClient> td = Sinks.one();
-	private final Scheduler tdScheduler = Schedulers.newSingle("TdMain", false);
 
 	private final String botAlias;
 
@@ -35,7 +34,7 @@ public class AsyncTdDirectImpl implements AsyncTdDirect {
 	@Override
 	public <T extends TdApi.Object> Mono<TdResult<T>> execute(Function request, boolean synchronous) {
 		if (synchronous) {
-			return td.asMono().single().flatMap(td -> Mono.fromCallable(() -> {
+			return td.asMono().single().flatMap(td -> MonoUtils.fromBlockingSingle(() -> {
 				if (td != null) {
 					return TdResult.<T>of(td.execute(request));
 				} else {
@@ -44,7 +43,7 @@ public class AsyncTdDirectImpl implements AsyncTdDirect {
 					}
 					throw new IllegalStateException("TDLib client is destroyed");
 				}
-			}).publishOn(Schedulers.boundedElastic()).single()).subscribeOn(tdScheduler);
+			}));
 		} else {
 			return td.asMono().single().flatMap(td -> Mono.<TdResult<T>>create(sink -> {
 				if (td != null) {
@@ -58,7 +57,7 @@ public class AsyncTdDirectImpl implements AsyncTdDirect {
 						sink.error(new IllegalStateException("TDLib client is destroyed"));
 					}
 				}
-			})).single().subscribeOn(tdScheduler);
+			})).single();
 		}
 	}
 
@@ -90,18 +89,17 @@ public class AsyncTdDirectImpl implements AsyncTdDirect {
 				closedFromTd.tryEmitValue(false);
 
 				closedFromTd.asMono()
-						.doOnNext(isClosedFromTd -> {
-							if (!isClosedFromTd) {
-								logger.warn("The stream has been disposed without closing tdlib. Sending TdApi.Close()...");
-								client.send(new Close(),
-										result -> logger.warn("Close result: {}", result),
-										ex -> logger.error("Error when disposing td client", ex)
-								);
-							}
+						.filter(isClosedFromTd -> !isClosedFromTd)
+						.doOnNext(x -> {
+							logger.warn("The stream has been disposed without closing tdlib. Sending TdApi.Close()...");
+							client.send(new Close(),
+									result -> logger.warn("Close result: {}", result),
+									ex -> logger.error("Error when disposing td client", ex)
+							);
 						})
-						.subscribeOn(tdScheduler)
+						.subscribeOn(Schedulers.single())
 						.subscribe();
 			});
-		}).subscribeOn(tdScheduler);
+		});
 	}
 }

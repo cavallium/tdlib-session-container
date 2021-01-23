@@ -2,10 +2,10 @@ package it.tdlight.utils;
 
 import io.vertx.core.buffer.Buffer;
 import it.unimi.dsi.fastutil.bytes.ByteArrays;
-import it.unimi.dsi.fastutil.io.MeasurableOutputStream;
-import it.unimi.dsi.fastutil.io.RepositionableStream;
+import org.warp.commonutils.stream.SafeMeasurableOutputStream;
+import org.warp.commonutils.stream.SafeRepositionableStream;
 
-public class VertxBufferOutputStream  extends MeasurableOutputStream implements RepositionableStream {
+public class VertxBufferOutputStream extends SafeMeasurableOutputStream implements SafeRepositionableStream {
 
 	/** The buffer backing the output stream. */
 	public Buffer buffer;

@@ -43,6 +43,7 @@ public class TdClusterManager {
 	private final VertxOptions vertxOptions;
 	private final Vertx vertx;
 
+	@SuppressWarnings({"unchecked", "rawtypes"})
 	public TdClusterManager(ClusterManager mgr, VertxOptions vertxOptions, Vertx vertx) {
 		this.mgr = mgr;
 		this.vertxOptions = vertxOptions;
@@ -54,7 +55,9 @@ public class TdClusterManager {
 					.getDelegate()
 					.registerDefaultCodec(TdResultList.class, new TdResultListMessageCodec())
 					.registerDefaultCodec(ExecuteObject.class, new TdExecuteObjectMessageCodec())
-					.registerDefaultCodec(TdResultMessage.class, new TdResultMessageCodec());
+					.registerDefaultCodec(TdResultMessage.class, new TdResultMessageCodec())
+					.registerDefaultCodec(StartSessionMessage.class, new StartSessionMessageCodec())
+					.registerDefaultCodec(EndSessionMessage.class, new EndSessionMessageCodec());
 			for (Class<?> value : ConstructorDetector.getTDConstructorsUnsafe().values()) {
 				vertx.eventBus().getDelegate().registerDefaultCodec(value, new TdMessageCodec(value));
 			}

@@ -1,28 +1,49 @@
 package it.tdlight.utils;
 
 import io.reactivex.Completable;
+import io.reactivex.Flowable;
 import io.reactivex.Maybe;
+import io.reactivex.Observable;
 import io.reactivex.Single;
 import io.vertx.core.AsyncResult;
 import io.vertx.core.Future;
 import io.vertx.core.Handler;
 import io.vertx.core.Promise;
+import io.vertx.reactivex.core.streams.Pipe;
+import io.vertx.reactivex.core.streams.ReadStream;
+import io.vertx.reactivex.core.streams.WriteStream;
 import it.tdlight.jni.TdApi;
 import it.tdlight.jni.TdApi.Object;
 import it.tdlight.tdlibsession.td.TdError;
 import it.tdlight.tdlibsession.td.TdResult;
+import java.time.Duration;
 import java.util.Objects;
+import java.util.Queue;
+import java.util.concurrent.Callable;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
+import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 import org.reactivestreams.Subscription;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.warp.commonutils.concurrency.future.CompletableFutureUtils;
 import reactor.core.CoreSubscriber;
+import reactor.core.Disposable;
+import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.core.publisher.MonoSink;
+import reactor.core.publisher.Sinks;
+import reactor.core.publisher.Sinks.EmissionException;
+import reactor.core.publisher.Sinks.EmitResult;
+import reactor.core.publisher.Sinks.Empty;
+import reactor.core.publisher.Sinks.Many;
+import reactor.core.publisher.Sinks.One;
 import reactor.core.publisher.SynchronousSink;
+import reactor.core.scheduler.Schedulers;
+import reactor.util.concurrent.Queues;
 import reactor.util.context.Context;
 
 public class MonoUtils {
@@ -75,6 +96,14 @@ public class MonoUtils {
 				return resultFuture;
 			});
 		});
+	}
+
+	public static <T> Mono<T> fromBlockingMaybe(Callable<T> callable) {
+		return Mono.fromCallable(callable).subscribeOn(Schedulers.boundedElastic());
+	}
+
+	public static <T> Mono<T> fromBlockingSingle(Callable<T> callable) {
+		return fromBlockingMaybe(callable).single();
 	}
 
 	public static <T> CoreSubscriber<? super T> toSubscriber(Promise<T> promise) {
@@ -217,5 +246,541 @@ public class MonoUtils {
 
 	public static <T> Completable toCompletable(Mono<T> s) {
 		return Completable.fromPublisher(s);
+	}
+
+	public static Mono<Void> fromEmitResult(EmitResult emitResult) {
+		return Mono.fromCallable(() -> {
+			emitResult.orThrow();
+			return null;
+		});
+	}
+
+	public static Future<Void> fromEmitResultFuture(EmitResult emitResult) {
+		if (emitResult.isSuccess()) {
+			return Future.succeededFuture();
+		} else {
+			return Future.failedFuture(new EmissionException(emitResult));
+		}
+	}
+
+	public static <T> Mono<Void> emitValue(One<T> sink, T value) {
+		return fromEmitResult(sink.tryEmitValue(value));
+	}
+
+	public static <T> Mono<Void> emitNext(Many<T> sink, T value) {
+		return fromEmitResult(sink.tryEmitNext(value));
+	}
+
+	public static <T> Mono<Void> emitComplete(Many<T> sink) {
+		return fromEmitResult(sink.tryEmitComplete());
+	}
+
+	public static <T> Mono<Void> emitError(Empty<T> sink, Throwable value) {
+		return fromEmitResult(sink.tryEmitError(value));
+	}
+
+	public static <T> Future<Void> emitEmpty(Empty<T> sink) {
+		return fromEmitResultFuture(sink.tryEmitEmpty());
+	}
+
+	public static <T> Future<Void> emitValueFuture(One<T> sink, T value) {
+		return fromEmitResultFuture(sink.tryEmitValue(value));
+	}
+
+	public static <T> Future<Void> emitNextFuture(Many<T> sink, T value) {
+		return fromEmitResultFuture(sink.tryEmitNext(value));
+	}
+
+	public static <T> Future<Void> emitCompleteFuture(Many<T> sink) {
+		return fromEmitResultFuture(sink.tryEmitComplete());
+	}
+
+	public static <T> Future<Void> emitErrorFuture(Empty<T> sink, Throwable value) {
+		return fromEmitResultFuture(sink.tryEmitError(value));
+	}
+
+	public static <T> Future<Void> emitEmptyFuture(Empty<T> sink) {
+		return fromEmitResultFuture(sink.tryEmitEmpty());
+	}
+
+	public static <T> SinkRWStream<T> unicastBackpressureSinkStreak() {
+		Many<T> sink = Sinks.many().unicast().onBackpressureBuffer();
+		return asStream(sink, null, null, 1);
+	}
+
+	/**
+	 * Create a sink that can be written from a writeStream
+	 */
+	public static <T> SinkRWStream<T> unicastBackpressureStream(int maxBackpressureQueueSize) {
+		Queue<T> boundedQueue = Queues.<T>get(maxBackpressureQueueSize).get();
+		var queueSize = Flux
+				.interval(Duration.ZERO, Duration.ofMillis(500))
+				.map(n -> boundedQueue.size());
+		Empty<Void> termination = Sinks.empty();
+		Many<T> sink = Sinks.many().unicast().onBackpressureBuffer(boundedQueue, termination::tryEmitEmpty);
+		return asStream(sink, queueSize, termination, maxBackpressureQueueSize);
+	}
+
+	public static <T> SinkRWStream<T> unicastBackpressureErrorStream() {
+		Many<T> sink = Sinks.many().unicast().onBackpressureError();
+		return asStream(sink, null, null, 1);
+	}
+
+	public static <T> SinkRWStream<T> asStream(Many<T> sink,
+			@Nullable Flux<Integer> backpressureSize,
+			@Nullable Empty<Void> termination,
+			int maxBackpressureQueueSize) {
+		return new SinkRWStream<>(sink, backpressureSize, termination, maxBackpressureQueueSize);
+	}
+
+	private static Future<Void> toVertxFuture(Mono<Void> toTransform) {
+		var promise = Promise.<Void>promise();
+		toTransform.subscribeOn(Schedulers.single()).subscribe(next -> {}, promise::fail, promise::complete);
+		return promise.future();
+	}
+
+	@SuppressWarnings({"unchecked", "rawtypes"})
+	public static <T> Mono<T> castVoid(Mono<Void> mono) {
+		return (Mono) mono;
+	}
+
+	public static class SinkRWStream<T> implements io.vertx.core.streams.WriteStream<T>, io.vertx.core.streams.ReadStream<T> {
+
+		private final Many<T> sink;
+		private final @Nullable Disposable drainSubscription;
+		private Handler<Throwable> exceptionHandler = e -> {};
+		private Handler<Void> drainHandler = h -> {};
+		private final int maxBackpressureQueueSize;
+		private volatile int writeQueueMaxSize;
+		private volatile boolean writeQueueFull = false;
+
+		public SinkRWStream(Many<T> sink,
+				@Nullable Flux<Integer> backpressureSize,
+				@Nullable Empty<Void> termination,
+				int maxBackpressureQueueSize) {
+			this.maxBackpressureQueueSize = maxBackpressureQueueSize;
+			this.writeQueueMaxSize = this.maxBackpressureQueueSize;
+			this.sink = sink;
+
+			if (backpressureSize != null) {
+				AtomicBoolean drained = new AtomicBoolean(true);
+				this.drainSubscription = backpressureSize
+						.subscribeOn(Schedulers.single())
+						.subscribe(size -> {
+							writeQueueFull = size >= this.writeQueueMaxSize;
+
+							boolean newDrained = size <= this.writeQueueMaxSize / 2;
+							boolean oldDrained = drained.getAndSet(newDrained);
+							if (newDrained && !oldDrained) {
+								drainHandler.handle(null);
+							}
+						}, ex -> {
+							exceptionHandler.handle(ex);
+						}, () -> {
+							if (!drained.get()) {
+								drainHandler.handle(null);
+							}
+						});
+				if (termination != null) {
+					termination.asMono().subscribeOn(Schedulers.single()).doOnTerminate(drainSubscription::dispose).subscribe();
+				}
+			} else {
+				this.drainSubscription = null;
+			}
+		}
+
+		public Flux<T> readAsFlux() {
+			return sink.asFlux();
+		}
+
+		public ReactiveReactorReadStream<T> readAsStream() {
+			return new ReactiveReactorReadStream<>(this);
+		}
+
+		public Many<T> writeAsSink() {
+			return sink;
+		}
+
+		public ReactiveSinkWriteStream<T> writeAsStream() {
+			return new ReactiveSinkWriteStream<>(this);
+		}
+
+		@Override
+		public SinkRWStream<T> exceptionHandler(Handler<Throwable> handler) {
+			exceptionHandler = handler;
+			return this;
+		}
+
+		//
+		// Read stream section
+		//
+
+		private Handler<Void> readEndHandler = v -> {};
+
+		private Subscription readCoreSubscription;
+
+		private final AtomicBoolean fetchMode = new AtomicBoolean(false);
+
+		@Override
+		public io.vertx.core.streams.ReadStream<T> handler(@io.vertx.codegen.annotations.Nullable Handler<T> handler) {
+			sink.asFlux().subscribeWith(new CoreSubscriber<T>() {
+
+				@Override
+				public void onSubscribe(@NotNull Subscription s) {
+					readCoreSubscription = s;
+					if (!fetchMode.get()) {
+						readCoreSubscription.request(1);
+					}
+				}
+
+				@Override
+				public void onNext(T t) {
+					handler.handle(t);
+					if (!fetchMode.get()) {
+						readCoreSubscription.request(1);
+					}
+				}
+
+				@Override
+				public void onError(Throwable t) {
+					exceptionHandler.handle(t);
+				}
+
+				@Override
+				public void onComplete() {
+					readEndHandler.handle(null);
+				}
+			});
+			return this;
+		}
+
+		@Override
+		public io.vertx.core.streams.ReadStream<T> pause() {
+			fetchMode.set(true);
+			return this;
+		}
+
+		@Override
+		public io.vertx.core.streams.ReadStream<T> resume() {
+			if (fetchMode.compareAndSet(true, false)) {
+				readCoreSubscription.request(1);
+			}
+			return this;
+		}
+
+		@Override
+		public io.vertx.core.streams.ReadStream<T> fetch(long amount) {
+			if (fetchMode.get()) {
+				readCoreSubscription.request(amount);
+			}
+			return this;
+		}
+
+		@Override
+		public io.vertx.core.streams.ReadStream<T> endHandler(@io.vertx.codegen.annotations.Nullable Handler<Void> endHandler) {
+			this.readEndHandler = endHandler;
+			return this;
+		}
+
+		//
+		// Write stream section
+		//
+
+		@Override
+		public Future<Void> write(T data) {
+			return MonoUtils.emitNextFuture(sink, data);
+		}
+
+		@Override
+		public void write(T data, Handler<AsyncResult<Void>> handler) {
+			write(data).onComplete(handler);
+		}
+
+		@Override
+		public void end(Handler<AsyncResult<Void>> handler) {
+			MonoUtils.emitCompleteFuture(sink).onComplete(h -> {
+				if (drainSubscription != null) {
+					drainSubscription.dispose();
+				}
+			}).onComplete(handler);
+		}
+
+		@Override
+		public io.vertx.core.streams.WriteStream<T> setWriteQueueMaxSize(int maxSize) {
+			if (maxSize <= maxBackpressureQueueSize) {
+				this.writeQueueMaxSize = maxSize;
+			} else {
+				logger.error("Failed to set writeQueueMaxSize to " + maxSize + ", because it's bigger than the max backpressure queue size " + maxBackpressureQueueSize);
+			}
+			return this;
+		}
+
+		@Override
+		public boolean writeQueueFull() {
+			return writeQueueFull;
+		}
+
+		@Override
+		public io.vertx.core.streams.WriteStream<T> drainHandler(@Nullable Handler<Void> handler) {
+			this.drainHandler = handler;
+			return this;
+		}
+	}
+
+	public static class FluxReadStream<T> implements io.vertx.core.streams.ReadStream<T> {
+
+		private final Flux<T> flux;
+		private Handler<Throwable> exceptionHandler = e -> {};
+
+		public FluxReadStream(Flux<T> flux) {
+			this.flux = flux;
+		}
+
+		public Flux<T> readAsFlux() {
+			return flux;
+		}
+
+		public ReactiveReactorReadStream<T> readAsStream() {
+			return new ReactiveReactorReadStream<>(this);
+		}
+
+		@Override
+		public FluxReadStream<T> exceptionHandler(Handler<Throwable> handler) {
+			exceptionHandler = handler;
+			return this;
+		}
+
+		//
+		// Read stream section
+		//
+
+		private Handler<Void> readEndHandler = v -> {};
+
+		private Subscription readCoreSubscription;
+
+		private final AtomicBoolean fetchMode = new AtomicBoolean(false);
+
+		@Override
+		public io.vertx.core.streams.ReadStream<T> handler(@io.vertx.codegen.annotations.Nullable Handler<T> handler) {
+			flux.subscribeWith(new CoreSubscriber<T>() {
+
+				@Override
+				public void onSubscribe(@NotNull Subscription s) {
+					readCoreSubscription = s;
+					if (!fetchMode.get()) {
+						readCoreSubscription.request(1);
+					}
+				}
+
+				@Override
+				public void onNext(T t) {
+					handler.handle(t);
+					if (!fetchMode.get()) {
+						readCoreSubscription.request(1);
+					}
+				}
+
+				@Override
+				public void onError(Throwable t) {
+					exceptionHandler.handle(t);
+				}
+
+				@Override
+				public void onComplete() {
+					readEndHandler.handle(null);
+				}
+			});
+			return this;
+		}
+
+		@Override
+		public io.vertx.core.streams.ReadStream<T> pause() {
+			fetchMode.set(true);
+			return this;
+		}
+
+		@Override
+		public io.vertx.core.streams.ReadStream<T> resume() {
+			if (fetchMode.compareAndSet(true, false)) {
+				readCoreSubscription.request(1);
+			}
+			return this;
+		}
+
+		@Override
+		public io.vertx.core.streams.ReadStream<T> fetch(long amount) {
+			if (fetchMode.get()) {
+				readCoreSubscription.request(amount);
+			}
+			return this;
+		}
+
+		@Override
+		public io.vertx.core.streams.ReadStream<T> endHandler(@io.vertx.codegen.annotations.Nullable Handler<Void> endHandler) {
+			this.readEndHandler = endHandler;
+			return this;
+		}
+	}
+
+	public static class ReactiveSinkWriteStream<T> implements WriteStream<T> {
+
+		private final WriteStream<T> ws;
+
+		public ReactiveSinkWriteStream(SinkRWStream<T> ws) {
+			this.ws = WriteStream.newInstance(ws);
+		}
+
+		public io.vertx.core.streams.WriteStream<T> getDelegate() {
+			//noinspection unchecked
+			return ws.getDelegate();
+		}
+
+		@Override
+		public WriteStream<T> exceptionHandler(Handler<Throwable> handler) {
+			return ws.exceptionHandler(handler);
+		}
+
+		@Override
+		public void write(T data, Handler<AsyncResult<Void>> handler) {
+			ws.write(data, handler);
+		}
+
+		@Override
+		public void write(T data) {
+			ws.write(data);
+		}
+
+		@Override
+		public Completable rxWrite(T data) {
+			return ws.rxWrite(data);
+		}
+
+		@Override
+		public void end(Handler<AsyncResult<Void>> handler) {
+			ws.end(handler);
+		}
+
+		@Override
+		public void end() {
+			ws.end();
+		}
+
+		@Override
+		public Completable rxEnd() {
+			return ws.rxEnd();
+		}
+
+		@Override
+		public void end(T data, Handler<AsyncResult<Void>> handler) {
+			ws.end(data, handler);
+		}
+
+		@Override
+		public void end(T data) {
+			ws.end(data);
+		}
+
+		@Override
+		public Completable rxEnd(T data) {
+			return ws.rxEnd(data);
+		}
+
+		@Override
+		public WriteStream<T> setWriteQueueMaxSize(int maxSize) {
+			return ws.setWriteQueueMaxSize(maxSize);
+		}
+
+		@Override
+		public boolean writeQueueFull() {
+			return ws.writeQueueFull();
+		}
+
+		@Override
+		public WriteStream<T> drainHandler(Handler<Void> handler) {
+			return ws.drainHandler(handler);
+		}
+	}
+
+	public static class ReactiveReactorReadStream<T> implements ReadStream<T> {
+
+		private final ReadStream<T> rs;
+
+		public ReactiveReactorReadStream(SinkRWStream<T> rws) {
+			this.rs = ReadStream.newInstance(rws);
+		}
+
+		public ReactiveReactorReadStream(FluxReadStream<T> rs) {
+			this.rs = ReadStream.newInstance(rs);
+		}
+
+		public ReactiveReactorReadStream(Flux<T> s) {
+			this.rs = ReadStream.newInstance(new FluxReadStream<>(s));
+		}
+
+		@Override
+		public io.vertx.core.streams.ReadStream<T> getDelegate() {
+			//noinspection unchecked
+			return rs.getDelegate();
+		}
+
+		@Override
+		public ReadStream<T> exceptionHandler(Handler<Throwable> handler) {
+			return rs.exceptionHandler(handler);
+		}
+
+		@Override
+		public ReadStream<T> handler(Handler<T> handler) {
+			return rs.handler(handler);
+		}
+
+		@Override
+		public ReadStream<T> pause() {
+			return rs.pause();
+		}
+
+		@Override
+		public ReadStream<T> resume() {
+			return rs.resume();
+		}
+
+		@Override
+		public ReadStream<T> fetch(long amount) {
+			return rs.fetch(amount);
+		}
+
+		@Override
+		public ReadStream<T> endHandler(Handler<Void> endHandler) {
+			return rs.endHandler(endHandler);
+		}
+
+		@Override
+		public Pipe<T> pipe() {
+			return rs.pipe();
+		}
+
+		@Override
+		public void pipeTo(WriteStream<T> dst, Handler<AsyncResult<Void>> handler) {
+			rs.pipeTo(dst, handler);
+		}
+
+		@Override
+		public void pipeTo(WriteStream<T> dst) {
+			rs.pipeTo(dst);
+		}
+
+		@Override
+		public Completable rxPipeTo(WriteStream<T> dst) {
+			return rs.rxPipeTo(dst);
+		}
+
+		@Override
+		public Observable<T> toObservable() {
+			return rs.toObservable();
+		}
+
+		@Override
+		public Flowable<T> toFlowable() {
+			return rs.toFlowable();
+		}
 	}
 }

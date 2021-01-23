@@ -2,12 +2,11 @@ package it.tdlight.tdlibsession;
 
 import io.vertx.core.buffer.Buffer;
 import io.vertx.core.eventbus.MessageCodec;
-import it.unimi.dsi.fastutil.io.FastByteArrayInputStream;
-import it.unimi.dsi.fastutil.io.FastByteArrayOutputStream;
-import java.io.DataInputStream;
-import java.io.DataOutputStream;
-import java.io.IOException;
+import it.tdlight.utils.VertxBufferInputStream;
+import it.tdlight.utils.VertxBufferOutputStream;
 import java.nio.charset.StandardCharsets;
+import org.warp.commonutils.stream.SafeDataInputStream;
+import org.warp.commonutils.stream.SafeDataOutputStream;
 
 public class SignalMessageCodec<T> implements MessageCodec<SignalMessage<T>, SignalMessage<T>> {
 
@@ -22,8 +21,8 @@ public class SignalMessageCodec<T> implements MessageCodec<SignalMessage<T>, Sig
 
 	@Override
 	public void encodeToWire(Buffer buffer, SignalMessage<T> t) {
-		try (var bos = new FastByteArrayOutputStream()) {
-			try (var dos = new DataOutputStream(bos)) {
+		try (var bos = new VertxBufferOutputStream(buffer)) {
+			try (var dos = new SafeDataOutputStream(bos)) {
 				switch (t.getSignalType()) {
 					case ITEM:
 						dos.writeByte(0x01);
@@ -35,11 +34,9 @@ public class SignalMessageCodec<T> implements MessageCodec<SignalMessage<T>, Sig
 						dos.writeByte(0x03);
 						break;
 					default:
-						throw new UnsupportedOperationException();
+						throw new IllegalStateException("Unexpected value: " + t.getSignalType());
 				}
 			}
-			bos.trim();
-			buffer.appendBytes(bos.array);
 			switch (t.getSignalType()) {
 				case ITEM:
 					typeCodec.encodeToWire(buffer, t.getItem());
@@ -50,15 +47,13 @@ public class SignalMessageCodec<T> implements MessageCodec<SignalMessage<T>, Sig
 					buffer.appendBytes(stringBytes);
 					break;
 			}
-		} catch (IOException ex) {
-			ex.printStackTrace();
 		}
 	}
 
 	@Override
 	public SignalMessage<T> decodeFromWire(int pos, Buffer buffer) {
-		try (var fis = new FastByteArrayInputStream(buffer.getBytes(pos, buffer.length()))) {
-			try (var dis = new DataInputStream(fis)) {
+		try (var fis = new VertxBufferInputStream(buffer, pos)) {
+			try (var dis = new SafeDataInputStream(fis)) {
 				switch (dis.readByte()) {
 					case 0x01:
 						return SignalMessage.onNext(typeCodec.decodeFromWire(pos + 1, buffer));
@@ -68,13 +63,10 @@ public class SignalMessageCodec<T> implements MessageCodec<SignalMessage<T>, Sig
 					case 0x03:
 						return SignalMessage.onComplete();
 					default:
-						throw new UnsupportedOperationException();
+						throw new IllegalStateException("Unexpected value: " + dis.readByte());
 				}
 			}
-		} catch (IOException ex) {
-			ex.printStackTrace();
 		}
-		return null;
 	}
 
 	@Override

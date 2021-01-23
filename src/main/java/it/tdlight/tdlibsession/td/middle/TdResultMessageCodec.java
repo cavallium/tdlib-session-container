@@ -4,11 +4,11 @@ import io.vertx.core.buffer.Buffer;
 import io.vertx.core.eventbus.MessageCodec;
 import it.tdlight.jni.TdApi;
 import it.tdlight.tdlibsession.td.TdResultMessage;
-import it.unimi.dsi.fastutil.io.FastByteArrayInputStream;
-import it.unimi.dsi.fastutil.io.FastByteArrayOutputStream;
-import java.io.DataInputStream;
-import java.io.DataOutputStream;
+import it.tdlight.utils.VertxBufferInputStream;
+import it.tdlight.utils.VertxBufferOutputStream;
 import java.io.IOException;
+import org.warp.commonutils.stream.SafeDataInputStream;
+import org.warp.commonutils.stream.SafeDataOutputStream;
 
 @SuppressWarnings("rawtypes")
 public class TdResultMessageCodec implements MessageCodec<TdResultMessage, TdResultMessage> {
@@ -22,18 +22,16 @@ public class TdResultMessageCodec implements MessageCodec<TdResultMessage, TdRes
 
 	@Override
 	public void encodeToWire(Buffer buffer, TdResultMessage t) {
-		try (var bos = new FastByteArrayOutputStream()) {
-			try (var dos = new DataOutputStream(bos)) {
+		try (var bos = new VertxBufferOutputStream(buffer)) {
+			try (var dos = new SafeDataOutputStream(bos)) {
 				if (t.value != null) {
 					dos.writeBoolean(true);
-					t.value.serialize(dos);
+					t.value.serialize(dos.asDataOutputStream());
 				} else {
 					dos.writeBoolean(false);
-					t.cause.serialize(dos);
+					t.cause.serialize(dos.asDataOutputStream());
 				}
 			}
-			bos.trim();
-			buffer.appendBytes(bos.array);
 		} catch (IOException ex) {
 			ex.printStackTrace();
 		}
@@ -41,8 +39,8 @@ public class TdResultMessageCodec implements MessageCodec<TdResultMessage, TdRes
 
 	@Override
 	public TdResultMessage decodeFromWire(int pos, Buffer buffer) {
-		try (var fis = new FastByteArrayInputStream(buffer.getBytes(pos, buffer.length()))) {
-			try (var dis = new DataInputStream(fis)) {
+		try (var fis = new VertxBufferInputStream(buffer, pos)) {
+			try (var dis = new SafeDataInputStream(fis)) {
 				if (dis.readBoolean()) {
 					return new TdResultMessage(TdApi.Deserializer.deserialize(dis), null);
 				} else {

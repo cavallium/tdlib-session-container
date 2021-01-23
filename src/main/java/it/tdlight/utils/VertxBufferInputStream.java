@@ -1,10 +1,10 @@
 package it.tdlight.utils;
 
 import io.vertx.core.buffer.Buffer;
-import it.unimi.dsi.fastutil.io.MeasurableInputStream;
-import it.unimi.dsi.fastutil.io.RepositionableStream;
+import org.warp.commonutils.stream.SafeMeasurableInputStream;
+import org.warp.commonutils.stream.SafeRepositionableStream;
 
-public class VertxBufferInputStream extends MeasurableInputStream implements RepositionableStream {
+public class VertxBufferInputStream extends SafeMeasurableInputStream implements SafeRepositionableStream {
 
 	private final Buffer buffer;
 
@@ -32,12 +32,31 @@ public class VertxBufferInputStream extends MeasurableInputStream implements Rep
 		this.length = length;
 	}
 
+	/** Creates a new buffer input stream using a given buffer fragment.
+	 *
+	 * @param buffer the backing buffer.
+	 * @param offset the first valid entry of the buffer.
+	 */
+	public VertxBufferInputStream(final Buffer buffer, final int offset) {
+		this.buffer = buffer;
+		this.offset = offset;
+		this.length = buffer.length();
+	}
+
 	/** Creates a new buffer input stream using a given buffer.
 	 *
 	 * @param buffer the backing buffer.
 	 */
 	public VertxBufferInputStream(final Buffer buffer) {
 		this(buffer, 0, buffer.length());
+	}
+
+	/** Creates a new buffer input stream using a given buffer.
+	 *
+	 * @param in the backing buffer.
+	 */
+	public VertxBufferInputStream(final VertxBufferInputStream in) {
+		this(in.buffer, in.offset + in.position, in.buffer.length());
 	}
 
 	@Override
