@@ -5,8 +5,8 @@ import io.vertx.core.eventbus.MessageCodec;
 import it.tdlight.jni.TdApi;
 import it.tdlight.jni.TdApi.Error;
 import it.tdlight.tdlibsession.td.TdResult;
-import it.unimi.dsi.fastutil.io.FastByteArrayInputStream;
-import it.unimi.dsi.fastutil.io.FastByteArrayOutputStream;
+import it.tdlight.utils.VertxBufferInputStream;
+import it.tdlight.utils.VertxBufferOutputStream;
 import java.io.DataInputStream;
 import java.io.DataOutputStream;
 import java.io.IOException;
@@ -21,7 +21,7 @@ public class TdResultListMessageCodec implements MessageCodec<TdResultList, TdRe
 
 	@Override
 	public void encodeToWire(Buffer buffer, TdResultList ts) {
-		try (var bos = new FastByteArrayOutputStream()) {
+		try (var bos = new VertxBufferOutputStream(buffer)) {
 			try (var dos = new DataOutputStream(bos)) {
 				var t = ts.getValues();
 				dos.writeInt(t.size());
@@ -35,8 +35,6 @@ public class TdResultListMessageCodec implements MessageCodec<TdResultList, TdRe
 					}
 				}
 			}
-			bos.trim();
-			buffer.appendBytes(bos.array);
 		} catch (IOException ex) {
 			ex.printStackTrace();
 		}
@@ -44,10 +42,10 @@ public class TdResultListMessageCodec implements MessageCodec<TdResultList, TdRe
 
 	@Override
 	public TdResultList decodeFromWire(int pos, Buffer buffer) {
-		try (var fis = new FastByteArrayInputStream(buffer.getBytes(pos, buffer.length()))) {
+		try (var fis = new VertxBufferInputStream(buffer, pos, buffer.length())) {
 			try (var dis = new DataInputStream(fis)) {
 				var size = dis.readInt();
-				ArrayList<TdResult<TdApi.Object>> list = new ArrayList<>();
+				ArrayList<TdResult<TdApi.Object>> list = new ArrayList<>(size);
 				for (int i = 0; i < size; i++) {
 					if (dis.readBoolean()) {
 						list.add(TdResult.succeeded((TdApi.Object) TdApi.Deserializer.deserialize(dis)));

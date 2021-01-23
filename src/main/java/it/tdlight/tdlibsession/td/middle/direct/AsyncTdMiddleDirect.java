@@ -75,7 +75,7 @@ public class AsyncTdMiddleDirect extends AbstractVerticle implements AsyncTdMidd
 	@Override
 	public Flux<TdApi.Object> receive() {
 		return td
-				.receive(new AsyncTdDirectOptions(WAIT_DURATION, 1000))
+				.receive(new AsyncTdDirectOptions(WAIT_DURATION, 100))
 				.takeUntilOther(closeRequest.asMono())
 				.doOnError(ex -> logger.info("TdMiddle verticle error", ex))
 				.doOnTerminate(() -> logger.debug("TdMiddle verticle stopped"))

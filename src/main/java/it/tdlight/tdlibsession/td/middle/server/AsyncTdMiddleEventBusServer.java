@@ -66,7 +66,7 @@ public class AsyncTdMiddleEventBusServer {
 	@SuppressWarnings({"unchecked", "rawtypes"})
 	public AsyncTdMiddleEventBusServer(TdClusterManager clusterManager) {
 		this.cluster = clusterManager;
-		this.tdOptions = new AsyncTdDirectOptions(WAIT_DURATION, 1000);
+		this.tdOptions = new AsyncTdDirectOptions(WAIT_DURATION, 100);
 	}
 
 	public Mono<AsyncTdMiddleEventBusServer> start(String botAddress, String botAlias, boolean local) {
