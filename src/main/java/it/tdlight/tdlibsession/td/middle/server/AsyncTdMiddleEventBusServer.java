@@ -9,14 +9,20 @@ import io.vertx.reactivex.core.eventbus.MessageProducer;
 import it.tdlight.jni.TdApi;
 import it.tdlight.jni.TdApi.AuthorizationStateClosed;
 import it.tdlight.jni.TdApi.Error;
+import it.tdlight.jni.TdApi.Function;
+import it.tdlight.jni.TdApi.SetTdlibParameters;
 import it.tdlight.jni.TdApi.Update;
 import it.tdlight.jni.TdApi.UpdateAuthorizationState;
+import it.tdlight.tdlibsession.remoteclient.TDLibRemoteClient;
 import it.tdlight.tdlibsession.td.TdResultMessage;
 import it.tdlight.tdlibsession.td.direct.AsyncTdDirectImpl;
 import it.tdlight.tdlibsession.td.direct.AsyncTdDirectOptions;
+import it.tdlight.tdlibsession.td.middle.EndSessionMessage;
 import it.tdlight.tdlibsession.td.middle.ExecuteObject;
 import it.tdlight.tdlibsession.td.middle.TdResultList;
 import it.tdlight.tdlibsession.td.middle.TdResultListMessageCodec;
+import it.tdlight.utils.BinlogAsyncFile;
+import it.tdlight.utils.BinlogUtils;
 import it.tdlight.utils.MonoUtils;
 import java.time.Duration;
 import java.util.Collections;
@@ -48,6 +54,7 @@ public class AsyncTdMiddleEventBusServer extends AbstractVerticle {
 	// Variables configured at startup
 	private final One<AsyncTdDirectImpl> td = Sinks.one();
 	private final One<MessageConsumer<ExecuteObject>> executeConsumer = Sinks.one();
+	private final One<MessageConsumer<byte[]>> readBinlogConsumer = Sinks.one();
 
 	public AsyncTdMiddleEventBusServer() {
 		this.tdOptions = new AsyncTdDirectOptions(WAIT_DURATION, 100);
@@ -87,15 +94,15 @@ public class AsyncTdMiddleEventBusServer extends AbstractVerticle {
 					if (this.td.tryEmitValue(td).isFailure()) {
 						throw new IllegalStateException("Failed to set td instance");
 					}
-					return onSuccessfulStartRequest(td, botAddress, botAlias, local);
+					return onSuccessfulStartRequest(td, botAddress, botAlias, botId, local);
 				})
 				.flatMap(Mono::hide));
 	}
 
-	private Mono<Void> onSuccessfulStartRequest(AsyncTdDirectImpl td, String botAddress, String botAlias, boolean local) {
+	private Mono<Void> onSuccessfulStartRequest(AsyncTdDirectImpl td, String botAddress, String botAlias, int botId, boolean local) {
 		return this
-				.listen(td, botAddress, botAlias, local)
-				.then(this.pipe(td, botAddress, botAlias, local))
+				.listen(td, botAddress, botAlias, botId, local)
+				.then(this.pipe(td, botAddress, botAlias, botId, local))
 				.doOnSuccess(s -> {
 					logger.info("Deploy and start of bot \"" + botAlias + "\": ✅ Succeeded");
 				})
@@ -104,7 +111,7 @@ public class AsyncTdMiddleEventBusServer extends AbstractVerticle {
 				});
 	}
 
-	private Mono<Void> listen(AsyncTdDirectImpl td, String botAddress, String botAlias, boolean local) {
+	private Mono<Void> listen(AsyncTdDirectImpl td, String botAddress, String botAlias, int botId, boolean local) {
 		return Mono.<Void>create(registrationSink -> {
 			MessageConsumer<ExecuteObject> executeConsumer = vertx.eventBus().consumer(botAddress + ".execute");
 			if (this.executeConsumer.tryEmitValue(executeConsumer).isFailure()) {
@@ -112,13 +119,17 @@ public class AsyncTdMiddleEventBusServer extends AbstractVerticle {
 				return;
 			}
 
-			Flux.<Message<ExecuteObject>>create(sink -> {
-				executeConsumer.handler(sink::next);
-				executeConsumer.completionHandler(MonoUtils.toHandler(registrationSink));
-			})
-					.flatMap(msg -> td
-							.execute(msg.body().getRequest(), msg.body().isExecuteDirectly())
-							.map(result -> Tuples.of(msg, result)))
+			Flux
+					.<Message<ExecuteObject>>create(sink -> {
+						executeConsumer.handler(sink::next);
+						executeConsumer.endHandler(h -> sink.complete());
+					})
+					.flatMap(msg -> {
+						var request = overrideRequest(msg.body().getRequest(), botId);
+						return td
+								.execute(request, msg.body().isExecuteDirectly())
+								.map(result -> Tuples.of(msg, result));
+					})
 					.handle((tuple, sink) -> {
 						var msg = tuple.getT1();
 						var response = tuple.getT2();
@@ -133,11 +144,58 @@ public class AsyncTdMiddleEventBusServer extends AbstractVerticle {
 						}
 					})
 					.then()
-					.doOnError(ex -> {
-						logger.error("Error when processing a request", ex);
+					.subscribeOn(Schedulers.single())
+					.subscribe(v -> {}, ex -> logger.error("Error when processing an execute request", ex));
+
+			MessageConsumer<byte[]> readBinlogConsumer = vertx.eventBus().consumer(botAddress + ".read-binlog");
+			if (this.readBinlogConsumer.tryEmitValue(readBinlogConsumer).isFailure()) {
+				registrationSink.error(new IllegalStateException("Failed to set readBinlogConsumer"));
+				return;
+			}
+
+			Flux
+					.<Message<byte[]>>create(sink -> {
+						readBinlogConsumer.handler(sink::next);
+						readBinlogConsumer.endHandler(h -> sink.complete());
 					})
-					.subscribe();
+					.flatMap(req -> BinlogUtils
+							.retrieveBinlog(vertx.fileSystem(), TDLibRemoteClient.getSessionBinlogDirectory(botId))
+							.flatMap(BinlogAsyncFile::readFullyBytes)
+							.single()
+							.map(binlog -> Tuples.of(req, binlog))
+					)
+					.doOnNext(tuple -> {
+						var opts = new DeliveryOptions().setLocalOnly(local).setSendTimeout(Duration.ofSeconds(10).toMillis());
+						tuple.getT1().reply(new EndSessionMessage(botId, tuple.getT2()), opts);
+					})
+					.then()
+					.subscribeOn(Schedulers.single())
+					.subscribe(v -> {}, ex -> logger.error("Error when processing a read-binlog request", ex));
+
+
+			//noinspection ResultOfMethodCallIgnored
+			executeConsumer
+					.rxCompletionHandler()
+					.andThen(readBinlogConsumer.rxCompletionHandler())
+					.subscribeOn(io.reactivex.schedulers.Schedulers.single())
+					.subscribe(registrationSink::success, registrationSink::error);
 		});
+	}
+
+	/**
+	 * Override some requests
+	 */
+	private Function overrideRequest(Function request, int botId) {
+		switch (request.getConstructor()) {
+			case SetTdlibParameters.CONSTRUCTOR:
+				// Fix session directory locations
+				var setTdlibParamsObj = (SetTdlibParameters) request;
+				setTdlibParamsObj.parameters.databaseDirectory = TDLibRemoteClient.getSessionDirectory(botId).toString();
+				setTdlibParamsObj.parameters.filesDirectory = TDLibRemoteClient.getMediaDirectory(botId).toString();
+				return request;
+			default:
+				return request;
+		}
 	}
 
 	@Override
@@ -155,7 +213,7 @@ public class AsyncTdMiddleEventBusServer extends AbstractVerticle {
 						.doOnTerminate(() -> logger.info("Undeploy of bot \"" + botAlias + "\": stopped"))));
 	}
 
-	private Mono<Void> pipe(AsyncTdDirectImpl td, String botAddress, String botAlias, boolean local) {
+	private Mono<Void> pipe(AsyncTdDirectImpl td, String botAddress, String botAlias, int botId, boolean local) {
 		Flux<TdResultList> updatesFlux = td
 				.receive(tdOptions)
 				.flatMap(item -> Mono.defer(() -> {

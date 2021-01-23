@@ -8,7 +8,7 @@ public final class EndSessionMessage {
 	private final int id;
 	private final byte[] binlog;
 
-	EndSessionMessage(int id, byte[] binlog) {
+	public EndSessionMessage(int id, byte[] binlog) {
 		this.id = id;
 		this.binlog = binlog;
 	}

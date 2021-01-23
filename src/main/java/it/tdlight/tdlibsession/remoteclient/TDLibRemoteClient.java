@@ -95,7 +95,7 @@ public class TDLibRemoteClient implements AutoCloseable {
 				.setPassword(securityInfo.getTrustStorePassword());
 
 		return MonoUtils
-				.fromBlockingSingle(() -> {
+				.fromBlockingMaybe(() -> {
 					// Set verbosity level here, before creating the bots
 					if (Files.notExists(Paths.get("logs"))) {
 						try {
@@ -123,6 +123,7 @@ public class TDLibRemoteClient implements AutoCloseable {
 						clusterManager.tryEmitEmpty();
 					}
 				})
+				.single()
 				.flatMap(clusterManager -> {
 					MessageConsumer<StartSessionMessage> startBotConsumer = clusterManager.getEventBus().consumer("bots.start-bot");
 					startBotConsumer.handler(msg -> {
@@ -137,10 +138,12 @@ public class TDLibRemoteClient implements AutoCloseable {
 						var verticle = new AsyncTdMiddleEventBusServer();
 
 						// Binlog path
-						var blPath = Paths.get(".sessions-cache").resolve("id" + req.id()).resolve("td.binlog");
+						var sessPath = getSessionDirectory(req.id());
+						var blPath = getSessionBinlogDirectory(req.id());
 
 						BinlogUtils
 								.chooseBinlog(clusterManager.getVertx().fileSystem(), blPath, req.binlog(), req.binlogDate())
+								.then(BinlogUtils.cleanSessionPath(clusterManager.getVertx().fileSystem(), blPath, sessPath))
 								.then(clusterManager.getVertx().rxDeployVerticle(verticle, deploymentOptions).as(MonoUtils::toMono))
 								.subscribeOn(Schedulers.single())
 								.subscribe(
@@ -152,9 +155,21 @@ public class TDLibRemoteClient implements AutoCloseable {
 										() -> msg.reply(new byte[0])
 								);
 					});
-					return Mono.empty();
+					return startBotConsumer.rxCompletionHandler().as(MonoUtils::toMono);
 				})
 				.then();
+	}
+
+	public static Path getSessionDirectory(int botId) {
+		return Paths.get(".sessions-cache").resolve("id" + botId);
+	}
+
+	public static Path getMediaDirectory(int botId) {
+		return Paths.get(".cache").resolve("media").resolve("id" + botId);
+	}
+
+	public static Path getSessionBinlogDirectory(int botId) {
+		return getSessionDirectory(botId).resolve("td.binlog");
 	}
 
 	@Override

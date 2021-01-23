@@ -3,6 +3,7 @@ package it.tdlight.tdlibsession.td.middle.client;
 import io.vertx.core.eventbus.DeliveryOptions;
 import io.vertx.reactivex.core.Vertx;
 import io.vertx.reactivex.core.eventbus.Message;
+import io.vertx.reactivex.core.eventbus.MessageConsumer;
 import it.tdlight.jni.TdApi;
 import it.tdlight.jni.TdApi.Function;
 import it.tdlight.tdlibsession.td.ResponseError;
@@ -10,6 +11,7 @@ import it.tdlight.tdlibsession.td.TdError;
 import it.tdlight.tdlibsession.td.TdResult;
 import it.tdlight.tdlibsession.td.TdResultMessage;
 import it.tdlight.tdlibsession.td.middle.AsyncTdMiddle;
+import it.tdlight.tdlibsession.td.middle.EndSessionMessage;
 import it.tdlight.tdlibsession.td.middle.ExecuteObject;
 import it.tdlight.tdlibsession.td.middle.StartSessionMessage;
 import it.tdlight.tdlibsession.td.middle.TdClusterManager;
@@ -19,6 +21,7 @@ import it.tdlight.utils.BinlogUtils;
 import it.tdlight.utils.MonoUtils;
 import it.tdlight.utils.MonoUtils.SinkRWStream;
 import java.nio.file.Path;
+import org.reactivestreams.Publisher;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import reactor.core.publisher.Flux;
@@ -65,11 +68,19 @@ public class AsyncTdMiddleEventBusClient implements AsyncTdMiddle {
 			Path binlogsArchiveDirectory) {
 		var instance = new AsyncTdMiddleEventBusClient(clusterManager);
 		return retrieveBinlog(clusterManager.getVertx(), binlogsArchiveDirectory, botId)
-				.single()
-				.flatMap(binlog -> instance
+				.flatMap(binlog -> binlog
+						.getLastModifiedTime()
+						.filter(modTime -> modTime == 0)
+						.doOnNext(v -> LoggerFactory
+								.getLogger(AsyncTdMiddleEventBusClient.class)
+								.error("Can't retrieve binlog of bot " + botId + " " + botAlias + ". Creating a new one..."))
+						.thenReturn(binlog)
+				)
+				.<AsyncTdMiddle>flatMap(binlog -> instance
 						.start(botId, botAlias, local, binlog)
 						.thenReturn(instance)
-				);
+				)
+				.single();
 	}
 
 	/**
@@ -108,7 +119,7 @@ public class AsyncTdMiddleEventBusClient implements AsyncTdMiddle {
 
 	@SuppressWarnings("CallingSubscribeInNonBlockingScope")
 	private Mono<Void> setupUpdatesListener() {
-		var updateConsumer = cluster.getEventBus().<TdResultList>consumer(botAddress + ".update");
+		MessageConsumer<TdResultList> updateConsumer = MessageConsumer.newInstance(cluster.getEventBus().<TdResultList>consumer(botAddress + ".updates").getDelegate());
 		updateConsumer.endHandler(h -> {
 			logger.error("<<<<<<<<<<<<<<<<EndHandler?>>>>>>>>>>>>>");
 		});
@@ -129,10 +140,31 @@ public class AsyncTdMiddleEventBusClient implements AsyncTdMiddle {
 		return updates
 				.readAsFlux()
 				.subscribeOn(Schedulers.single())
-				.flatMap(updates -> Flux.fromIterable(updates.body().getValues()))
+				.cast(io.vertx.core.eventbus.Message.class)
+				.flatMap(updates -> Flux.fromIterable(((TdResultList) updates.body()).getValues()))
 				.flatMap(update -> Mono.fromCallable(update::orElseThrow))
+				.flatMap(this::interceptUpdate)
 				.doOnError(crash::tryEmitError)
 				.doOnTerminate(updatesStreamEnd::tryEmitEmpty);
+	}
+
+	private Publisher<TdApi.Object> interceptUpdate(TdApi.Object update) {
+		switch (update.getConstructor()) {
+			case TdApi.UpdateAuthorizationState.CONSTRUCTOR:
+				var updateAuthorizationState = (TdApi.UpdateAuthorizationState) update;
+				switch (updateAuthorizationState.authorizationState.getConstructor()) {
+					case TdApi.AuthorizationStateClosed.CONSTRUCTOR:
+						return cluster
+								.getEventBus()
+								.<EndSessionMessage>rxRequest(this.botAddress + ".read-binlog", EMPTY).as(MonoUtils::toMono)
+								.doOnNext(l -> logger.info("Received binlog from server. Size: " + BinlogUtils.humanReadableByteCountBin(l.body().binlog().length)))
+								.flatMap(latestBinlog -> this.saveBinlog(latestBinlog.body().binlog()))
+								.doOnSuccess(s -> logger.info("Overwritten binlog from server"))
+								.thenReturn(update);
+				}
+				break;
+		}
+		return Mono.just(update);
 	}
 
 	@Override
@@ -152,8 +184,8 @@ public class AsyncTdMiddleEventBusClient implements AsyncTdMiddle {
 									}
 								}))
 		)
-				.switchIfEmpty(Mono.fromCallable(() -> {
+				.switchIfEmpty(Mono.defer(() -> Mono.fromCallable(() -> {
 					throw ResponseError.newResponseError(request, botAlias, new TdError(500, "Client is closed or response is empty"));
-				}));
+				})));
 	}
 }
