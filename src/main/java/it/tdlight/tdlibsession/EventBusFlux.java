@@ -98,7 +98,9 @@ public class EventBusFlux {
 											.flatMap(item -> Mono.<Message<T>>create(itemSink -> {
 												var responseHandler = MonoUtils.toHandler(itemSink);
 												eventBus.request(subscriptionAddress + ".signal", SignalMessage.<T>onNext(item), signalDeliveryOptions, responseHandler);
-											})).subscribe(response -> {}, error -> {
+											}))
+											.subscribeOn(Schedulers.single())
+											.subscribe(response -> {}, error -> {
 												if (error instanceof ReplyException) {
 													var errorMessageCode = ((ReplyException) error).failureCode();
 													// -1 == NO_HANDLERS
@@ -309,7 +311,9 @@ public class EventBusFlux {
 									}
 								}
 							})))
-							.subscribeOn(Schedulers.single())
+							.subscribeOn(Schedulers.boundedElastic())
+							.onBackpressureBuffer()
+							.publishOn(Schedulers.single())
 							.subscribe(v -> {}, emitter::error);
 
 					emitter.onDispose(() -> {
