@@ -59,7 +59,7 @@ public class AsyncTdMiddleEventBusServer extends AbstractVerticle {
 	private final One<Flux<Void>> pipeFlux = Sinks.one();
 
 	public AsyncTdMiddleEventBusServer() {
-		this.tdOptions = new AsyncTdDirectOptions(WAIT_DURATION, 100);
+		this.tdOptions = new AsyncTdDirectOptions(WAIT_DURATION, 15);
 	}
 
 	@Override
