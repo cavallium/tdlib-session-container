@@ -498,7 +498,18 @@ public class MonoUtils {
 
 		@Override
 		public void end(Handler<AsyncResult<Void>> handler) {
-			MonoUtils.emitCompleteFuture(sink).onComplete(h -> {
+			MonoUtils.emitCompleteFuture(sink).recover(error -> {
+				if (error instanceof EmissionException) {
+					var sinkError = (EmissionException) error;
+					switch (sinkError.getReason()) {
+						case FAIL_CANCELLED:
+						case FAIL_ZERO_SUBSCRIBER:
+						case FAIL_TERMINATED:
+							return Future.succeededFuture();
+					}
+				}
+				return Future.failedFuture(error);
+			}).onComplete(h -> {
 				if (drainSubscription != null) {
 					drainSubscription.dispose();
 				}

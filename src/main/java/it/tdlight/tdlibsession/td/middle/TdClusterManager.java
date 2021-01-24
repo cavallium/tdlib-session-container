@@ -84,20 +84,22 @@ public class TdClusterManager {
 	}
 
 	public static Mono<TdClusterManager> ofNodes(JksOptions keyStoreOptions, JksOptions trustStoreOptions, boolean onlyLocal, String masterHostname, String netInterface, int port, Set<String> nodesAddresses) {
-		if (definedNodesCluster.compareAndSet(false, true)) {
-			var vertxOptions = new VertxOptions();
-			netInterface = onlyLocal ? "127.0.0.1" : netInterface;
-			Config cfg;
-			if (!onlyLocal) {
-				cfg = new Config();
-				cfg.setInstanceName("Node-" + new Random().nextLong());
+		return Mono.defer(() -> {
+			if (definedNodesCluster.compareAndSet(false, true)) {
+				var vertxOptions = new VertxOptions();
+				var netInterfaceF = onlyLocal ? "127.0.0.1" : netInterface;
+				Config cfg;
+				if (!onlyLocal) {
+					cfg = new Config();
+					cfg.setInstanceName("Node-" + new Random().nextLong());
+				} else {
+					cfg = null;
+				}
+				return of(cfg, vertxOptions, keyStoreOptions, trustStoreOptions, masterHostname, netInterfaceF, port, nodesAddresses);
 			} else {
-				cfg = null;
+				return Mono.error(new AlreadyBoundException());
 			}
-			return of(cfg, vertxOptions, keyStoreOptions, trustStoreOptions, masterHostname, netInterface, port, nodesAddresses);
-		} else {
-			return Mono.error(new AlreadyBoundException());
-		}
+		});
 	}
 
 	public static Mono<TdClusterManager> of(@Nullable Config cfg,
@@ -156,6 +158,8 @@ public class TdClusterManager {
 			mgr = null;
 			vertxOptions.setClusterManager(null);
 		}
+
+		vertxOptions.setPreferNativeTransport(true);
 
 		return Mono
 				.<Vertx>create(sink -> {

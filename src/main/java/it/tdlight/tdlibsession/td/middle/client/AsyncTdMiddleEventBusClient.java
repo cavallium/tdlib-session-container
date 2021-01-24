@@ -21,6 +21,7 @@ import it.tdlight.utils.BinlogUtils;
 import it.tdlight.utils.MonoUtils;
 import it.tdlight.utils.MonoUtils.SinkRWStream;
 import java.nio.file.Path;
+import java.time.Duration;
 import org.reactivestreams.Publisher;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -43,7 +44,7 @@ public class AsyncTdMiddleEventBusClient implements AsyncTdMiddle {
 
 	private final One<BinlogAsyncFile> binlog = Sinks.one();
 
-	SinkRWStream<Message<TdResultList>> updates = MonoUtils.unicastBackpressureStream(1000);
+	SinkRWStream<Message<TdResultList>> updates = MonoUtils.unicastBackpressureStream(10000);
 	// This will only result in a successful completion, never completes in other ways
 	private final Empty<Void> updatesStreamEnd = Sinks.one();
 	// This will only result in a crash, never completes in other ways
@@ -137,10 +138,12 @@ public class AsyncTdMiddleEventBusClient implements AsyncTdMiddle {
 	@Override
 	public Flux<TdApi.Object> receive() {
 		// Here the updates will be received
-		return updates
-				.readAsFlux()
-				.subscribeOn(Schedulers.single())
+		return cluster.getEventBus().<byte[]>rxRequest(botAddress + ".ready-to-receive", EMPTY).as(MonoUtils::toMono)
+				.thenMany(updates.readAsFlux())
 				.cast(io.vertx.core.eventbus.Message.class)
+				.timeout(Duration.ofSeconds(20), Mono.fromCallable(() -> {
+					throw new IllegalStateException("Server did not respond to 4 pings after 20 seconds (5 seconds per ping)");
+				}))
 				.flatMap(updates -> Flux.fromIterable(((TdResultList) updates.body()).getValues()))
 				.flatMap(update -> Mono.fromCallable(update::orElseThrow))
 				.flatMap(this::interceptUpdate)
@@ -174,7 +177,7 @@ public class AsyncTdMiddleEventBusClient implements AsyncTdMiddle {
 				.firstWithSignal(
 						MonoUtils.castVoid(crash.asMono()),
 						cluster.getEventBus()
-								.<TdResultMessage>rxRequest(botAddress + ".execute", req, deliveryOptionsWithTimeout).as(MonoUtils::toMono)
+								.<TdResultMessage>rxRequest(botAddress + ".execute", req, deliveryOptions).as(MonoUtils::toMono)
 								.onErrorMap(ex -> ResponseError.newResponseError(request, botAlias, ex))
 								.<TdResult<T>>flatMap(resp -> Mono.fromCallable(() -> {
 									if (resp.body() == null) {

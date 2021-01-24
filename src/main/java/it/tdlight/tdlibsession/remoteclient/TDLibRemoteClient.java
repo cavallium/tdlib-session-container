@@ -80,17 +80,23 @@ public class TDLibRemoteClient implements AutoCloseable {
 
 		var securityInfo = new SecurityInfo(keyStorePath, keyStorePasswordPath, trustStorePath, trustStorePasswordPath);
 
-		new TDLibRemoteClient(securityInfo, masterHostname, netInterface, port, membersAddresses)
+		var client = new TDLibRemoteClient(securityInfo, masterHostname, netInterface, port, membersAddresses);
+
+		client
 				.start()
 				.block();
+
+		// Close vert.x on shutdown
+		var vertx = client.clusterManager.asMono().block().getVertx();
+		Runtime.getRuntime().addShutdownHook(new Thread(() -> MonoUtils.toMono(vertx.rxClose()).blockOptional()));
 	}
 
 	public Mono<Void> start() {
-		var keyStoreOptions = new JksOptions()
+		var keyStoreOptions = securityInfo == null ? null : new JksOptions()
 				.setPath(securityInfo.getKeyStorePath().toAbsolutePath().toString())
 				.setPassword(securityInfo.getKeyStorePassword());
 
-		var trustStoreOptions = new JksOptions()
+		var trustStoreOptions = securityInfo == null ? null : new JksOptions()
 				.setPath(securityInfo.getTrustStorePath().toAbsolutePath().toString())
 				.setPassword(securityInfo.getTrustStorePassword());
 

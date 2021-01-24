@@ -1,11 +1,18 @@
 package it.tdlight.utils;
 
+import io.vertx.core.eventbus.DeliveryOptions;
 import io.vertx.core.file.OpenOptions;
+import io.vertx.reactivex.core.Vertx;
 import io.vertx.reactivex.core.buffer.Buffer;
+import io.vertx.reactivex.core.eventbus.Message;
+import io.vertx.reactivex.core.eventbus.MessageConsumer;
 import io.vertx.reactivex.core.file.FileSystem;
+import it.tdlight.tdlibsession.remoteclient.TDLibRemoteClient;
+import it.tdlight.tdlibsession.td.middle.EndSessionMessage;
 import java.nio.file.Path;
 import java.text.CharacterIterator;
 import java.text.StringCharacterIterator;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import org.slf4j.Logger;
@@ -13,6 +20,7 @@ import org.slf4j.LoggerFactory;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.util.function.Tuple2;
+import reactor.util.function.Tuples;
 
 public class BinlogUtils {
 
@@ -87,5 +95,27 @@ public class BinlogUtils {
 		}
 		value *= Long.signum(bytes);
 		return String.format("%.1f %ciB", value / 1024.0, ci.current());
+	}
+
+	public static Mono<Void> readBinlogConsumer(Vertx vertx,
+			MessageConsumer<byte[]> readBinlogConsumer,
+			int botId,
+			boolean local) {
+		return Flux
+				.<Message<byte[]>>create(sink -> {
+					readBinlogConsumer.handler(sink::next);
+					readBinlogConsumer.endHandler(h -> sink.complete());
+				})
+				.flatMap(req -> BinlogUtils
+						.retrieveBinlog(vertx.fileSystem(), TDLibRemoteClient.getSessionBinlogDirectory(botId))
+						.flatMap(BinlogAsyncFile::readFullyBytes)
+						.single()
+						.map(binlog -> Tuples.of(req, binlog))
+				)
+				.doOnNext(tuple -> {
+					var opts = new DeliveryOptions().setLocalOnly(local).setSendTimeout(Duration.ofSeconds(10).toMillis());
+					tuple.getT1().reply(new EndSessionMessage(botId, tuple.getT2()), opts);
+				})
+				.then();
 	}
 }
