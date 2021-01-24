@@ -19,7 +19,7 @@ public class TelegramClientFactory {
 				case "native-client":
 					return ClientManager.create();
 				case "test-client":
-					//todo: create a noop test client with optional behaviours
+					return new TestClient(implementationDetails.getJsonObject("test-client-settings"));
 				default:
 					return null;
 			}

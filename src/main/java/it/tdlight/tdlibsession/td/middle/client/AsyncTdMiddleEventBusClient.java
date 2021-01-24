@@ -21,6 +21,7 @@ import it.tdlight.utils.BinlogAsyncFile;
 import it.tdlight.utils.BinlogUtils;
 import it.tdlight.utils.MonoUtils;
 import it.tdlight.utils.MonoUtils.SinkRWStream;
+import java.net.ConnectException;
 import java.nio.file.Path;
 import java.time.Duration;
 import org.slf4j.Logger;
@@ -44,7 +45,7 @@ public class AsyncTdMiddleEventBusClient implements AsyncTdMiddle {
 
 	private final One<BinlogAsyncFile> binlog = Sinks.one();
 
-	SinkRWStream<Message<TdResultList>> updates = MonoUtils.unicastBackpressureStream(10000);
+	SinkRWStream<Message<TdResultList>> updates = MonoUtils.unicastBackpressureSinkStreak();
 	// This will only result in a successful completion, never completes in other ways
 	private final Empty<Void> updatesStreamEnd = Sinks.one();
 	// This will only result in a crash, never completes in other ways
@@ -131,7 +132,8 @@ public class AsyncTdMiddleEventBusClient implements AsyncTdMiddle {
 
 	@SuppressWarnings("CallingSubscribeInNonBlockingScope")
 	private Mono<Void> setupUpdatesListener() {
-		MessageConsumer<TdResultList> updateConsumer = MessageConsumer.newInstance(cluster.getEventBus().<TdResultList>consumer(botAddress + ".updates").setMaxBufferedMessages(5000).getDelegate());
+		MessageConsumer<TdResultList> updateConsumer = MessageConsumer.newInstance(cluster.getEventBus().<TdResultList>consumer(
+				botAddress + ".updates").setMaxBufferedMessages(5000).getDelegate());
 		updateConsumer.endHandler(h -> {
 			logger.error("<<<<<<<<<<<<<<<<EndHandler?>>>>>>>>>>>>>");
 		});
@@ -152,14 +154,17 @@ public class AsyncTdMiddleEventBusClient implements AsyncTdMiddle {
 		return Mono
 				.fromRunnable(() -> logger.trace("Called receive() from parent"))
 				.doOnSuccess(s -> logger.trace("Sending ready-to-receive"))
-				.then(cluster.getEventBus().<byte[]>rxRequest(botAddress + ".ready-to-receive", EMPTY, deliveryOptionsWithTimeout).as(MonoUtils::toMono))
+				.then()
 				.doOnSuccess(s -> logger.trace("Sent ready-to-receive, received reply"))
 				.doOnSuccess(s -> logger.trace("About to read updates flux"))
 				.thenMany(updates.readAsFlux())
 				.cast(io.vertx.core.eventbus.Message.class)
 				.timeout(Duration.ofSeconds(20), Mono.fromCallable(() -> {
-					throw new IllegalStateException("Server did not respond to 4 pings after 20 seconds (5 seconds per ping)");
+					var ex = new ConnectException("Server did not respond to 4 pings after 20 seconds (5 seconds per ping)");
+					ex.setStackTrace(new StackTraceElement[0]);
+					throw ex;
 				}))
+				.doOnSubscribe(s -> cluster.getEventBus().<byte[]>send(botAddress + ".ready-to-receive", EMPTY, deliveryOptionsWithTimeout))
 				.flatMap(updates -> {
 					var result = (TdResultList) updates.body();
 					if (result.succeeded()) {

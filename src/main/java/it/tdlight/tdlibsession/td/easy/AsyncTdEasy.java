@@ -46,11 +46,10 @@ import org.reactivestreams.Publisher;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.warp.commonutils.error.InitializationException;
-import reactor.core.publisher.EmitterProcessor;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
-import reactor.core.publisher.ReplayProcessor;
 import reactor.core.publisher.Sinks;
+import reactor.core.publisher.Sinks.Many;
 import reactor.core.publisher.Sinks.One;
 import reactor.core.scheduler.Scheduler;
 import reactor.core.scheduler.Schedulers;
@@ -59,11 +58,14 @@ public class AsyncTdEasy {
 
 	private final Logger logger;
 
-	private static final Scheduler scheduler = Schedulers.newSingle("AsyncTdEasy", false);
-	private final ReplayProcessor<AuthorizationState> authState = ReplayProcessor.create(1);
-	private final ReplayProcessor<Boolean> requestedDefinitiveExit = ReplayProcessor.cacheLastOrDefault(false);
-	private final ReplayProcessor<TdEasySettings> settings = ReplayProcessor.cacheLast();
-	private final EmitterProcessor<Error> globalErrors = EmitterProcessor.create();
+	private static final Scheduler scheduler = Schedulers.newParallel("AsyncTdEasy",
+			Runtime.getRuntime().availableProcessors(),
+			false
+	);
+	private final Many<AuthorizationState> authState = Sinks.many().replay().latest();
+	private final Many<Boolean> requestedDefinitiveExit = Sinks.many().replay().latestOrDefault(false);
+	private final Many<TdEasySettings> settings = Sinks.many().replay().latest();
+	private final Many<Error> globalErrors = Sinks.many().multicast().onBackpressureBuffer();
 	private final One<FatalErrorType> fatalError = Sinks.one();
 	private final AsyncTdMiddle td;
 	private final String logName;
@@ -78,7 +80,6 @@ public class AsyncTdEasy {
 		this.incomingUpdates = td.receive()
 				.flatMap(this::preprocessUpdates)
 				.flatMap(update -> Mono.from(this.getState()).single().map(state -> new AsyncTdUpdateObj(state, update)))
-				.filter(upd -> upd.getState().getConstructor() == AuthorizationStateReady.CONSTRUCTOR)
 				.map(upd -> (TdApi.Update) upd.getUpdate())
 				.doOnError(ex -> {
 					if (ex instanceof TdError) {
@@ -96,33 +97,31 @@ public class AsyncTdEasy {
 					}
 				})
 				.doOnComplete(() -> {
-					authState.asFlux().take(1).single().subscribeOn(Schedulers.single()).subscribe(authState -> {
+					authState.asFlux().take(1).single().subscribeOn(scheduler).subscribe(authState -> {
 						onUpdatesTerminated();
 						if (authState.getConstructor() != AuthorizationStateClosed.CONSTRUCTOR) {
 							logger.warn("Updates stream has closed while"
 									+ " the current authorization state is"
 									+ " still {}. Setting authorization state as closed!", authState.getClass().getSimpleName());
-							this.authState.onNext(new AuthorizationStateClosed());
+							this.authState.tryEmitNext(new AuthorizationStateClosed());
 						}
 					});
 				}).doOnError(ex -> {
-					authState.asFlux().take(1).single().subscribeOn(Schedulers.single()).subscribe(authState -> {
+					authState.asFlux().take(1).single().subscribeOn(scheduler).subscribe(authState -> {
 						onUpdatesTerminated();
 						if (authState.getConstructor() != AuthorizationStateClosed.CONSTRUCTOR) {
 							logger.warn("Updates stream has terminated with an error while"
 									+ " the current authorization state is"
 									+ " still {}. Setting authorization state as closed!", authState.getClass().getSimpleName());
-							this.authState.onNext(new AuthorizationStateClosed());
+							this.authState.tryEmitNext(new AuthorizationStateClosed());
 						}
 					});
-				})
-				.subscribeOn(scheduler)
-				.publish().refCount(1);
+				});
 	}
 
 	private void onUpdatesTerminated() {
 		logger.debug("Incoming updates flux terminated. Setting requestedDefinitiveExit: true");
-		requestedDefinitiveExit.onNext(true);
+		requestedDefinitiveExit.tryEmitNext(true);
 	}
 
 	public Mono<Void> create(TdEasySettings settings) {
@@ -138,13 +137,13 @@ public class AsyncTdEasy {
 					}
 
 					// Register fatal error handler
-					fatalError.asMono().flatMap(settings.getFatalErrorHandler()::onFatalError).subscribeOn(scheduler).subscribe();
+					fatalError.asMono().flatMap(settings.getFatalErrorHandler()::onFatalError).publishOn(scheduler).subscribe();
 
 					return true;
 				})
 				.subscribeOn(Schedulers.boundedElastic())
 				.flatMap(_v -> {
-					this.settings.onNext(settings);
+					this.settings.tryEmitNext(settings);
 					return Mono.empty();
 				});
 	}
@@ -153,7 +152,7 @@ public class AsyncTdEasy {
 	 * Get TDLib state
 	 */
 	public Flux<AuthorizationState> getState() {
-		return authState.distinct().subscribeOn(scheduler);
+		return authState.asFlux().distinct().publishOn(scheduler);
 	}
 
 	/**
@@ -164,21 +163,21 @@ public class AsyncTdEasy {
 	}
 
 	private Flux<TdApi.Update> getIncomingUpdates(boolean includePreAuthUpdates) {
-		return incomingUpdates.subscribeOn(scheduler);
+		return incomingUpdates.publishOn(scheduler);
 	}
 
 	/**
 	 * Get generic error updates from TDLib (When they are not linked to a precise request).
 	 */
 	public Flux<TdApi.Error> getIncomingErrors() {
-		return Flux.from(globalErrors).subscribeOn(scheduler);
+		return Flux.from(globalErrors.asFlux()).publishOn(scheduler);
 	}
 
 	/**
 	 * Receives fatal errors from TDLib.
 	 */
 	public Mono<FatalErrorType> getFatalErrors() {
-		return Mono.from(fatalError.asMono()).subscribeOn(scheduler);
+		return Mono.from(fatalError.asMono()).publishOn(scheduler);
 	}
 
 	/**
@@ -190,7 +189,7 @@ public class AsyncTdEasy {
 	}
 
 	private <T extends TdApi.Object> Mono<TdResult<T>> sendDirectly(TdApi.Function obj, boolean synchronous) {
-		return td.<T>execute(obj, synchronous).subscribeOn(scheduler);
+		return td.<T>execute(obj, synchronous).publishOn(scheduler);
 	}
 
 	/**
@@ -198,7 +197,7 @@ public class AsyncTdEasy {
 	 * @param i level
 	 */
 	public Mono<Void> setVerbosityLevel(int i) {
-		return thenOrFatalError(sendDirectly(new TdApi.SetLogVerbosityLevel(i), true)).subscribeOn(scheduler);
+		return thenOrFatalError(sendDirectly(new TdApi.SetLogVerbosityLevel(i), true)).publishOn(scheduler);
 	}
 
 	/**
@@ -206,7 +205,7 @@ public class AsyncTdEasy {
 	 * @param name option name
 	 */
 	public Mono<Void> clearOption(String name) {
-		return thenOrFatalError(sendDirectly(new TdApi.SetOption(name, new TdApi.OptionValueEmpty()), false)).subscribeOn(scheduler);
+		return thenOrFatalError(sendDirectly(new TdApi.SetOption(name, new TdApi.OptionValueEmpty()), false)).publishOn(scheduler);
 	}
 
 	/**
@@ -215,7 +214,7 @@ public class AsyncTdEasy {
 	 * @param value option value
 	 */
 	public Mono<Void> setOptionString(String name, String value) {
-		return thenOrFatalError(sendDirectly(new TdApi.SetOption(name, new TdApi.OptionValueString(value)), false)).subscribeOn(scheduler);
+		return thenOrFatalError(sendDirectly(new TdApi.SetOption(name, new TdApi.OptionValueString(value)), false)).publishOn(scheduler);
 	}
 
 	/**
@@ -224,7 +223,7 @@ public class AsyncTdEasy {
 	 * @param value option value
 	 */
 	public Mono<Void> setOptionInteger(String name, long value) {
-		return thenOrFatalError(sendDirectly(new TdApi.SetOption(name, new TdApi.OptionValueInteger(value)), false)).subscribeOn(scheduler);
+		return thenOrFatalError(sendDirectly(new TdApi.SetOption(name, new TdApi.OptionValueInteger(value)), false)).publishOn(scheduler);
 	}
 
 	/**
@@ -233,7 +232,7 @@ public class AsyncTdEasy {
 	 * @param value option value
 	 */
 	public Mono<Void> setOptionBoolean(String name, boolean value) {
-		return thenOrFatalError(sendDirectly(new TdApi.SetOption(name, new TdApi.OptionValueBoolean(value)), false)).subscribeOn(scheduler);
+		return thenOrFatalError(sendDirectly(new TdApi.SetOption(name, new TdApi.OptionValueBoolean(value)), false)).publishOn(scheduler);
 	}
 
 	/**
@@ -252,7 +251,7 @@ public class AsyncTdEasy {
 					return Mono.error(new UnsupportedOperationException("The option " + name + " is of type "
 							+ value.getClass().getSimpleName()));
 			}
-		}).subscribeOn(scheduler);
+		}).publishOn(scheduler);
 	}
 
 	/**
@@ -271,7 +270,7 @@ public class AsyncTdEasy {
 					return Mono.error(new UnsupportedOperationException("The option " + name + " is of type "
 							+ value.getClass().getSimpleName()));
 			}
-		}).subscribeOn(scheduler);
+		}).publishOn(scheduler);
 	}
 
 	/**
@@ -290,7 +289,7 @@ public class AsyncTdEasy {
 					return Mono.error(new UnsupportedOperationException("The option " + name + " is of type "
 							+ value.getClass().getSimpleName()));
 			}
-		}).subscribeOn(scheduler);
+		}).publishOn(scheduler);
 	}
 
 	/**
@@ -301,7 +300,7 @@ public class AsyncTdEasy {
 	 * @return The request response.
 	 */
 	public <T extends Object> Mono<TdResult<T>> execute(TdApi.Function request) {
-		return td.<T>execute(request, true).subscribeOn(scheduler);
+		return td.<T>execute(request, true).publishOn(scheduler);
 	}
 
 	/**
@@ -329,7 +328,7 @@ public class AsyncTdEasy {
 				.filter(closeRequested -> !closeRequested)
 				.doOnSuccess(s -> {
 					logger.debug("Setting requestedDefinitiveExit: true");
-					requestedDefinitiveExit.onNext(true);
+					requestedDefinitiveExit.tryEmitNext(true);
 				})
 				.then(td.execute(new TdApi.Close(), false).doOnSubscribe(s -> {
 					logger.debug("Sending TdApi.Close");
@@ -337,7 +336,7 @@ public class AsyncTdEasy {
 				.doOnNext(closeResponse -> logger.debug("TdApi.Close response is: \"{}\"",
 						closeResponse.toString().replace('\n', ' ')
 				))
-				.then(authState
+				.then(authState.asFlux()
 						.filter(authorizationState -> authorizationState.getConstructor() == AuthorizationStateClosed.CONSTRUCTOR)
 						.take(1)
 						.singleOrEmpty())
@@ -348,7 +347,7 @@ public class AsyncTdEasy {
 					logger.info("AsyncTdEasy closed successfully");
 				})
 				.then()
-				.subscribeOn(scheduler);
+				.publishOn(scheduler);
 	}
 
 	/**
@@ -374,13 +373,13 @@ public class AsyncTdEasy {
 
 				switch (error.message) {
 					case "PHONE_CODE_INVALID":
-						globalErrors.onNext(error);
+						globalErrors.tryEmitNext(error);
 						return new UpdateAuthorizationState(new AuthorizationStateWaitCode());
 					case "PASSWORD_HASH_INVALID":
-						globalErrors.onNext(error);
+						globalErrors.tryEmitNext(error);
 						return new UpdateAuthorizationState(new AuthorizationStateWaitPassword());
 					default:
-						globalErrors.onNext(error);
+						globalErrors.tryEmitNext(error);
 						break;
 				}
 				analyzeFatalErrors(error);
@@ -388,7 +387,7 @@ public class AsyncTdEasy {
 			} else {
 				return (Update) obj;
 			}
-		}).subscribeOn(scheduler);
+		}).publishOn(scheduler);
 	}
 
 	private void analyzeFatalErrors(Object obj) {
@@ -415,7 +414,7 @@ public class AsyncTdEasy {
 	}
 
 	public Mono<Boolean> isBot() {
-		return Mono.from(settings).single().map(TdEasySettings::isBotTokenSet).subscribeOn(scheduler);
+		return Mono.from(settings.asFlux()).single().map(TdEasySettings::isBotTokenSet).publishOn(scheduler);
 	}
 
 	private Publisher<TdApi.Update> preprocessUpdates(TdApi.Object updateObj) {
@@ -427,7 +426,7 @@ public class AsyncTdEasy {
 				.flatMap(obj -> {
 					switch (obj.getConstructor()) {
 						case AuthorizationStateWaitTdlibParameters.CONSTRUCTOR:
-							return thenOrFatalError(Mono.from(this.settings).map(settings -> {
+							return thenOrFatalError(Mono.from(this.settings.asFlux()).map(settings -> {
 								var parameters = new TdlibParameters();
 								parameters.useTestDc = settings.useTestDc;
 								parameters.databaseDirectory = settings.databaseDirectory;
@@ -453,7 +452,7 @@ public class AsyncTdEasy {
 										return sendDirectly(new TdApi.Close(), false).then();
 									});
 						case AuthorizationStateWaitPhoneNumber.CONSTRUCTOR:
-							return thenOrFatalError(Mono.from(this.settings).flatMap(settings -> {
+							return thenOrFatalError(Mono.from(this.settings.asFlux()).flatMap(settings -> {
 								if (settings.isPhoneNumberSet()) {
 									return sendDirectly(new SetAuthenticationPhoneNumber(String.valueOf(settings.getPhoneNumber()),
 											new PhoneNumberAuthenticationSettings(false, false, false)
@@ -476,7 +475,7 @@ public class AsyncTdEasy {
 							}
 
 							return Mono
-									.from(settings)
+									.from(settings.asFlux())
 									.map(TdEasySettings::getParameterRequestHandler)
 									.flatMap(handler -> {
 										return MonoUtils.thenOrLogRepeatError(() -> handler
@@ -502,7 +501,7 @@ public class AsyncTdEasy {
 						case TdApi.AuthorizationStateWaitOtherDeviceConfirmation.CONSTRUCTOR:
 							var authorizationStateWaitOtherDeviceConfirmation = (AuthorizationStateWaitOtherDeviceConfirmation) obj;
 							return Mono
-									.from(settings)
+									.from(settings.asFlux())
 									.map(TdEasySettings::getParameterRequestHandler)
 									.flatMap(handler -> {
 										return handler.onParameterRequest(Parameter.NOTIFY_LINK,
@@ -512,7 +511,7 @@ public class AsyncTdEasy {
 						case TdApi.AuthorizationStateWaitCode.CONSTRUCTOR:
 							var authorizationStateWaitCode = (AuthorizationStateWaitCode) obj;
 							return Mono
-									.from(settings)
+									.from(settings.asFlux())
 									.map(TdEasySettings::getParameterRequestHandler)
 									.flatMap(handler -> {
 										return MonoUtils.thenOrLogRepeatError(() -> handler.onParameterRequest(Parameter.ASK_CODE,
@@ -526,7 +525,7 @@ public class AsyncTdEasy {
 						case AuthorizationStateWaitPassword.CONSTRUCTOR:
 							var authorizationStateWaitPassword = (AuthorizationStateWaitPassword) obj;
 							return Mono
-									.from(settings)
+									.from(settings.asFlux())
 									.map(TdEasySettings::getParameterRequestHandler)
 									.flatMap(handler -> {
 										return MonoUtils.thenOrLogRepeatError(() -> handler.onParameterRequest(Parameter.ASK_PASSWORD,
@@ -534,7 +533,7 @@ public class AsyncTdEasy {
 										).flatMap(password -> sendDirectly(new CheckAuthenticationPassword(password), false)));
 									});
 						case AuthorizationStateReady.CONSTRUCTOR: {
-							this.authState.onNext(new AuthorizationStateReady());
+							this.authState.tryEmitNext(new AuthorizationStateReady());
 							return Mono.empty();
 						}
 						case AuthorizationStateClosing.CONSTRUCTOR:
@@ -542,17 +541,17 @@ public class AsyncTdEasy {
 							return Mono.empty();
 						case AuthorizationStateClosed.CONSTRUCTOR:
 							logger.debug("Received AuthorizationStateClosed from td");
-							return Mono.from(requestedDefinitiveExit).doOnNext(closeRequested -> {
+							return Mono.from(requestedDefinitiveExit.asFlux()).doOnNext(closeRequested -> {
 								if (closeRequested) {
 									logger.debug("td closed successfully");
 								} else {
 									logger.warn("td closed unexpectedly: {}", logName);
 								}
-								authState.onNext(obj);
+								authState.tryEmitNext(obj);
 							}).flatMap(closeRequested -> {
 								if (closeRequested) {
 									return Mono
-											.from(settings)
+											.from(settings.asFlux())
 											.map(settings -> settings.databaseDirectory)
 											.map(Path::of)
 											.flatMapIterable(sessionPath -> Set.of(sessionPath.resolve("media"),
@@ -587,8 +586,7 @@ public class AsyncTdEasy {
 							return Mono.empty();
 					}
 				})
-				.then(Mono.justOrEmpty(updateObj.getConstructor() == Error.CONSTRUCTOR ? null : (Update) updateObj))
-				.subscribeOn(scheduler);
+				.then(Mono.justOrEmpty(updateObj.getConstructor() == Error.CONSTRUCTOR ? null : (Update) updateObj));
 	}
 
 	public <T extends TdApi.Object> Mono<Void> thenOrFatalError(Mono<TdResult<T>> optionalMono) {

@@ -92,10 +92,11 @@ public class AsyncTdDirectImpl implements AsyncTdDirect {
 
 							// Send close if the stream is disposed before tdlib is closed
 							updatesSink.onDispose(() -> {
-								// Try to emit false, so that if it has not been closed from tdlib, now it is explicitly false.
-								closedFromTd.tryEmitValue(false);
 
-								closedFromTd.asMono().filter(isClosedFromTd -> !isClosedFromTd).doOnNext(x -> {
+								Mono.firstWithValue(closedFromTd.asMono(), Mono.empty()).switchIfEmpty(Mono.defer(() -> Mono.fromRunnable(() -> {
+									// Try to emit false, so that if it has not been closed from tdlib, now it is explicitly false.
+									closedFromTd.tryEmitValue(false);
+								}))).filter(isClosedFromTd -> !isClosedFromTd).doOnNext(x -> {
 									logger.warn("The stream has been disposed without closing tdlib. Sending TdApi.Close()...");
 									client.send(new Close(),
 											result -> logger.warn("Close result: {}", result),

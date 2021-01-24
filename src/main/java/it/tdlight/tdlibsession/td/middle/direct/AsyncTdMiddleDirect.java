@@ -2,9 +2,9 @@ package it.tdlight.tdlibsession.td.middle.direct;
 
 import static it.tdlight.tdlibsession.td.middle.server.AsyncTdMiddleEventBusServer.WAIT_DURATION;
 
-import io.vertx.core.AbstractVerticle;
-import io.vertx.core.Promise;
+import io.reactivex.Completable;
 import io.vertx.core.json.JsonObject;
+import io.vertx.reactivex.core.AbstractVerticle;
 import it.tdlight.jni.TdApi;
 import it.tdlight.jni.TdApi.Function;
 import it.tdlight.jni.TdApi.Object;
@@ -22,6 +22,7 @@ import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.core.publisher.Sinks;
 import reactor.core.publisher.Sinks.Empty;
+import reactor.core.scheduler.Schedulers;
 
 public class AsyncTdMiddleDirect extends AbstractVerticle implements AsyncTdMiddle {
 
@@ -55,7 +56,7 @@ public class AsyncTdMiddleDirect extends AbstractVerticle implements AsyncTdMidd
 	}
 
 	@Override
-	public void start(Promise<Void> startPromise) {
+	public Completable rxStart() {
 		var botAddress = config().getString("botAddress");
 		if (botAddress == null || botAddress.isEmpty()) {
 			throw new IllegalArgumentException("botAddress is not set!");
@@ -73,13 +74,13 @@ public class AsyncTdMiddleDirect extends AbstractVerticle implements AsyncTdMidd
 
 		this.td = new AsyncTdDirectImpl(clientFactory, implementationDetails, botAlias);
 
-		startPromise.complete();
+		return Completable.complete();
 	}
 
 	@Override
-	public void stop(Promise<Void> stopPromise) {
+	public Completable rxStop() {
 		closeRequest.tryEmitEmpty();
-		stopPromise.complete();
+		return Completable.complete();
 	}
 
 	@Override
@@ -87,8 +88,10 @@ public class AsyncTdMiddleDirect extends AbstractVerticle implements AsyncTdMidd
 		return td
 				.receive(new AsyncTdDirectOptions(WAIT_DURATION, 100))
 				.takeUntilOther(closeRequest.asMono())
+				.doOnNext(s -> logger.trace("Received update from tdlib: {}", s))
 				.doOnError(ex -> logger.info("TdMiddle verticle error", ex))
-				.doOnTerminate(() -> logger.debug("TdMiddle verticle stopped"));
+				.doOnTerminate(() -> logger.debug("TdMiddle verticle stopped"))
+				.publishOn(Schedulers.single());
 	}
 
 	@Override

@@ -2,6 +2,8 @@ package it.tdlight.tdlibsession.td.middle.server;
 
 import io.reactivex.Completable;
 import io.vertx.core.eventbus.DeliveryOptions;
+import io.vertx.core.eventbus.ReplyException;
+import io.vertx.core.eventbus.ReplyFailure;
 import io.vertx.reactivex.core.AbstractVerticle;
 import io.vertx.reactivex.core.eventbus.Message;
 import io.vertx.reactivex.core.eventbus.MessageConsumer;
@@ -24,6 +26,7 @@ import it.tdlight.tdlibsession.td.middle.TdResultList;
 import it.tdlight.tdlibsession.td.middle.TdResultListMessageCodec;
 import it.tdlight.utils.BinlogUtils;
 import it.tdlight.utils.MonoUtils;
+import java.net.ConnectException;
 import java.time.Duration;
 import java.util.Collections;
 import org.slf4j.Logger;
@@ -377,11 +380,26 @@ public class AsyncTdMiddleEventBusServer extends AbstractVerticle {
 					}
 				}))
 				.onErrorResume(ex -> {
-					logger.warn("Undeploying after a fatal error in a served flux", ex);
+					boolean printDefaultException = true;
+					if (ex instanceof ReplyException) {
+						ReplyException replyException = (ReplyException) ex;
+						if (replyException.failureCode() == -1 && replyException.failureType() == ReplyFailure.NO_HANDLERS) {
+							logger.warn("Undeploying, the flux has been terminated because no more handlers are available on the event bus. {}", replyException.getMessage());
+							printDefaultException = false;
+						}
+					} else if (ex instanceof ConnectException || ex instanceof java.nio.channels.ClosedChannelException) {
+						logger.warn("Undeploying, the flux has been terminated because the consumer disconnected from the event bus. {}", ex.getMessage());
+						printDefaultException = false;
+					}
+					if (printDefaultException) {
+						logger.warn("Undeploying after a fatal error in a served flux", ex);
+					}
 					return td.execute(new TdApi.Close(), false)
 							.doOnError(ex2 -> logger.error("Unexpected error", ex2))
-							.then();
+							.doOnSuccess(s -> logger.debug("Emergency Close() signal has been sent successfully"))
+							.then(rxStop().as(MonoUtils::toMono));
 				});
+
 		return MonoUtils.emitValue(this.pipeFlux, pipeFlux)
 				.doOnSuccess(s -> logger.trace("Prepared piping requests successfully"));
 	}
