@@ -144,8 +144,14 @@ public class AsyncTdMiddleEventBusClient implements AsyncTdMiddle {
 				.timeout(Duration.ofSeconds(20), Mono.fromCallable(() -> {
 					throw new IllegalStateException("Server did not respond to 4 pings after 20 seconds (5 seconds per ping)");
 				}))
-				.flatMap(updates -> Flux.fromIterable(((TdResultList) updates.body()).getValues()))
-				.flatMap(update -> Mono.fromCallable(update::orElseThrow))
+				.flatMap(updates -> {
+					var result = (TdResultList) updates.body();
+					if (result.succeeded()) {
+						return Flux.fromIterable(result.value());
+					} else {
+						return Mono.fromCallable(() -> TdResult.failed(result.error()).orElseThrow());
+					}
+				})
 				.flatMap(this::interceptUpdate)
 				.doOnError(crash::tryEmitError)
 				.doOnTerminate(updatesStreamEnd::tryEmitEmpty);

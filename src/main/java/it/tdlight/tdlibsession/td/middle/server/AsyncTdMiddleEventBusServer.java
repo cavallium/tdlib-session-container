@@ -14,6 +14,7 @@ import it.tdlight.jni.TdApi.SetTdlibParameters;
 import it.tdlight.jni.TdApi.Update;
 import it.tdlight.jni.TdApi.UpdateAuthorizationState;
 import it.tdlight.tdlibsession.remoteclient.TDLibRemoteClient;
+import it.tdlight.tdlibsession.td.TdError;
 import it.tdlight.tdlibsession.td.TdResultMessage;
 import it.tdlight.tdlibsession.td.direct.AsyncTdDirectImpl;
 import it.tdlight.tdlibsession.td.direct.AsyncTdDirectOptions;
@@ -270,26 +271,29 @@ public class AsyncTdMiddleEventBusServer extends AbstractVerticle {
 		Flux<TdResultList> updatesFlux = td
 				.receive(tdOptions)
 				.flatMap(item -> Mono.defer(() -> {
-					if (item.succeeded()) {
-						var tdObject = item.result();
-						if (tdObject instanceof Update) {
-							var tdUpdate = (Update) tdObject;
-							if (tdUpdate.getConstructor() == UpdateAuthorizationState.CONSTRUCTOR) {
-								var tdUpdateAuthorizationState = (UpdateAuthorizationState) tdUpdate;
-								if (tdUpdateAuthorizationState.authorizationState.getConstructor()
-										== AuthorizationStateClosed.CONSTRUCTOR) {
-									logger.debug("Undeploying after receiving AuthorizationStateClosed");
-									return rxStop().as(MonoUtils::toMono).thenReturn(item);
-								}
+					if (item instanceof Update) {
+						var tdUpdate = (Update) item;
+						if (tdUpdate.getConstructor() == UpdateAuthorizationState.CONSTRUCTOR) {
+							var tdUpdateAuthorizationState = (UpdateAuthorizationState) tdUpdate;
+							if (tdUpdateAuthorizationState.authorizationState.getConstructor()
+									== AuthorizationStateClosed.CONSTRUCTOR) {
+								logger.debug("Undeploying after receiving AuthorizationStateClosed");
+								return rxStop().as(MonoUtils::toMono).thenReturn(item);
 							}
-						} else if (tdObject instanceof Error) {
-							// An error in updates means that a fatal error occurred
-							logger.debug("Undeploying after receiving a fatal error");
-							return rxStop().as(MonoUtils::toMono).thenReturn(item);
 						}
-						return Mono.just(item);
+					} else if (item instanceof Error) {
+						// An error in updates means that a fatal error occurred
+						logger.debug("Undeploying after receiving a fatal error");
+						return rxStop().as(MonoUtils::toMono).thenReturn(item);
+					}
+					return Mono.just(item);
+				}))
+				.flatMap(item -> Mono.fromCallable(() -> {
+					if (item.getConstructor() == TdApi.Error.CONSTRUCTOR) {
+						var error = (Error) item;
+						throw new TdError(error.code, error.message);
 					} else {
-						return Mono.just(item);
+						return item;
 					}
 				}))
 				.bufferTimeout(tdOptions.getEventsSize(), local ? Duration.ofMillis(1) : Duration.ofMillis(100))

@@ -13,7 +13,7 @@ public interface AsyncTdDirect {
 	 * Can be called only once.
 	 *
 	 */
-	Flux<TdResult<TdApi.Object>> receive(AsyncTdDirectOptions options);
+	Flux<TdApi.Object> receive(AsyncTdDirectOptions options);
 
 	/**
 	 * Sends request to TDLib.

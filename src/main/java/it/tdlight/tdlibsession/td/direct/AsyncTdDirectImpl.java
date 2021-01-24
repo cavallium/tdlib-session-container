@@ -62,12 +62,12 @@ public class AsyncTdDirectImpl implements AsyncTdDirect {
 	}
 
 	@Override
-	public Flux<TdResult<TdApi.Object>> receive(AsyncTdDirectOptions options) {
+	public Flux<TdApi.Object> receive(AsyncTdDirectOptions options) {
 		// If closed it will be either true or false
 		final One<Boolean> closedFromTd = Sinks.one();
-		return Flux.<TdResult<TdApi.Object>>create(emitter -> {
+		return Flux.<TdApi.Object>create(emitter -> {
 			var client = ClientManager.create((Object object) -> {
-				emitter.next(TdResult.of(object));
+				emitter.next(object);
 				// Close the emitter if receive closed state
 				if (object.getConstructor() == UpdateAuthorizationState.CONSTRUCTOR
 						&& ((UpdateAuthorizationState) object).authorizationState.getConstructor()

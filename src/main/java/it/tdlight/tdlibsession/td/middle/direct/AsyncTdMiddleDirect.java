@@ -78,14 +78,7 @@ public class AsyncTdMiddleDirect extends AbstractVerticle implements AsyncTdMidd
 				.receive(new AsyncTdDirectOptions(WAIT_DURATION, 100))
 				.takeUntilOther(closeRequest.asMono())
 				.doOnError(ex -> logger.info("TdMiddle verticle error", ex))
-				.doOnTerminate(() -> logger.debug("TdMiddle verticle stopped"))
-				.doOnNext(result -> {
-					if (result.failed()) {
-						logger.error("Received an errored update: {}", result.cause());
-					}
-				})
-				.filter(TdResult::succeeded)
-				.map(TdResult::result);
+				.doOnTerminate(() -> logger.debug("TdMiddle verticle stopped"));
 	}
 
 	@Override
