@@ -57,7 +57,7 @@ import reactor.core.scheduler.Schedulers;
 
 public class AsyncTdEasy {
 
-	private static final Logger logger = LoggerFactory.getLogger(AsyncTdEasy.class);
+	private final Logger logger;
 
 	private static final Scheduler scheduler = Schedulers.newSingle("AsyncTdEasy", false);
 	private final ReplayProcessor<AuthorizationState> authState = ReplayProcessor.create(1);
@@ -72,6 +72,7 @@ public class AsyncTdEasy {
 	public AsyncTdEasy(AsyncTdMiddle td, String logName) {
 		this.td = td;
 		this.logName = logName;
+		this.logger = LoggerFactory.getLogger("AsyncTdEasy " + logName);
 
 		// todo: use Duration.ZERO instead of 10ms interval
 		this.incomingUpdates = td.receive()
@@ -93,8 +94,9 @@ public class AsyncTdEasy {
 					} else {
 						logger.error(ex.getLocalizedMessage(), ex);
 					}
-				}).doOnComplete(() -> {
-					authState.asFlux().take(1).single().subscribe(authState -> {
+				})
+				.doOnComplete(() -> {
+					authState.asFlux().take(1).single().subscribeOn(Schedulers.single()).subscribe(authState -> {
 						onUpdatesTerminated();
 						if (authState.getConstructor() != AuthorizationStateClosed.CONSTRUCTOR) {
 							logger.warn("Updates stream has closed while"
@@ -104,7 +106,7 @@ public class AsyncTdEasy {
 						}
 					});
 				}).doOnError(ex -> {
-					authState.asFlux().take(1).single().subscribe(authState -> {
+					authState.asFlux().take(1).single().subscribeOn(Schedulers.single()).subscribe(authState -> {
 						onUpdatesTerminated();
 						if (authState.getConstructor() != AuthorizationStateClosed.CONSTRUCTOR) {
 							logger.warn("Updates stream has terminated with an error while"

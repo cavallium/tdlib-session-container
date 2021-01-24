@@ -18,6 +18,7 @@ import it.tdlight.tdlibsession.td.TdError;
 import it.tdlight.tdlibsession.td.TdResultMessage;
 import it.tdlight.tdlibsession.td.direct.AsyncTdDirectImpl;
 import it.tdlight.tdlibsession.td.direct.AsyncTdDirectOptions;
+import it.tdlight.tdlibsession.td.direct.TelegramClientFactory;
 import it.tdlight.tdlibsession.td.middle.ExecuteObject;
 import it.tdlight.tdlibsession.td.middle.TdResultList;
 import it.tdlight.tdlibsession.td.middle.TdResultListMessageCodec;
@@ -30,6 +31,7 @@ import org.slf4j.LoggerFactory;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.core.publisher.Sinks;
+import reactor.core.publisher.Sinks.Empty;
 import reactor.core.publisher.Sinks.One;
 import reactor.core.scheduler.Schedulers;
 import reactor.util.function.Tuples;
@@ -43,6 +45,7 @@ public class AsyncTdMiddleEventBusServer extends AbstractVerticle {
 
 	// Values configured from constructor
 	private final AsyncTdDirectOptions tdOptions;
+	private final TelegramClientFactory clientFactory;
 
 	// Variables configured by the user at startup
 	private final One<Integer> botId = Sinks.one();
@@ -57,48 +60,55 @@ public class AsyncTdMiddleEventBusServer extends AbstractVerticle {
 	private final One<MessageConsumer<byte[]>> readyToReceiveConsumer = Sinks.one();
 	private final One<MessageConsumer<byte[]>> pingConsumer = Sinks.one();
 	private final One<Flux<Void>> pipeFlux = Sinks.one();
+	private final Empty<Void> terminatePingOverPipeFlux = Sinks.empty();
 
 	public AsyncTdMiddleEventBusServer() {
-		this.tdOptions = new AsyncTdDirectOptions(WAIT_DURATION, 15);
+		this.tdOptions = new AsyncTdDirectOptions(WAIT_DURATION, 50);
+		this.clientFactory = new TelegramClientFactory();
 	}
 
 	@Override
 	public Completable rxStart() {
-		return MonoUtils.toCompletable(Mono
-				.fromCallable(() -> {
-					var botId = config().getInteger("botId");
-					if (botId == null || botId <= 0) {
-						throw new IllegalArgumentException("botId is not set!");
-					}
-					if (this.botId.tryEmitValue(botId).isFailure()) {
-						throw new IllegalStateException("Failed to set botId");
-					}
-					var botAddress = "bots.bot." + botId;
-					if (this.botAddress.tryEmitValue(botAddress).isFailure()) {
-						throw new IllegalStateException("Failed to set botAddress");
-					}
-					var botAlias = config().getString("botAlias");
-					if (botAlias == null || botAlias.isEmpty()) {
-						throw new IllegalArgumentException("botAlias is not set!");
-					}
-					if (this.botAlias.tryEmitValue(botAlias).isFailure()) {
-						throw new IllegalStateException("Failed to set botAlias");
-					}
-					var local = config().getBoolean("local");
-					if (local == null) {
-						throw new IllegalArgumentException("local is not set!");
-					}
-					if (this.local.tryEmitValue(local).isFailure()) {
-						throw new IllegalStateException("Failed to set local");
-					}
+		return MonoUtils
+				.toCompletable(MonoUtils
+						.fromBlockingMaybe(() -> {
+							logger.trace("Stating verticle");
+							var botId = config().getInteger("botId");
+							if (botId == null || botId <= 0) {
+								throw new IllegalArgumentException("botId is not set!");
+							}
+							if (this.botId.tryEmitValue(botId).isFailure()) {
+								throw new IllegalStateException("Failed to set botId");
+							}
+							var botAddress = "bots.bot." + botId;
+							if (this.botAddress.tryEmitValue(botAddress).isFailure()) {
+								throw new IllegalStateException("Failed to set botAddress");
+							}
+							var botAlias = config().getString("botAlias");
+							if (botAlias == null || botAlias.isEmpty()) {
+								throw new IllegalArgumentException("botAlias is not set!");
+							}
+							if (this.botAlias.tryEmitValue(botAlias).isFailure()) {
+								throw new IllegalStateException("Failed to set botAlias");
+							}
+							var local = config().getBoolean("local");
+							if (local == null) {
+								throw new IllegalArgumentException("local is not set!");
+							}
+							var implementationDetails = config().getJsonObject("implementationDetails");
+							if (implementationDetails == null) {
+								throw new IllegalArgumentException("implementationDetails is not set!");
+							}
 
-					var td = new AsyncTdDirectImpl(botAlias);
-					if (this.td.tryEmitValue(td).isFailure()) {
-						throw new IllegalStateException("Failed to set td instance");
-					}
-					return onSuccessfulStartRequest(td, botAddress, botAlias, botId, local);
-				})
-				.flatMap(Mono::hide));
+							var td = new AsyncTdDirectImpl(clientFactory, implementationDetails, botAlias);
+							if (this.td.tryEmitValue(td).isFailure()) {
+								throw new IllegalStateException("Failed to set td instance");
+							}
+							return onSuccessfulStartRequest(td, botAddress, botAlias, botId, local);
+						})
+						.flatMap(Mono::hide)
+						.doOnSuccess(s -> logger.trace("Stated verticle"))
+				);
 	}
 
 	private Mono<Void> onSuccessfulStartRequest(AsyncTdDirectImpl td, String botAddress, String botAlias, int botId, boolean local) {
@@ -115,6 +125,8 @@ public class AsyncTdMiddleEventBusServer extends AbstractVerticle {
 
 	private Mono<Void> listen(AsyncTdDirectImpl td, String botAddress, String botAlias, int botId, boolean local) {
 		return Mono.<Void>create(registrationSink -> {
+			logger.trace("Preparing listeners");
+
 			MessageConsumer<ExecuteObject> executeConsumer = vertx.eventBus().consumer(botAddress + ".execute");
 			if (this.executeConsumer.tryEmitValue(executeConsumer).isFailure()) {
 				registrationSink.error(new IllegalStateException("Failed to set executeConsumer"));
@@ -126,10 +138,12 @@ public class AsyncTdMiddleEventBusServer extends AbstractVerticle {
 						executeConsumer.endHandler(h -> sink.complete());
 					})
 					.flatMap(msg -> {
+						logger.trace("Received execute request {}", msg.body());
 						var request = overrideRequest(msg.body().getRequest(), botId);
 						return td
 								.execute(request, msg.body().isExecuteDirectly())
-								.map(result -> Tuples.of(msg, result));
+								.map(result -> Tuples.of(msg, result))
+								.doOnSuccess(s -> logger.trace("Executed successfully"));
 					})
 					.handle((tuple, sink) -> {
 						var msg = tuple.getT1();
@@ -137,16 +151,21 @@ public class AsyncTdMiddleEventBusServer extends AbstractVerticle {
 						var replyOpts = new DeliveryOptions().setLocalOnly(local);
 						var replyValue = new TdResultMessage(response.result(), response.cause());
 						try {
+							logger.trace("Replying with success response");
 							msg.reply(replyValue, replyOpts);
 							sink.next(response);
 						} catch (Exception ex) {
+							logger.trace("Replying with error response: {}", ex.getLocalizedMessage());
 							msg.fail(500, ex.getLocalizedMessage());
 							sink.error(ex);
 						}
 					})
 					.then()
 					.subscribeOn(Schedulers.single())
-					.subscribe(v -> {}, ex -> logger.error("Error when processing an execute request", ex));
+					.subscribe(v -> {},
+							ex -> logger.error("Error when processing an execute request", ex),
+							() -> logger.trace("Finished handling execute requests")
+					);
 
 			MessageConsumer<byte[]> readBinlogConsumer = vertx.eventBus().consumer(botAddress + ".read-binlog");
 			if (this.readBinlogConsumer.tryEmitValue(readBinlogConsumer).isFailure()) {
@@ -163,28 +182,37 @@ public class AsyncTdMiddleEventBusServer extends AbstractVerticle {
 				registrationSink.error(new IllegalStateException("Failed to set readyToReceiveConsumer"));
 				return;
 			}
-			Flux
+
+			// Pipe  the data
+			var pipeSubscription = Flux
 					.<Message<byte[]>>create(sink -> {
 						readyToReceiveConsumer.handler(sink::next);
 						readyToReceiveConsumer.endHandler(h -> sink.complete());
 					})
+					.take(1)
+					.limitRequest(1)
+					.single()
 					.flatMap(msg -> this.pipeFlux
 							.asMono()
 							.timeout(Duration.ofSeconds(5))
 							.map(pipeFlux -> Tuples.of(msg, pipeFlux)))
-					.doOnNext(tuple -> {
+					.doOnError(ex -> logger.error("Error when processing a ready-to-receive request", ex))
+					.flatMapMany(tuple -> {
 						var opts = new DeliveryOptions().setLocalOnly(local).setSendTimeout(Duration.ofSeconds(10).toMillis());
+
 						tuple.getT1().reply(EMPTY, opts);
+						logger.trace("Replied to ready-to-receive");
 
 						// Start piping the data
-						//noinspection CallingSubscribeInNonBlockingScope
-						tuple.getT2()
-								.subscribeOn(Schedulers.single())
-								.subscribe();
+						return tuple.getT2().doOnSubscribe(s -> {
+							logger.trace("Subscribed to updates pipe");
+						});
 					})
 					.then()
+					.doOnSuccess(s -> logger.trace("Finished handling ready-to-receive requests (updates pipe ended)"))
 					.subscribeOn(Schedulers.single())
-					.subscribe(v -> {}, ex -> logger.error("Error when processing a ready-to-receive request", ex));
+					// Don't handle errors here. Handle them in pipeFlux
+					.subscribe(v -> {});
 
 			MessageConsumer<byte[]> pingConsumer = vertx.eventBus().consumer(botAddress + ".ping");
 			if (this.pingConsumer.tryEmitValue(pingConsumer).isFailure()) {
@@ -202,7 +230,10 @@ public class AsyncTdMiddleEventBusServer extends AbstractVerticle {
 					})
 					.then()
 					.subscribeOn(Schedulers.single())
-					.subscribe(v -> {}, ex -> logger.error("Error when processing a ping request", ex));
+					.subscribe(v -> {},
+							ex -> logger.error("Error when processing a ping request", ex),
+							() -> logger.trace("Finished handling ping requests")
+					);
 
 
 			//noinspection ResultOfMethodCallIgnored
@@ -212,6 +243,7 @@ public class AsyncTdMiddleEventBusServer extends AbstractVerticle {
 					.andThen(readyToReceiveConsumer.rxCompletionHandler())
 					.andThen(pingConsumer.rxCompletionHandler())
 					.subscribeOn(io.reactivex.schedulers.Schedulers.single())
+					.doOnComplete(() -> logger.trace("Finished preparing listeners"))
 					.subscribe(registrationSink::success, registrationSink::error);
 		});
 	}
@@ -268,37 +300,37 @@ public class AsyncTdMiddleEventBusServer extends AbstractVerticle {
 	}
 
 	private Mono<Void> pipe(AsyncTdDirectImpl td, String botAddress, String botAlias, int botId, boolean local) {
+		logger.trace("Preparing to pipe requests");
 		Flux<TdResultList> updatesFlux = td
 				.receive(tdOptions)
-				.flatMap(item -> Mono.defer(() -> {
+				.takeUntil(item -> {
 					if (item instanceof Update) {
 						var tdUpdate = (Update) item;
 						if (tdUpdate.getConstructor() == UpdateAuthorizationState.CONSTRUCTOR) {
-							var tdUpdateAuthorizationState = (UpdateAuthorizationState) tdUpdate;
-							if (tdUpdateAuthorizationState.authorizationState.getConstructor()
-									== AuthorizationStateClosed.CONSTRUCTOR) {
-								logger.debug("Undeploying after receiving AuthorizationStateClosed");
-								return rxStop().as(MonoUtils::toMono).thenReturn(item);
+							var updateAuthorizationState = (UpdateAuthorizationState) tdUpdate;
+							if (updateAuthorizationState.authorizationState.getConstructor() == AuthorizationStateClosed.CONSTRUCTOR) {
+								return true;
 							}
 						}
 					} else if (item instanceof Error) {
-						// An error in updates means that a fatal error occurred
-						logger.debug("Undeploying after receiving a fatal error");
-						return rxStop().as(MonoUtils::toMono).thenReturn(item);
+						return true;
 					}
-					return Mono.just(item);
-				}))
-				.flatMap(item -> Mono.fromCallable(() -> {
-					if (item.getConstructor() == TdApi.Error.CONSTRUCTOR) {
-						var error = (Error) item;
+					return false;
+				})
+				.flatMap(update -> Mono.fromCallable(() -> {
+					if (update.getConstructor() == TdApi.Error.CONSTRUCTOR) {
+						var error = (Error) update;
 						throw new TdError(error.code, error.message);
 					} else {
-						return item;
+						return update;
 					}
 				}))
 				.bufferTimeout(tdOptions.getEventsSize(), local ? Duration.ofMillis(1) : Duration.ofMillis(100))
-				.windowTimeout(1, Duration.ofSeconds(5))
-				.flatMap(w -> w.defaultIfEmpty(Collections.emptyList()))
+				.doFinally(signalType -> terminatePingOverPipeFlux.tryEmitEmpty())
+				.mergeWith(Flux
+						.interval(Duration.ofSeconds(5))
+						.map(l -> Collections.<TdApi.Object>emptyList())
+						.takeUntilOther(terminatePingOverPipeFlux.asMono()))
 				.map(TdResultList::new);
 
 		var fluxCodec = new TdResultListMessageCodec();
@@ -312,7 +344,33 @@ public class AsyncTdMiddleEventBusServer extends AbstractVerticle {
 				.sender(botAddress + ".updates", opts);
 
 		var pipeFlux = updatesFlux
-				.flatMap(update -> updatesSender.rxWrite(update).as(MonoUtils::toMono).then())
+				.flatMap(updatesList -> updatesSender
+						.rxWrite(updatesList)
+						.as(MonoUtils::toMono)
+						.thenReturn(updatesList)
+				)
+				.flatMap(updatesList -> Flux
+						.fromIterable(updatesList.value())
+						.flatMap(item -> {
+							if (item instanceof Update) {
+								var tdUpdate = (Update) item;
+								if (tdUpdate.getConstructor() == UpdateAuthorizationState.CONSTRUCTOR) {
+									var tdUpdateAuthorizationState = (UpdateAuthorizationState) tdUpdate;
+									if (tdUpdateAuthorizationState.authorizationState.getConstructor()
+											== AuthorizationStateClosed.CONSTRUCTOR) {
+										logger.debug("Undeploying after receiving AuthorizationStateClosed");
+										return rxStop().as(MonoUtils::toMono).thenReturn(item);
+									}
+								}
+							} else if (item instanceof Error) {
+								// An error in updates means that a fatal error occurred
+								logger.debug("Undeploying after receiving a fatal error");
+								return rxStop().as(MonoUtils::toMono).thenReturn(item);
+							}
+							return Mono.just(item);
+						})
+						.then()
+				)
 				.doOnTerminate(() -> updatesSender.close(h -> {
 					if (h.failed()) {
 						logger.error("Failed to close \"updates\" message sender");
@@ -324,7 +382,7 @@ public class AsyncTdMiddleEventBusServer extends AbstractVerticle {
 							.doOnError(ex2 -> logger.error("Unexpected error", ex2))
 							.then();
 				});
-		MonoUtils.emitValue(this.pipeFlux, pipeFlux);
-		return Mono.empty();
+		return MonoUtils.emitValue(this.pipeFlux, pipeFlux)
+				.doOnSuccess(s -> logger.trace("Prepared piping requests successfully"));
 	}
 }

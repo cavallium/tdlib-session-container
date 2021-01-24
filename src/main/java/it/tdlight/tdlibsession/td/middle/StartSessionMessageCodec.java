@@ -2,6 +2,7 @@ package it.tdlight.tdlibsession.td.middle;
 
 import io.vertx.core.buffer.Buffer;
 import io.vertx.core.eventbus.MessageCodec;
+import io.vertx.core.json.JsonObject;
 import it.tdlight.utils.VertxBufferInputStream;
 import it.tdlight.utils.VertxBufferOutputStream;
 import org.warp.commonutils.stream.SafeDataInputStream;
@@ -25,6 +26,7 @@ public class StartSessionMessageCodec implements MessageCodec<StartSessionMessag
 				dos.writeInt(t.binlog().length);
 				dos.write(t.binlog());
 				dos.writeLong(t.binlogDate());
+				dos.writeUTF(t.implementationDetails().toString());
 			}
 		}
 	}
@@ -33,7 +35,12 @@ public class StartSessionMessageCodec implements MessageCodec<StartSessionMessag
 	public StartSessionMessage decodeFromWire(int pos, Buffer buffer) {
 		try (var fis = new VertxBufferInputStream(buffer, pos)) {
 			try (var dis = new SafeDataInputStream(fis)) {
-				return new StartSessionMessage(dis.readInt(), dis.readUTF(), dis.readNBytes(dis.readInt()), dis.readLong());
+				return new StartSessionMessage(dis.readInt(),
+						dis.readUTF(),
+						dis.readNBytes(dis.readInt()),
+						dis.readLong(),
+						new JsonObject(dis.readUTF())
+				);
 			}
 		}
 	}

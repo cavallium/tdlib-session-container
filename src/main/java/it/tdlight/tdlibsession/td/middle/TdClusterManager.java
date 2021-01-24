@@ -160,6 +160,18 @@ public class TdClusterManager {
 		}
 
 		vertxOptions.setPreferNativeTransport(true);
+		// check for blocked threads every 5s
+		vertxOptions.setBlockedThreadCheckInterval(5);
+		vertxOptions.setBlockedThreadCheckIntervalUnit(TimeUnit.SECONDS);
+		// warn if an event loop thread handler took more than 100ms to execute
+		vertxOptions.setMaxEventLoopExecuteTime(50);
+		vertxOptions.setMaxEventLoopExecuteTimeUnit(TimeUnit.MILLISECONDS);
+		// warn if an worker thread handler took more than 10s to execute
+		vertxOptions.setMaxWorkerExecuteTime(10);
+		vertxOptions.setMaxWorkerExecuteTimeUnit(TimeUnit.SECONDS);
+		// log the stack trace if an event loop or worker handler took more than 20s to execute
+		vertxOptions.setWarningExceptionTime(100);
+		vertxOptions.setWarningExceptionTimeUnit(TimeUnit.MILLISECONDS);
 
 		return Mono
 				.<Vertx>create(sink -> {

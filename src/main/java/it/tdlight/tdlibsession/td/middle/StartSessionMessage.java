@@ -1,5 +1,6 @@
 package it.tdlight.tdlibsession.td.middle;
 
+import io.vertx.core.json.JsonObject;
 import java.util.Arrays;
 import java.util.Objects;
 import java.util.StringJoiner;
@@ -10,12 +11,14 @@ public final class StartSessionMessage {
 	private final String alias;
 	private final byte[] binlog;
 	private final long binlogDate;
+	private final JsonObject implementationDetails;
 
-	public StartSessionMessage(int id, String alias, byte[] binlog, long binlogDate) {
+	public StartSessionMessage(int id, String alias, byte[] binlog, long binlogDate, JsonObject implementationDetails) {
 		this.id = id;
 		this.alias = alias;
 		this.binlog = binlog;
 		this.binlogDate = binlogDate;
+		this.implementationDetails = implementationDetails;
 	}
 
 	public int id() {
@@ -32,6 +35,10 @@ public final class StartSessionMessage {
 
 	public long binlogDate() {
 		return binlogDate;
+	}
+
+	public JsonObject implementationDetails() {
+		return implementationDetails;
 	}
 
 	@Override
@@ -54,7 +61,10 @@ public final class StartSessionMessage {
 		if (!Objects.equals(alias, that.alias)) {
 			return false;
 		}
-		return Arrays.equals(binlog, that.binlog);
+		if (!Arrays.equals(binlog, that.binlog)) {
+			return false;
+		}
+		return Objects.equals(implementationDetails, that.implementationDetails);
 	}
 
 	@Override
@@ -63,6 +73,7 @@ public final class StartSessionMessage {
 		result = 31 * result + (alias != null ? alias.hashCode() : 0);
 		result = 31 * result + Arrays.hashCode(binlog);
 		result = 31 * result + (int) (binlogDate ^ (binlogDate >>> 32));
+		result = 31 * result + (implementationDetails != null ? implementationDetails.hashCode() : 0);
 		return result;
 	}
 
@@ -73,6 +84,7 @@ public final class StartSessionMessage {
 				.add("alias='" + alias + "'")
 				.add("binlog=" + Arrays.toString(binlog))
 				.add("binlogDate=" + binlogDate)
+				.add("implementationDetails=" + implementationDetails)
 				.toString();
 	}
 }

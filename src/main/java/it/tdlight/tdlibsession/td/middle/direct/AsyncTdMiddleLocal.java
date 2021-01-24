@@ -29,19 +29,26 @@ public class AsyncTdMiddleLocal implements AsyncTdMiddle {
 
 	private final AsyncTdMiddleEventBusServer srv;
 	private final One<AsyncTdMiddle> cli = Sinks.one();
+	private final JsonObject implementationDetails;
 
 
-	public AsyncTdMiddleLocal(TdClusterManager masterClusterManager, String botAlias, int botId) {
+	public AsyncTdMiddleLocal(TdClusterManager masterClusterManager,
+			String botAlias,
+			int botId,
+			JsonObject implementationDetails) {
 		this.masterClusterManager = masterClusterManager;
 		this.botAlias = botAlias;
 		this.botId = botId;
+		this.implementationDetails = implementationDetails;
 		this.vertx = masterClusterManager.getVertx();
 		this.deploymentOptions = masterClusterManager
 				.newDeploymentOpts()
 				.setConfig(new JsonObject()
 						.put("botId", botId)
 						.put("botAlias", botAlias)
-						.put("local", true));
+						.put("local", true)
+						.put("implementationDetails", implementationDetails)
+				);
 		this.srv = new AsyncTdMiddleEventBusServer();
 	}
 
@@ -51,7 +58,10 @@ public class AsyncTdMiddleLocal implements AsyncTdMiddle {
 				.single()
 				.then(Mono.fromSupplier(() -> new AsyncTdMiddleEventBusClient(masterClusterManager)))
 				.zipWith(AsyncTdMiddleEventBusClient.retrieveBinlog(vertx, Path.of("binlogs"), botId))
-				.flatMap(tuple -> tuple.getT1().start(botId, botAlias, true, tuple.getT2()).thenReturn(tuple.getT1()))
+				.flatMap(tuple -> tuple
+						.getT1()
+						.start(botId, botAlias, true, implementationDetails, tuple.getT2())
+						.thenReturn(tuple.getT1()))
 				.onErrorMap(InitializationException::new)
 				.doOnNext(this.cli::tryEmitValue)
 				.doOnError(this.cli::tryEmitError)

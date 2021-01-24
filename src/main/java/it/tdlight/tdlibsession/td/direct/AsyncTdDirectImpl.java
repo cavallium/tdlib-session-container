@@ -1,15 +1,15 @@
 package it.tdlight.tdlibsession.td.direct;
 
+import io.vertx.core.json.JsonObject;
 import it.tdlight.common.TelegramClient;
 import it.tdlight.jni.TdApi;
 import it.tdlight.jni.TdApi.AuthorizationStateClosed;
 import it.tdlight.jni.TdApi.Close;
 import it.tdlight.jni.TdApi.Function;
-import it.tdlight.jni.TdApi.Object;
 import it.tdlight.jni.TdApi.Ok;
 import it.tdlight.jni.TdApi.UpdateAuthorizationState;
+import it.tdlight.tdlibsession.td.TdError;
 import it.tdlight.tdlibsession.td.TdResult;
-import it.tdlight.tdlight.ClientManager;
 import it.tdlight.utils.MonoUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -23,11 +23,17 @@ public class AsyncTdDirectImpl implements AsyncTdDirect {
 
 	private static final Logger logger = LoggerFactory.getLogger(AsyncTdDirect.class);
 
-	private final One<TelegramClient> td = Sinks.one();
-
+	private final TelegramClientFactory telegramClientFactory;
+	private final JsonObject implementationDetails;
 	private final String botAlias;
 
-	public AsyncTdDirectImpl(String botAlias) {
+	private final One<TelegramClient> td = Sinks.one();
+
+	public AsyncTdDirectImpl(TelegramClientFactory telegramClientFactory,
+			JsonObject implementationDetails,
+			String botAlias) {
+		this.telegramClientFactory = telegramClientFactory;
+		this.implementationDetails = implementationDetails;
 		this.botAlias = botAlias;
 	}
 
@@ -65,41 +71,40 @@ public class AsyncTdDirectImpl implements AsyncTdDirect {
 	public Flux<TdApi.Object> receive(AsyncTdDirectOptions options) {
 		// If closed it will be either true or false
 		final One<Boolean> closedFromTd = Sinks.one();
-		return Flux.<TdApi.Object>create(emitter -> {
-			var client = ClientManager.create((Object object) -> {
-				emitter.next(object);
-				// Close the emitter if receive closed state
-				if (object.getConstructor() == UpdateAuthorizationState.CONSTRUCTOR
-						&& ((UpdateAuthorizationState) object).authorizationState.getConstructor()
-						== AuthorizationStateClosed.CONSTRUCTOR) {
-					logger.debug("Received closed status from tdlib");
-					closedFromTd.tryEmitValue(true);
-					emitter.complete();
-				}
-			}, emitter::error, emitter::error);
-			try {
-				this.td.tryEmitValue(client).orThrow();
-			} catch (Exception ex) {
-				emitter.error(ex);
-			}
+		return telegramClientFactory.create(implementationDetails)
+				.flatMapMany(client -> Flux
+						.<TdApi.Object>create(updatesSink -> {
+							client.initialize((TdApi.Object object) -> {
+								updatesSink.next(object);
+								// Close the emitter if receive closed state
+								if (object.getConstructor() == UpdateAuthorizationState.CONSTRUCTOR
+										&& ((UpdateAuthorizationState) object).authorizationState.getConstructor()
+										== AuthorizationStateClosed.CONSTRUCTOR) {
+									logger.debug("Received closed status from tdlib");
+									closedFromTd.tryEmitValue(true);
+									updatesSink.complete();
+								}
+							}, updatesSink::error, updatesSink::error);
 
-			// Send close if the stream is disposed before tdlib is closed
-			emitter.onDispose(() -> {
-				// Try to emit false, so that if it has not been closed from tdlib, now it is explicitly false.
-				closedFromTd.tryEmitValue(false);
+							if (td.tryEmitValue(client).isFailure()) {
+								updatesSink.error(new TdError(500, "Failed to emit td client"));
+							}
 
-				closedFromTd.asMono()
-						.filter(isClosedFromTd -> !isClosedFromTd)
-						.doOnNext(x -> {
-							logger.warn("The stream has been disposed without closing tdlib. Sending TdApi.Close()...");
-							client.send(new Close(),
-									result -> logger.warn("Close result: {}", result),
-									ex -> logger.error("Error when disposing td client", ex)
-							);
+							// Send close if the stream is disposed before tdlib is closed
+							updatesSink.onDispose(() -> {
+								// Try to emit false, so that if it has not been closed from tdlib, now it is explicitly false.
+								closedFromTd.tryEmitValue(false);
+
+								closedFromTd.asMono().filter(isClosedFromTd -> !isClosedFromTd).doOnNext(x -> {
+									logger.warn("The stream has been disposed without closing tdlib. Sending TdApi.Close()...");
+									client.send(new Close(),
+											result -> logger.warn("Close result: {}", result),
+											ex -> logger.error("Error when disposing td client", ex)
+									);
+								}).subscribeOn(Schedulers.single()).subscribe();
+							});
 						})
-						.subscribeOn(Schedulers.single())
-						.subscribe();
-			});
-		});
+						.subscribeOn(Schedulers.boundedElastic())
+				);
 	}
 }

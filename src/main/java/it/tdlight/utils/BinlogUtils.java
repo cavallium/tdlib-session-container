@@ -69,13 +69,20 @@ public class BinlogUtils {
 				.then();
 	}
 
-	public static Mono<Void> cleanSessionPath(FileSystem vertxFilesystem, Path binlogPath, Path sessionPath) {
+	public static Mono<Void> cleanSessionPath(FileSystem vertxFilesystem,
+			Path binlogPath,
+			Path sessionPath,
+			Path mediaPath) {
 		return vertxFilesystem
 				.rxReadFile(binlogPath.toString()).as(MonoUtils::toMono)
 				.flatMap(buffer -> vertxFilesystem
 						.rxReadDir(sessionPath.toString(), "^(?!td.binlog$).*").as(MonoUtils::toMono)
 						.flatMapMany(Flux::fromIterable)
-						.doOnNext(file -> logger.debug("Deleting file {}", file))
+						.doOnNext(file -> logger.debug("Deleting session file {}", file))
+						.flatMap(file -> vertxFilesystem.rxDeleteRecursive(file, true).as(MonoUtils::toMono))
+						.then(vertxFilesystem.rxReadDir(mediaPath.toString(), "^(?!td.binlog$).*").as(MonoUtils::toMono))
+						.flatMapMany(Flux::fromIterable)
+						.doOnNext(file -> logger.debug("Deleting media file {}", file))
 						.flatMap(file -> vertxFilesystem.rxDeleteRecursive(file, true).as(MonoUtils::toMono))
 						.onErrorResume(ex -> Mono.empty())
 						.then()

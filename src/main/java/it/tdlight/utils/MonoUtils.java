@@ -99,7 +99,7 @@ public class MonoUtils {
 	}
 
 	public static <T> Mono<T> fromBlockingMaybe(Callable<T> callable) {
-		return Mono.fromCallable(callable).subscribeOn(Schedulers.boundedElastic());
+		return Mono.fromCallable(callable).publishOn(Schedulers.boundedElastic());
 	}
 
 	public static <T> Mono<T> fromBlockingSingle(Callable<T> callable) {
@@ -471,7 +471,9 @@ public class MonoUtils {
 		@Override
 		public io.vertx.core.streams.ReadStream<T> fetch(long amount) {
 			if (fetchMode.get()) {
-				readCoreSubscription.request(amount);
+				if (amount > 0) {
+					readCoreSubscription.request(amount);
+				}
 			}
 			return this;
 		}
@@ -498,6 +500,7 @@ public class MonoUtils {
 
 		@Override
 		public void end(Handler<AsyncResult<Void>> handler) {
+			/*
 			MonoUtils.emitCompleteFuture(sink).recover(error -> {
 				if (error instanceof EmissionException) {
 					var sinkError = (EmissionException) error;
@@ -514,6 +517,8 @@ public class MonoUtils {
 					drainSubscription.dispose();
 				}
 			}).onComplete(handler);
+			 */
+			MonoUtils.emitCompleteFuture(sink).onComplete(handler);
 		}
 
 		@Override
@@ -621,7 +626,9 @@ public class MonoUtils {
 		@Override
 		public io.vertx.core.streams.ReadStream<T> fetch(long amount) {
 			if (fetchMode.get()) {
-				readCoreSubscription.request(amount);
+				if (amount > 0) {
+					readCoreSubscription.request(amount);
+				}
 			}
 			return this;
 		}

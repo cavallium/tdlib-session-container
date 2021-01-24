@@ -25,6 +25,7 @@ import reactor.core.publisher.Mono;
 import reactor.core.publisher.Sinks;
 import reactor.core.publisher.Sinks.One;
 import reactor.core.scheduler.Schedulers;
+import reactor.tools.agent.ReactorDebugAgent;
 
 public class TDLibRemoteClient implements AutoCloseable {
 
@@ -41,12 +42,26 @@ public class TDLibRemoteClient implements AutoCloseable {
 	 */
 	private final AtomicInteger statsActiveDeployments = new AtomicInteger();
 
-	public TDLibRemoteClient(SecurityInfo securityInfo, String masterHostname, String netInterface, int port, Set<String> membersAddresses) {
+	public static boolean runningFromIntelliJ() {
+		return System.getProperty("java.class.path").contains("idea_rt.jar")
+				|| System.getProperty("idea.test.cyclic.buffer.size") != null;
+	}
+
+	public TDLibRemoteClient(SecurityInfo securityInfo,
+			String masterHostname,
+			String netInterface,
+			int port,
+			Set<String> membersAddresses,
+			boolean enableStacktraces) {
 		this.securityInfo = securityInfo;
 		this.masterHostname = masterHostname;
 		this.netInterface = netInterface;
 		this.port = port;
 		this.membersAddresses = membersAddresses;
+
+		if (enableStacktraces && !runningFromIntelliJ()) {
+			ReactorDebugAgent.init();
+		}
 
 		try {
 			Init.start();
@@ -74,13 +89,14 @@ public class TDLibRemoteClient implements AutoCloseable {
 		Path keyStorePasswordPath = Paths.get(args[4]);
 		Path trustStorePath = Paths.get(args[5]);
 		Path trustStorePasswordPath = Paths.get(args[6]);
+		boolean enableStacktraces = Boolean.parseBoolean(args[7]);
 
 		var loggerContext = (org.apache.logging.log4j.core.LoggerContext) LogManager.getContext(false);
 		loggerContext.setConfigLocation(TDLibRemoteClient.class.getResource("/tdlib-session-container-log4j2.xml").toURI());
 
 		var securityInfo = new SecurityInfo(keyStorePath, keyStorePasswordPath, trustStorePath, trustStorePasswordPath);
 
-		var client = new TDLibRemoteClient(securityInfo, masterHostname, netInterface, port, membersAddresses);
+		var client = new TDLibRemoteClient(securityInfo, masterHostname, netInterface, port, membersAddresses, enableStacktraces);
 
 		client
 				.start()
@@ -140,16 +156,18 @@ public class TDLibRemoteClient implements AutoCloseable {
 								.setConfig(new JsonObject()
 										.put("botId", req.id())
 										.put("botAlias", req.alias())
-										.put("local", false));
+										.put("local", false)
+										.put("implementationDetails", req.implementationDetails()));
 						var verticle = new AsyncTdMiddleEventBusServer();
 
 						// Binlog path
 						var sessPath = getSessionDirectory(req.id());
+						var mediaPath = getMediaDirectory(req.id());
 						var blPath = getSessionBinlogDirectory(req.id());
 
 						BinlogUtils
 								.chooseBinlog(clusterManager.getVertx().fileSystem(), blPath, req.binlog(), req.binlogDate())
-								.then(BinlogUtils.cleanSessionPath(clusterManager.getVertx().fileSystem(), blPath, sessPath))
+								.then(BinlogUtils.cleanSessionPath(clusterManager.getVertx().fileSystem(), blPath, sessPath, mediaPath))
 								.then(clusterManager.getVertx().rxDeployVerticle(verticle, deploymentOptions).as(MonoUtils::toMono))
 								.subscribeOn(Schedulers.single())
 								.subscribe(

@@ -12,6 +12,7 @@ import it.tdlight.tdlibsession.td.ResponseError;
 import it.tdlight.tdlibsession.td.TdResult;
 import it.tdlight.tdlibsession.td.direct.AsyncTdDirectImpl;
 import it.tdlight.tdlibsession.td.direct.AsyncTdDirectOptions;
+import it.tdlight.tdlibsession.td.direct.TelegramClientFactory;
 import it.tdlight.tdlibsession.td.middle.AsyncTdMiddle;
 import it.tdlight.tdlibsession.td.middle.TdClusterManager;
 import it.tdlight.utils.MonoUtils;
@@ -26,21 +27,26 @@ public class AsyncTdMiddleDirect extends AbstractVerticle implements AsyncTdMidd
 
 	private static final Logger logger = LoggerFactory.getLogger(AsyncTdMiddleDirect.class);
 
+	private final TelegramClientFactory clientFactory;
+
 	protected AsyncTdDirectImpl td;
 	private String botAddress;
 	private String botAlias;
 	private final Empty<Object> closeRequest = Sinks.empty();
 
 	public AsyncTdMiddleDirect() {
+		this.clientFactory = new TelegramClientFactory();
 	}
 
 	public static Mono<AsyncTdMiddle> getAndDeployInstance(TdClusterManager clusterManager,
 			String botAlias,
-			String botAddress) {
+			String botAddress,
+			JsonObject implementationDetails) {
 			var instance = new AsyncTdMiddleDirect();
 			var options = clusterManager.newDeploymentOpts().setConfig(new JsonObject()
 					.put("botAlias", botAlias)
-					.put("botAddress", botAddress));
+					.put("botAddress", botAddress)
+					.put("implementationDetails", implementationDetails));
 		return clusterManager.getVertx()
 				.rxDeployVerticle(instance, options)
 				.as(MonoUtils::toMono)
@@ -60,8 +66,12 @@ public class AsyncTdMiddleDirect extends AbstractVerticle implements AsyncTdMidd
 			throw new IllegalArgumentException("botAlias is not set!");
 		}
 		this.botAlias = botAlias;
+		var implementationDetails = config().getJsonObject("implementationDetails");
+		if (implementationDetails == null) {
+			throw new IllegalArgumentException("implementationDetails is not set!");
+		}
 
-		this.td = new AsyncTdDirectImpl(botAlias);
+		this.td = new AsyncTdDirectImpl(clientFactory, implementationDetails, botAlias);
 
 		startPromise.complete();
 	}
