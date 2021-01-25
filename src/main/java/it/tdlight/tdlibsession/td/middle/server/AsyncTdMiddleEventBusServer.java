@@ -128,7 +128,7 @@ public class AsyncTdMiddleEventBusServer extends AbstractVerticle {
 	}
 
 	private Mono<Void> listen(AsyncTdDirectImpl td, String botAddress, String botAlias, int botId, boolean local) {
-		return Mono.<Void>create(registrationSink -> {
+		return Mono.<Void>create(registrationSink -> Schedulers.boundedElastic().schedule(() -> {
 			logger.trace("Preparing listeners");
 
 			MessageConsumer<ExecuteObject> executeConsumer = vertx.eventBus().consumer(botAddress + ".execute");
@@ -249,7 +249,7 @@ public class AsyncTdMiddleEventBusServer extends AbstractVerticle {
 					.subscribeOn(io.reactivex.schedulers.Schedulers.single())
 					.doOnComplete(() -> logger.trace("Finished preparing listeners"))
 					.subscribe(registrationSink::success, registrationSink::error);
-		});
+		}));
 	}
 
 	/**
@@ -282,13 +282,13 @@ public class AsyncTdMiddleEventBusServer extends AbstractVerticle {
 						.then(readBinlogConsumer
 								.asMono()
 								.timeout(Duration.ofSeconds(10), Mono.empty())
-								.doOnNext(ec -> Mono
+								.doOnNext(ec -> Schedulers.boundedElastic().schedule(() -> Mono
 										// ReadBinLog will live for another 30 minutes.
 										// Since every consumer of ReadBinLog is identical, this should not pose a problem.
 										.delay(Duration.ofMinutes(30))
 										.then(ec.rxUnregister().as(MonoUtils::toMono))
 										.subscribeOn(Schedulers.single())
-										.subscribe()
+										.subscribe())
 								)
 						)
 						.then(readyToReceiveConsumer

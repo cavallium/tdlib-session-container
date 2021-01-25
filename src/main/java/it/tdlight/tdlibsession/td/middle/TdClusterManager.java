@@ -181,7 +181,9 @@ public class TdClusterManager {
 					} else {
 						sink.success(Vertx.vertx(vertxOptions));
 					}
-				}).flatMap(vertx -> Mono
+				})
+				.publishOn(Schedulers.boundedElastic())
+				.flatMap(vertx -> Mono
 						.fromCallable(() -> new TdClusterManager(mgr, vertxOptions, vertx))
 						.subscribeOn(Schedulers.boundedElastic())
 				);

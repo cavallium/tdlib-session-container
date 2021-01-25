@@ -24,6 +24,7 @@ import it.tdlight.utils.MonoUtils.SinkRWStream;
 import java.net.ConnectException;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.util.concurrent.Callable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import reactor.core.publisher.Flux;
@@ -45,7 +46,7 @@ public class AsyncTdMiddleEventBusClient implements AsyncTdMiddle {
 
 	private final One<BinlogAsyncFile> binlog = Sinks.one();
 
-	SinkRWStream<Message<TdResultList>> updates = MonoUtils.unicastBackpressureSinkStreak();
+	private final One<SinkRWStream<Message<TdResultList>>> updates = Sinks.one();
 	// This will only result in a successful completion, never completes in other ways
 	private final Empty<Void> updatesStreamEnd = Sinks.one();
 	// This will only result in a crash, never completes in other ways
@@ -63,25 +64,32 @@ public class AsyncTdMiddleEventBusClient implements AsyncTdMiddle {
 		this.deliveryOptionsWithTimeout = cluster.newDeliveryOpts().setLocalOnly(local).setSendTimeout(30000);
 	}
 
+	private Mono<AsyncTdMiddleEventBusClient> initialize() {
+		return MonoUtils.<Message<TdResultList>>unicastBackpressureSinkStream()
+				.flatMap(updates -> MonoUtils.emitValue(this.updates, updates))
+				.thenReturn(this);
+	}
+
 	public static Mono<AsyncTdMiddle> getAndDeployInstance(TdClusterManager clusterManager,
 			int botId,
 			String botAlias,
 			boolean local,
 			JsonObject implementationDetails,
 			Path binlogsArchiveDirectory) {
-		var instance = new AsyncTdMiddleEventBusClient(clusterManager);
-		return retrieveBinlog(clusterManager.getVertx(), binlogsArchiveDirectory, botId)
-				.flatMap(binlog -> binlog
-						.getLastModifiedTime()
-						.filter(modTime -> modTime == 0)
-						.doOnNext(v -> LoggerFactory
-								.getLogger(AsyncTdMiddleEventBusClient.class)
-								.error("Can't retrieve binlog of bot " + botId + " " + botAlias + ". Creating a new one..."))
-						.thenReturn(binlog)
-				)
-				.<AsyncTdMiddle>flatMap(binlog -> instance
-						.start(botId, botAlias, local, implementationDetails, binlog)
-						.thenReturn(instance)
+		return new AsyncTdMiddleEventBusClient(clusterManager)
+				.initialize()
+				.flatMap(instance -> retrieveBinlog(clusterManager.getVertx(), binlogsArchiveDirectory, botId)
+						.flatMap(binlog -> binlog
+								.getLastModifiedTime()
+								.filter(modTime -> modTime == 0)
+								.doOnNext(v -> LoggerFactory
+										.getLogger(AsyncTdMiddleEventBusClient.class)
+										.error("Can't retrieve binlog of bot " + botId + " " + botAlias + ". Creating a new one..."))
+								.thenReturn(binlog)).<AsyncTdMiddle>flatMap(binlog -> instance
+								.start(botId, botAlias, local, implementationDetails, binlog)
+								.thenReturn(instance)
+						)
+						.single()
 				)
 				.single();
 	}
@@ -124,29 +132,42 @@ public class AsyncTdMiddleEventBusClient implements AsyncTdMiddle {
 							implementationDetails
 					);
 					return setupUpdatesListener()
-							.then(Mono.defer(() -> local ? Mono.empty()
-									: cluster.getEventBus().<byte[]>rxRequest("bots.start-bot", msg).as(MonoUtils::toMono)))
+							.then(Mono.defer(() -> {
+								if (local) {
+									return Mono.empty();
+								}
+								return cluster.getEventBus()
+										.<byte[]>rxRequest("bots.start-bot", msg).as(MonoUtils::toMono)
+										.publishOn(Schedulers.boundedElastic());
+							}))
 							.then();
 				})
 				.publishOn(Schedulers.single());
 	}
 
-	@SuppressWarnings("CallingSubscribeInNonBlockingScope")
 	private Mono<Void> setupUpdatesListener() {
-		MessageConsumer<TdResultList> updateConsumer = MessageConsumer.newInstance(cluster.getEventBus().<TdResultList>consumer(
-				botAddress + ".updates").setMaxBufferedMessages(5000).getDelegate());
-		updateConsumer.endHandler(h -> {
-			logger.error("<<<<<<<<<<<<<<<<EndHandler?>>>>>>>>>>>>>");
-		});
+		return MonoUtils
+				.fromBlockingMaybe(() -> {
+					MessageConsumer<TdResultList> updateConsumer = MessageConsumer.newInstance(cluster.getEventBus().<TdResultList>consumer(
+							botAddress + ".updates").setMaxBufferedMessages(5000).getDelegate());
+					updateConsumer.endHandler(h -> {
+						logger.error("<<<<<<<<<<<<<<<<EndHandler?>>>>>>>>>>>>>");
+					});
 
-		// Here the updates will be piped from the server to the client
-		updateConsumer
-				.rxPipeTo(updates.writeAsStream()).as(MonoUtils::toMono)
-				.subscribeOn(Schedulers.single())
-				.subscribe();
+					// Here the updates will be piped from the server to the client
+					updates
+							.asMono()
+							.timeout(Duration.ofSeconds(5))
+							.flatMap(updates -> updateConsumer
+									.rxPipeTo(updates.writeAsStream()).as(MonoUtils::toMono)
+							)
+							.publishOn(Schedulers.newSingle("td-client-updates-pipe"))
+							.subscribe();
 
-		// Return when the registration of all the consumers has been done across the cluster
-		return updateConsumer.rxCompletionHandler().as(MonoUtils::toMono);
+					return updateConsumer;
+				})
+				// Return when the registration of all the consumers has been done across the cluster
+				.flatMap(updateConsumer -> updateConsumer.rxCompletionHandler().as(MonoUtils::toMono));
 	}
 
 	@Override
@@ -158,7 +179,8 @@ public class AsyncTdMiddleEventBusClient implements AsyncTdMiddle {
 				.then()
 				.doOnSuccess(s -> logger.trace("Sent ready-to-receive, received reply"))
 				.doOnSuccess(s -> logger.trace("About to read updates flux"))
-				.thenMany(updates.readAsFlux())
+				.then(updates.asMono().timeout(Duration.ofSeconds(5)))
+				.flatMapMany(SinkRWStream::readAsFlux)
 				// Cast to fix bug of reactivex
 				.cast(io.vertx.core.eventbus.Message.class)
 				.timeout(Duration.ofMinutes(1), Mono.fromCallable(() -> {
@@ -166,9 +188,12 @@ public class AsyncTdMiddleEventBusClient implements AsyncTdMiddle {
 					ex.setStackTrace(new StackTraceElement[0]);
 					throw ex;
 				}))
-				.doOnSubscribe(s -> cluster.getEventBus().<byte[]>send(botAddress + ".ready-to-receive", EMPTY, deliveryOptionsWithTimeout))
+				.doOnSubscribe(s -> Schedulers.boundedElastic().schedule(() -> {
+					cluster.getEventBus().<byte[]>send(botAddress + ".ready-to-receive", EMPTY, deliveryOptionsWithTimeout);
+				}))
+				.flatMap(updates -> Mono.fromCallable((Callable<Object>) updates::body).publishOn(Schedulers.boundedElastic()))
 				.flatMap(updates -> {
-					var result = (TdResultList) updates.body();
+					var result = (TdResultList) updates;
 					if (result.succeeded()) {
 						return Flux.fromIterable(result.value());
 					} else {
@@ -192,6 +217,7 @@ public class AsyncTdMiddleEventBusClient implements AsyncTdMiddle {
 								.doOnNext(l -> logger.info("Received binlog from server. Size: " + BinlogUtils.humanReadableByteCountBin(l.body().binlog().length)))
 								.flatMap(latestBinlog -> this.saveBinlog(latestBinlog.body().binlog()))
 								.doOnSuccess(s -> logger.info("Overwritten binlog from server"))
+								.publishOn(Schedulers.boundedElastic())
 								.thenReturn(update);
 				}
 				break;
@@ -210,13 +236,13 @@ public class AsyncTdMiddleEventBusClient implements AsyncTdMiddle {
 								.then(cluster.getEventBus().<TdResultMessage>rxRequest(botAddress + ".execute", req, deliveryOptions).as(MonoUtils::toMono))
 								.onErrorMap(ex -> ResponseError.newResponseError(request, botAlias, ex))
 								.<TdResult<T>>flatMap(resp -> Mono
-										.fromCallable(() -> {
+										.<TdResult<T>>fromCallable(() -> {
 											if (resp.body() == null) {
 												throw ResponseError.newResponseError(request, botAlias, new TdError(500, "Response is empty"));
 											} else {
 												return resp.body().toTdResult();
 											}
-										})
+										}).publishOn(Schedulers.boundedElastic())
 								)
 								.doOnSuccess(s -> logger.trace("Executed request"))
 		)

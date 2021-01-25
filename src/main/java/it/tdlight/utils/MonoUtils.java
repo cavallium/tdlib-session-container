@@ -31,7 +31,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.warp.commonutils.concurrency.future.CompletableFutureUtils;
 import reactor.core.CoreSubscriber;
-import reactor.core.Disposable;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.core.publisher.MonoSink;
@@ -303,7 +302,7 @@ public class MonoUtils {
 		return fromEmitResultFuture(sink.tryEmitEmpty());
 	}
 
-	public static <T> SinkRWStream<T> unicastBackpressureSinkStreak() {
+	public static <T> Mono<SinkRWStream<T>> unicastBackpressureSinkStream() {
 		Many<T> sink = Sinks.many().unicast().onBackpressureBuffer();
 		return asStream(sink, null, null, 1);
 	}
@@ -311,7 +310,7 @@ public class MonoUtils {
 	/**
 	 * Create a sink that can be written from a writeStream
 	 */
-	public static <T> SinkRWStream<T> unicastBackpressureStream(int maxBackpressureQueueSize) {
+	public static <T> Mono<SinkRWStream<T>> unicastBackpressureStream(int maxBackpressureQueueSize) {
 		Queue<T> boundedQueue = Queues.<T>get(maxBackpressureQueueSize).get();
 		var queueSize = Flux
 				.interval(Duration.ZERO, Duration.ofMillis(500))
@@ -321,16 +320,16 @@ public class MonoUtils {
 		return asStream(sink, queueSize, termination, maxBackpressureQueueSize);
 	}
 
-	public static <T> SinkRWStream<T> unicastBackpressureErrorStream() {
+	public static <T> Mono<SinkRWStream<T>> unicastBackpressureErrorStream() {
 		Many<T> sink = Sinks.many().unicast().onBackpressureError();
 		return asStream(sink, null, null, 1);
 	}
 
-	public static <T> SinkRWStream<T> asStream(Many<T> sink,
+	public static <T> Mono<SinkRWStream<T>> asStream(Many<T> sink,
 			@Nullable Flux<Integer> backpressureSize,
 			@Nullable Empty<Void> termination,
 			int maxBackpressureQueueSize) {
-		return new SinkRWStream<>(sink, backpressureSize, termination, maxBackpressureQueueSize);
+		return SinkRWStream.create(sink, backpressureSize, termination, maxBackpressureQueueSize);
 	}
 
 	private static Future<Void> toVertxFuture(Mono<Void> toTransform) {
@@ -347,46 +346,64 @@ public class MonoUtils {
 	public static class SinkRWStream<T> implements io.vertx.core.streams.WriteStream<T>, io.vertx.core.streams.ReadStream<T> {
 
 		private final Many<T> sink;
-		private final @Nullable Disposable drainSubscription;
+		private final Flux<Integer> backpressureSize;
+		private final Empty<Void> termination;
 		private Handler<Throwable> exceptionHandler = e -> {};
 		private Handler<Void> drainHandler = h -> {};
 		private final int maxBackpressureQueueSize;
 		private volatile int writeQueueMaxSize;
 		private volatile boolean writeQueueFull = false;
 
-		public SinkRWStream(Many<T> sink,
+		private SinkRWStream(Many<T> sink,
 				@Nullable Flux<Integer> backpressureSize,
 				@Nullable Empty<Void> termination,
 				int maxBackpressureQueueSize) {
 			this.maxBackpressureQueueSize = maxBackpressureQueueSize;
 			this.writeQueueMaxSize = this.maxBackpressureQueueSize;
+			this.backpressureSize = backpressureSize;
+			this.termination = termination;
 			this.sink = sink;
+		}
 
-			if (backpressureSize != null) {
-				AtomicBoolean drained = new AtomicBoolean(true);
-				this.drainSubscription = backpressureSize
-						.subscribeOn(Schedulers.single())
-						.subscribe(size -> {
-							writeQueueFull = size >= this.writeQueueMaxSize;
+		public Mono<SinkRWStream<T>> initialize() {
+			return Mono.fromCallable(() -> {
+				if (backpressureSize != null) {
+					AtomicBoolean drained = new AtomicBoolean(true);
+					var drainSubscription = backpressureSize
+							.publishOn(Schedulers.boundedElastic())
+							.subscribe(size -> {
+								writeQueueFull = size >= this.writeQueueMaxSize;
 
-							boolean newDrained = size <= this.writeQueueMaxSize / 2;
-							boolean oldDrained = drained.getAndSet(newDrained);
-							if (newDrained && !oldDrained) {
-								drainHandler.handle(null);
-							}
-						}, ex -> {
-							exceptionHandler.handle(ex);
-						}, () -> {
-							if (!drained.get()) {
-								drainHandler.handle(null);
-							}
-						});
-				if (termination != null) {
-					termination.asMono().subscribeOn(Schedulers.single()).doOnTerminate(drainSubscription::dispose).subscribe();
+								boolean newDrained = size <= this.writeQueueMaxSize / 2;
+								boolean oldDrained = drained.getAndSet(newDrained);
+								if (newDrained && !oldDrained) {
+									drainHandler.handle(null);
+								}
+							}, ex -> {
+								exceptionHandler.handle(ex);
+							}, () -> {
+								if (!drained.get()) {
+									drainHandler.handle(null);
+								}
+							});
+					if (termination != null) {
+						termination
+								.asMono()
+								.doOnTerminate(drainSubscription::dispose)
+								.publishOn(Schedulers.boundedElastic())
+								.subscribe();
+					}
 				}
-			} else {
-				this.drainSubscription = null;
-			}
+
+				return this;
+			}).publishOn(Schedulers.boundedElastic());
+		}
+
+		public static <T> Mono<SinkRWStream<T>> create(Many<T> sink,
+				@Nullable Flux<Integer> backpressureSize,
+				@Nullable Empty<Void> termination,
+				int maxBackpressureQueueSize) {
+			return new SinkRWStream<T>(sink, backpressureSize, termination, maxBackpressureQueueSize).initialize();
 		}
 
 		public Flux<T> readAsFlux() {
@@ -423,7 +440,7 @@ public class MonoUtils {
 
 		@Override
 		public io.vertx.core.streams.ReadStream<T> handler(@io.vertx.codegen.annotations.Nullable Handler<T> handler) {
-			sink.asFlux().subscribeWith(new CoreSubscriber<T>() {
+			sink.asFlux().publishOn(Schedulers.boundedElastic()).subscribeWith(new CoreSubscriber<T>() {
 
 				@Override
 				public void onSubscribe(@NotNull Subscription s) {
@@ -500,24 +517,6 @@ public class MonoUtils {
 
 		@Override
 		public void end(Handler<AsyncResult<Void>> handler) {
-			/*
-			MonoUtils.emitCompleteFuture(sink).recover(error -> {
-				if (error instanceof EmissionException) {
-					var sinkError = (EmissionException) error;
-					switch (sinkError.getReason()) {
-						case FAIL_CANCELLED:
-						case FAIL_ZERO_SUBSCRIBER:
-						case FAIL_TERMINATED:
-							return Future.succeededFuture();
-					}
-				}
-				return Future.failedFuture(error);
-			}).onComplete(h -> {
-				if (drainSubscription != null) {
-					drainSubscription.dispose();
-				}
-			}).onComplete(handler);
-			 */
 			MonoUtils.emitCompleteFuture(sink).onComplete(handler);
 		}
 
@@ -578,7 +577,7 @@ public class MonoUtils {
 
 		@Override
 		public io.vertx.core.streams.ReadStream<T> handler(@io.vertx.codegen.annotations.Nullable Handler<T> handler) {
-			flux.subscribeWith(new CoreSubscriber<T>() {
+			flux.publishOn(Schedulers.boundedElastic()).subscribeWith(new CoreSubscriber<T>() {
 
 				@Override
 				public void onSubscribe(@NotNull Subscription s) {

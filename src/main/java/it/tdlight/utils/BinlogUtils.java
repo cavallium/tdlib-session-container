@@ -19,6 +19,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
+import reactor.core.scheduler.Schedulers;
 import reactor.util.function.Tuple2;
 import reactor.util.function.Tuples;
 
@@ -39,7 +40,8 @@ public class BinlogUtils {
 				// Open file
 				.flatMap(x -> vertxFilesystem.rxOpen(path, openOptions).as(MonoUtils::toMono))
 				.map(file -> new BinlogAsyncFile(vertxFilesystem, path, file))
-				.single();
+				.single()
+				.publishOn(Schedulers.boundedElastic());
 	}
 
 	public static Mono<Void> saveBinlog(BinlogAsyncFile binlog, byte[] data) {
@@ -66,7 +68,8 @@ public class BinlogUtils {
 						.then(retrieveBinlog(vertxFilesystem, binlogPath))
 				)
 				.single()
-				.then();
+				.then()
+				.publishOn(Schedulers.boundedElastic());
 	}
 
 	public static Mono<Void> cleanSessionPath(FileSystem vertxFilesystem,
@@ -86,7 +89,8 @@ public class BinlogUtils {
 						.flatMap(file -> vertxFilesystem.rxDeleteRecursive(file, true).as(MonoUtils::toMono))
 						.onErrorResume(ex -> Mono.empty())
 						.then()
-				);
+				)
+				.publishOn(Schedulers.boundedElastic());
 	}
 
 	public static String humanReadableByteCountBin(long bytes) {
@@ -123,6 +127,7 @@ public class BinlogUtils {
 					var opts = new DeliveryOptions().setLocalOnly(local).setSendTimeout(Duration.ofSeconds(10).toMillis());
 					tuple.getT1().reply(new EndSessionMessage(botId, tuple.getT2()), opts);
 				})
-				.then();
+				.then()
+				.publishOn(Schedulers.boundedElastic());
 	}
 }
