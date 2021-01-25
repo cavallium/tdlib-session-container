@@ -109,7 +109,7 @@ public class AsyncTdMiddleEventBusServer extends AbstractVerticle {
 							}
 							return onSuccessfulStartRequest(td, botAddress, botAlias, botId, local);
 						})
-						.flatMap(Mono::hide)
+						.flatMap(voidMono -> voidMono.hide().subscribeOn(Schedulers.boundedElastic()).publishOn(Schedulers.single()))
 						.doOnSuccess(s -> logger.trace("Stated verticle"))
 						.publishOn(Schedulers.single())
 				);
@@ -128,7 +128,7 @@ public class AsyncTdMiddleEventBusServer extends AbstractVerticle {
 	}
 
 	private Mono<Void> listen(AsyncTdDirectImpl td, String botAddress, String botAlias, int botId, boolean local) {
-		return Mono.<Void>create(registrationSink -> Schedulers.boundedElastic().schedule(() -> {
+		return Mono.<Void>create(registrationSink -> {
 			logger.trace("Preparing listeners");
 
 			MessageConsumer<ExecuteObject> executeConsumer = vertx.eventBus().consumer(botAddress + ".execute");
@@ -248,7 +248,9 @@ public class AsyncTdMiddleEventBusServer extends AbstractVerticle {
 					.doOnSuccess(s -> logger.trace("Finished preparing listeners"))
 					.publishOn(Schedulers.single())
 					.subscribe(v -> {}, registrationSink::error, registrationSink::success);
-		}));
+		})
+				.subscribeOn(Schedulers.boundedElastic())
+				.publishOn(Schedulers.single());
 	}
 
 	/**
@@ -281,14 +283,16 @@ public class AsyncTdMiddleEventBusServer extends AbstractVerticle {
 						.then(readBinlogConsumer
 								.asMono()
 								.timeout(Duration.ofSeconds(10), Mono.empty())
-								.doOnNext(ec -> Schedulers.boundedElastic().schedule(() -> Mono
-										// ReadBinLog will live for another 30 minutes.
-										// Since every consumer of ReadBinLog is identical, this should not pose a problem.
-										.delay(Duration.ofMinutes(30))
-										.then(ec.rxUnregister().as(MonoUtils::toMono))
-										.publishOn(Schedulers.single())
-										.subscribe())
-								)
+								.flatMap(ec -> Mono.fromCallable(() -> {
+									Mono
+											// ReadBinLog will live for another 30 minutes.
+											// Since every consumer of ReadBinLog is identical, this should not pose a problem.
+											.delay(Duration.ofMinutes(30))
+											.then(ec.rxUnregister().as(MonoUtils::toMono))
+											.publishOn(Schedulers.single())
+											.subscribe();
+									return null;
+								}).subscribeOn(Schedulers.boundedElastic()).publishOn(Schedulers.single()))
 						)
 						.then(readyToReceiveConsumer
 								.asMono()

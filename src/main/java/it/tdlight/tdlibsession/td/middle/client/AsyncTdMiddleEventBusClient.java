@@ -166,16 +166,19 @@ public class AsyncTdMiddleEventBusClient implements AsyncTdMiddle {
 				.then()
 				.doOnSuccess(s -> logger.trace("Sent ready-to-receive, received reply"))
 				.doOnSuccess(s -> logger.trace("About to read updates flux"))
-				.then(updates.asMono())
+				.then(updates.asMono().publishOn(Schedulers.single()))
 				.timeout(Duration.ofSeconds(5))
-				.flatMapMany(Flux::hide)
+				.publishOn(Schedulers.single())
+				.flatMapMany(tdResultListFlux -> tdResultListFlux.publishOn(Schedulers.single()))
+				.startWith(MonoUtils
+						.castVoid(Mono.<Void>fromRunnable(() -> {
+							cluster.getEventBus().<byte[]>send(botAddress + ".ready-to-receive", EMPTY, deliveryOptionsWithTimeout);
+						}).subscribeOn(Schedulers.boundedElastic()))
+				)
 				.timeout(Duration.ofMinutes(1), Mono.fromCallable(() -> {
 					var ex = new ConnectException("Server did not respond to 12 pings after 1 minute (5 seconds per ping)");
 					ex.setStackTrace(new StackTraceElement[0]);
 					throw ex;
-				}))
-				.doOnSubscribe(s -> Schedulers.boundedElastic().schedule(() -> {
-					cluster.getEventBus().<byte[]>send(botAddress + ".ready-to-receive", EMPTY, deliveryOptionsWithTimeout);
 				}))
 				.flatMapSequential(updates -> {
 					if (updates.succeeded()) {
@@ -184,6 +187,7 @@ public class AsyncTdMiddleEventBusClient implements AsyncTdMiddle {
 						return Mono.fromCallable(() -> TdResult.failed(updates.error()).orElseThrow());
 					}
 				})
+				.publishOn(Schedulers.single())
 				.flatMapSequential(this::interceptUpdate)
 				.doOnError(crash::tryEmitError)
 				.doOnTerminate(updatesStreamEnd::tryEmitEmpty)

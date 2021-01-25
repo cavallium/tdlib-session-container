@@ -74,7 +74,7 @@ public class AsyncTdDirectImpl implements AsyncTdDirect {
 		return telegramClientFactory.create(implementationDetails)
 				.flatMapMany(client -> Flux
 						.<TdApi.Object>create(updatesSink -> {
-							Schedulers.boundedElastic().schedule(() -> client.initialize((TdApi.Object object) -> {
+							client.initialize((TdApi.Object object) -> {
 								updatesSink.next(object);
 								// Close the emitter if receive closed state
 								if (object.getConstructor() == UpdateAuthorizationState.CONSTRUCTOR
@@ -84,7 +84,7 @@ public class AsyncTdDirectImpl implements AsyncTdDirect {
 									closedFromTd.tryEmitValue(true);
 									updatesSink.complete();
 								}
-							}, updatesSink::error, updatesSink::error));
+							}, updatesSink::error, updatesSink::error);
 
 							if (td.tryEmitValue(client).isFailure()) {
 								updatesSink.error(new TdError(500, "Failed to emit td client"));
@@ -105,7 +105,8 @@ public class AsyncTdDirectImpl implements AsyncTdDirect {
 								}).publishOn(Schedulers.single()).subscribe();
 							});
 						})
-						.publishOn(Schedulers.boundedElastic())
+						.subscribeOn(Schedulers.boundedElastic())
+						.publishOn(Schedulers.single())
 				);
 	}
 }

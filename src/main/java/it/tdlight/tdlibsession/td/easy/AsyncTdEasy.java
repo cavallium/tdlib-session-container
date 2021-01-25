@@ -58,7 +58,7 @@ public class AsyncTdEasy {
 
 	private final Logger logger;
 
-	private static final Scheduler scheduler = Schedulers.newSingle("AsyncTdEasy");
+	private static final Scheduler scheduler = Schedulers.newSingle("AsyncTdEasy", true);
 	private final Many<AuthorizationState> authState = Sinks.many().replay().latest();
 	private final Many<Boolean> requestedDefinitiveExit = Sinks.many().replay().latestOrDefault(false);
 	private final Many<TdEasySettings> settings = Sinks.many().replay().latest();
