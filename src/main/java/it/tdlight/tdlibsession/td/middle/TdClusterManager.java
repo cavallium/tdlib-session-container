@@ -166,9 +166,9 @@ public class TdClusterManager {
 		// check for blocked threads every 5s
 		vertxOptions.setBlockedThreadCheckInterval(5);
 		vertxOptions.setBlockedThreadCheckIntervalUnit(TimeUnit.SECONDS);
-		// warn if an event loop thread handler took more than 5s to execute
-		vertxOptions.setMaxEventLoopExecuteTime(5);
-		vertxOptions.setMaxEventLoopExecuteTimeUnit(TimeUnit.SECONDS);
+		// warn if an event loop thread handler took more than 100ms to execute
+		vertxOptions.setMaxEventLoopExecuteTime(100);
+		vertxOptions.setMaxEventLoopExecuteTimeUnit(TimeUnit.MILLISECONDS);
 		// warn if an worker thread handler took more than 10s to execute
 		vertxOptions.setMaxWorkerExecuteTime(10);
 		vertxOptions.setMaxWorkerExecuteTimeUnit(TimeUnit.SECONDS);
