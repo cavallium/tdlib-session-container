@@ -165,7 +165,7 @@ public class AsyncTdMiddleEventBusServer extends AbstractVerticle {
 						}
 					})
 					.then()
-					.subscribeOn(Schedulers.single())
+					.publishOn(Schedulers.single())
 					.subscribe(v -> {},
 							ex -> logger.error("Error when processing an execute request", ex),
 							() -> logger.trace("Finished handling execute requests")
@@ -178,7 +178,7 @@ public class AsyncTdMiddleEventBusServer extends AbstractVerticle {
 			}
 			BinlogUtils
 					.readBinlogConsumer(vertx, readBinlogConsumer, botId, local)
-					.subscribeOn(Schedulers.single())
+					.publishOn(Schedulers.single())
 					.subscribe(v -> {}, ex -> logger.error("Error when processing a read-binlog request", ex));
 
 			MessageConsumer<byte[]> readyToReceiveConsumer = vertx.eventBus().consumer(botAddress + ".ready-to-receive");
@@ -187,7 +187,7 @@ public class AsyncTdMiddleEventBusServer extends AbstractVerticle {
 				return;
 			}
 
-			// Pipe  the data
+			// Pipe the data
 			var pipeSubscription = Flux
 					.<Message<byte[]>>create(sink -> {
 						readyToReceiveConsumer.handler(sink::next);
@@ -214,7 +214,7 @@ public class AsyncTdMiddleEventBusServer extends AbstractVerticle {
 					})
 					.then()
 					.doOnSuccess(s -> logger.trace("Finished handling ready-to-receive requests (updates pipe ended)"))
-					.subscribeOn(Schedulers.single())
+					.publishOn(Schedulers.single())
 					// Don't handle errors here. Handle them in pipeFlux
 					.subscribe(v -> {});
 
@@ -233,22 +233,21 @@ public class AsyncTdMiddleEventBusServer extends AbstractVerticle {
 						msg.reply(EMPTY, opts);
 					})
 					.then()
-					.subscribeOn(Schedulers.single())
+					.publishOn(Schedulers.single())
 					.subscribe(v -> {},
 							ex -> logger.error("Error when processing a ping request", ex),
 							() -> logger.trace("Finished handling ping requests")
 					);
 
-
-			//noinspection ResultOfMethodCallIgnored
 			executeConsumer
 					.rxCompletionHandler()
 					.andThen(readBinlogConsumer.rxCompletionHandler())
 					.andThen(readyToReceiveConsumer.rxCompletionHandler())
 					.andThen(pingConsumer.rxCompletionHandler())
-					.subscribeOn(io.reactivex.schedulers.Schedulers.single())
-					.doOnComplete(() -> logger.trace("Finished preparing listeners"))
-					.subscribe(registrationSink::success, registrationSink::error);
+					.as(MonoUtils::toMono)
+					.doOnSuccess(s -> logger.trace("Finished preparing listeners"))
+					.publishOn(Schedulers.single())
+					.subscribe(v -> {}, registrationSink::error, registrationSink::success);
 		}));
 	}
 
@@ -287,7 +286,7 @@ public class AsyncTdMiddleEventBusServer extends AbstractVerticle {
 										// Since every consumer of ReadBinLog is identical, this should not pose a problem.
 										.delay(Duration.ofMinutes(30))
 										.then(ec.rxUnregister().as(MonoUtils::toMono))
-										.subscribeOn(Schedulers.single())
+										.publishOn(Schedulers.single())
 										.subscribe())
 								)
 						)

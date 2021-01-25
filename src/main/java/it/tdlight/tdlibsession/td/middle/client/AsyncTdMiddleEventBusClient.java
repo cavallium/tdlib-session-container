@@ -3,7 +3,6 @@ package it.tdlight.tdlibsession.td.middle.client;
 import io.vertx.core.eventbus.DeliveryOptions;
 import io.vertx.core.json.JsonObject;
 import io.vertx.reactivex.core.Vertx;
-import io.vertx.reactivex.core.eventbus.Message;
 import io.vertx.reactivex.core.eventbus.MessageConsumer;
 import it.tdlight.jni.TdApi;
 import it.tdlight.jni.TdApi.Function;
@@ -20,11 +19,9 @@ import it.tdlight.tdlibsession.td.middle.TdResultList;
 import it.tdlight.utils.BinlogAsyncFile;
 import it.tdlight.utils.BinlogUtils;
 import it.tdlight.utils.MonoUtils;
-import it.tdlight.utils.MonoUtils.SinkRWStream;
 import java.net.ConnectException;
 import java.nio.file.Path;
 import java.time.Duration;
-import java.util.concurrent.Callable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import reactor.core.publisher.Flux;
@@ -46,7 +43,7 @@ public class AsyncTdMiddleEventBusClient implements AsyncTdMiddle {
 
 	private final One<BinlogAsyncFile> binlog = Sinks.one();
 
-	private final One<SinkRWStream<Message<TdResultList>>> updates = Sinks.one();
+	private final One<Flux<TdResultList>> updates = Sinks.one();
 	// This will only result in a successful completion, never completes in other ways
 	private final Empty<Void> updatesStreamEnd = Sinks.one();
 	// This will only result in a crash, never completes in other ways
@@ -65,9 +62,7 @@ public class AsyncTdMiddleEventBusClient implements AsyncTdMiddle {
 	}
 
 	private Mono<AsyncTdMiddleEventBusClient> initialize() {
-		return MonoUtils.<Message<TdResultList>>unicastBackpressureSinkStream()
-				.flatMap(updates -> MonoUtils.emitValue(this.updates, updates))
-				.thenReturn(this);
+		return Mono.just(this);
 	}
 
 	public static Mono<AsyncTdMiddle> getAndDeployInstance(TdClusterManager clusterManager,
@@ -150,24 +145,16 @@ public class AsyncTdMiddleEventBusClient implements AsyncTdMiddle {
 				.fromBlockingMaybe(() -> {
 					MessageConsumer<TdResultList> updateConsumer = MessageConsumer.newInstance(cluster.getEventBus().<TdResultList>consumer(
 							botAddress + ".updates").setMaxBufferedMessages(5000).getDelegate());
-					updateConsumer.endHandler(h -> {
-						logger.error("<<<<<<<<<<<<<<<<EndHandler?>>>>>>>>>>>>>");
-					});
 
 					// Here the updates will be piped from the server to the client
-					updates
-							.asMono()
-							.timeout(Duration.ofSeconds(5))
-							.flatMap(updates -> updateConsumer
-									.rxPipeTo(updates.writeAsStream()).as(MonoUtils::toMono)
-							)
-							.publishOn(Schedulers.newSingle("td-client-updates-pipe"))
-							.subscribe();
+					var updateConsumerFlux = MonoUtils.fromConsumer(updateConsumer);
 
-					return updateConsumer;
+					// Return when the registration of all the consumers has been done across the cluster
+					return MonoUtils
+							.emitValue(updates, updateConsumerFlux)
+							.then(updateConsumer.rxCompletionHandler().as(MonoUtils::toMono));
 				})
-				// Return when the registration of all the consumers has been done across the cluster
-				.flatMap(updateConsumer -> updateConsumer.rxCompletionHandler().as(MonoUtils::toMono));
+				.then();
 	}
 
 	@Override
@@ -179,10 +166,9 @@ public class AsyncTdMiddleEventBusClient implements AsyncTdMiddle {
 				.then()
 				.doOnSuccess(s -> logger.trace("Sent ready-to-receive, received reply"))
 				.doOnSuccess(s -> logger.trace("About to read updates flux"))
-				.then(updates.asMono().timeout(Duration.ofSeconds(5)))
-				.flatMapMany(SinkRWStream::readAsFlux)
-				// Cast to fix bug of reactivex
-				.cast(io.vertx.core.eventbus.Message.class)
+				.then(updates.asMono())
+				.timeout(Duration.ofSeconds(5))
+				.flatMapMany(Flux::hide)
 				.timeout(Duration.ofMinutes(1), Mono.fromCallable(() -> {
 					var ex = new ConnectException("Server did not respond to 12 pings after 1 minute (5 seconds per ping)");
 					ex.setStackTrace(new StackTraceElement[0]);
@@ -191,13 +177,11 @@ public class AsyncTdMiddleEventBusClient implements AsyncTdMiddle {
 				.doOnSubscribe(s -> Schedulers.boundedElastic().schedule(() -> {
 					cluster.getEventBus().<byte[]>send(botAddress + ".ready-to-receive", EMPTY, deliveryOptionsWithTimeout);
 				}))
-				.flatMapSequential(updates -> Mono.fromCallable((Callable<Object>) updates::body).publishOn(Schedulers.boundedElastic()))
 				.flatMapSequential(updates -> {
-					var result = (TdResultList) updates;
-					if (result.succeeded()) {
-						return Flux.fromIterable(result.value());
+					if (updates.succeeded()) {
+						return Flux.fromIterable(updates.value());
 					} else {
-						return Mono.fromCallable(() -> TdResult.failed(result.error()).orElseThrow());
+						return Mono.fromCallable(() -> TdResult.failed(updates.error()).orElseThrow());
 					}
 				})
 				.flatMapSequential(this::interceptUpdate)

@@ -94,7 +94,7 @@ public class AsyncTdEasy {
 					}
 				})
 				.doOnComplete(() -> {
-					authState.asFlux().take(1).single().subscribeOn(scheduler).subscribe(authState -> {
+					authState.asFlux().take(1).single().publishOn(scheduler).subscribe(authState -> {
 						onUpdatesTerminated();
 						if (authState.getConstructor() != AuthorizationStateClosed.CONSTRUCTOR) {
 							logger.warn("Updates stream has closed while"
@@ -104,7 +104,7 @@ public class AsyncTdEasy {
 						}
 					});
 				}).doOnError(ex -> {
-					authState.asFlux().take(1).single().subscribeOn(scheduler).subscribe(authState -> {
+					authState.asFlux().take(1).single().publishOn(scheduler).subscribe(authState -> {
 						onUpdatesTerminated();
 						if (authState.getConstructor() != AuthorizationStateClosed.CONSTRUCTOR) {
 							logger.warn("Updates stream has terminated with an error while"
@@ -138,7 +138,7 @@ public class AsyncTdEasy {
 
 					return true;
 				})
-				.subscribeOn(Schedulers.boundedElastic())
+				.publishOn(Schedulers.boundedElastic())
 				.flatMap(_v -> {
 					this.settings.tryEmitNext(settings);
 					return Mono.empty();
@@ -561,7 +561,7 @@ public class AsyncTdEasy {
 											))
 											.filterWhen(file -> Mono
 													.fromCallable(() -> Files.exists(file))
-													.subscribeOn(Schedulers.boundedElastic()))
+													.publishOn(Schedulers.boundedElastic()))
 											.doOnNext(directory -> {
 												try {
 													if (!Files.walk(directory)

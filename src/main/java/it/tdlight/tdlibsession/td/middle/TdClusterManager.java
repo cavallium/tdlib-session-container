@@ -13,6 +13,7 @@ import io.vertx.core.VertxOptions;
 import io.vertx.core.eventbus.DeliveryOptions;
 import io.vertx.core.eventbus.MessageCodec;
 import io.vertx.core.http.ClientAuth;
+import io.vertx.core.metrics.MetricsOptions;
 import io.vertx.core.net.JksOptions;
 import io.vertx.core.spi.cluster.ClusterManager;
 import io.vertx.reactivex.core.Vertx;
@@ -160,13 +161,14 @@ public class TdClusterManager {
 			vertxOptions.setClusterManager(null);
 		}
 
-		vertxOptions.setPreferNativeTransport(true);
+		vertxOptions.setPreferNativeTransport(false);
+		vertxOptions.setMetricsOptions(new MetricsOptions().setEnabled(false));
 		// check for blocked threads every 5s
 		vertxOptions.setBlockedThreadCheckInterval(5);
 		vertxOptions.setBlockedThreadCheckIntervalUnit(TimeUnit.SECONDS);
-		// warn if an event loop thread handler took more than 100ms to execute
-		vertxOptions.setMaxEventLoopExecuteTime(50);
-		vertxOptions.setMaxEventLoopExecuteTimeUnit(TimeUnit.MILLISECONDS);
+		// warn if an event loop thread handler took more than 5s to execute
+		vertxOptions.setMaxEventLoopExecuteTime(5);
+		vertxOptions.setMaxEventLoopExecuteTimeUnit(TimeUnit.SECONDS);
 		// warn if an worker thread handler took more than 10s to execute
 		vertxOptions.setMaxWorkerExecuteTime(10);
 		vertxOptions.setMaxWorkerExecuteTimeUnit(TimeUnit.SECONDS);
@@ -185,7 +187,7 @@ public class TdClusterManager {
 				.publishOn(Schedulers.boundedElastic())
 				.flatMap(vertx -> Mono
 						.fromCallable(() -> new TdClusterManager(mgr, vertxOptions, vertx))
-						.subscribeOn(Schedulers.boundedElastic())
+						.publishOn(Schedulers.boundedElastic())
 				);
 	}
 

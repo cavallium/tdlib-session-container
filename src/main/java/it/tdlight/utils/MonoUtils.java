@@ -9,6 +9,8 @@ import io.vertx.core.AsyncResult;
 import io.vertx.core.Future;
 import io.vertx.core.Handler;
 import io.vertx.core.Promise;
+import io.vertx.reactivex.core.eventbus.Message;
+import io.vertx.reactivex.core.eventbus.MessageConsumer;
 import io.vertx.reactivex.core.streams.Pipe;
 import io.vertx.reactivex.core.streams.ReadStream;
 import io.vertx.reactivex.core.streams.WriteStream;
@@ -213,11 +215,7 @@ public class MonoUtils {
 
 	public static <T extends Object> CompletableFuture<T> toFuture(Mono<T> mono) {
 		var cf = new CompletableFuture<T>();
-		mono.subscribe(value -> {
-			cf.complete(value);
-		}, ex -> {
-			cf.completeExceptionally(ex);
-		}, () -> cf.complete(null));
+		mono.subscribe(cf::complete, cf::completeExceptionally, () -> cf.complete(null));
 		return cf;
 	}
 
@@ -334,13 +332,23 @@ public class MonoUtils {
 
 	private static Future<Void> toVertxFuture(Mono<Void> toTransform) {
 		var promise = Promise.<Void>promise();
-		toTransform.subscribeOn(Schedulers.single()).subscribe(next -> {}, promise::fail, promise::complete);
+		toTransform.publishOn(Schedulers.single()).subscribe(next -> {}, promise::fail, promise::complete);
 		return promise.future();
 	}
 
 	@SuppressWarnings({"unchecked", "rawtypes"})
 	public static <T> Mono<T> castVoid(Mono<Void> mono) {
 		return (Mono) mono;
+	}
+
+	public static <T> Flux<T> fromConsumer(MessageConsumer<T> messageConsumer) {
+		return Flux.<Message<T>>create(sink -> {
+			Schedulers.boundedElastic().schedule(() -> {
+				messageConsumer.handler(sink::next);
+				messageConsumer.endHandler(e -> sink.complete());
+				sink.onDispose(messageConsumer::unregister);
+			});
+		}).flatMapSequential(msg -> Mono.fromCallable(msg::body).publishOn(Schedulers.boundedElastic()));
 	}
 
 	public static class SinkRWStream<T> implements io.vertx.core.streams.WriteStream<T>, io.vertx.core.streams.ReadStream<T> {
@@ -440,7 +448,7 @@ public class MonoUtils {
 
 		@Override
 		public io.vertx.core.streams.ReadStream<T> handler(@io.vertx.codegen.annotations.Nullable Handler<T> handler) {
-			sink.asFlux().publishOn(Schedulers.boundedElastic()).subscribeWith(new CoreSubscriber<T>() {
+			sink.asFlux().publishOn(Schedulers.boundedElastic()).subscribe(new CoreSubscriber<T>() {
 
 				@Override
 				public void onSubscribe(@NotNull Subscription s) {
@@ -575,9 +583,10 @@ public class MonoUtils {
 
 		private final AtomicBoolean fetchMode = new AtomicBoolean(false);
 
+		@SuppressWarnings("DuplicatedCode")
 		@Override
 		public io.vertx.core.streams.ReadStream<T> handler(@io.vertx.codegen.annotations.Nullable Handler<T> handler) {
-			flux.publishOn(Schedulers.boundedElastic()).subscribeWith(new CoreSubscriber<T>() {
+			flux.publishOn(Schedulers.boundedElastic()).subscribe(new CoreSubscriber<T>() {
 
 				@Override
 				public void onSubscribe(@NotNull Subscription s) {

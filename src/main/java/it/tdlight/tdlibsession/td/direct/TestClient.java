@@ -60,7 +60,7 @@ public class TestClient implements TelegramClient {
 				.asFlux()
 				.buffer(50)
 				.doOnNext(ub -> logger.trace("Received update block of size {}", ub.size()))
-				.subscribeOn(testClientScheduler)
+				.publishOn(testClientScheduler)
 				.subscribe(updatesHandler::onUpdates, updateExceptionHandler::onException);
 
 		for (String featureName : features) {
@@ -70,7 +70,7 @@ public class TestClient implements TelegramClient {
 							.repeat()
 							.buffer(100)
 							.doOnNext(updatesHandler::onUpdates)
-							.subscribeOn(testClientScheduler)
+							.publishOn(testClientScheduler)
 							.subscribe();
 					break;
 				default:

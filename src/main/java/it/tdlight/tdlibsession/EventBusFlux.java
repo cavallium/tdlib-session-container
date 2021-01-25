@@ -99,7 +99,7 @@ public class EventBusFlux {
 												var responseHandler = MonoUtils.toHandler(itemSink);
 												eventBus.request(subscriptionAddress + ".signal", SignalMessage.<T>onNext(item), signalDeliveryOptions, responseHandler);
 											}))
-											.subscribeOn(Schedulers.single())
+											.publishOn(Schedulers.single())
 											.subscribe(response -> {}, error -> {
 												if (error instanceof ReplyException) {
 													var errorMessageCode = ((ReplyException) error).failureCode();
@@ -208,7 +208,7 @@ public class EventBusFlux {
 					sink.success();
 				}
 			});
-		}).subscribeOn(Schedulers.single()).share();
+		}).publishOn(Schedulers.single()).share();
 
 		return Tuples.of(servedMono, fatalErrorSink.asMono());
 	}
@@ -311,7 +311,7 @@ public class EventBusFlux {
 									}
 								}
 							})))
-							.subscribeOn(Schedulers.boundedElastic())
+							.publishOn(Schedulers.boundedElastic())
 							.onBackpressureBuffer()
 							.publishOn(Schedulers.single())
 							.subscribe(v -> {}, emitter::error);
