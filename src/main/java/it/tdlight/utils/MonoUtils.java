@@ -407,7 +407,7 @@ public class MonoUtils {
 		}
 
 		public Flux<T> readAsFlux() {
-			return sink.asFlux();
+			return sink.asFlux().publishOn(Schedulers.parallel());
 		}
 
 		public ReactiveReactorReadStream<T> readAsStream() {
@@ -552,7 +552,7 @@ public class MonoUtils {
 		}
 
 		public Flux<T> readAsFlux() {
-			return flux;
+			return flux.publishOn(Schedulers.parallel());
 		}
 
 		public ReactiveReactorReadStream<T> readAsStream() {

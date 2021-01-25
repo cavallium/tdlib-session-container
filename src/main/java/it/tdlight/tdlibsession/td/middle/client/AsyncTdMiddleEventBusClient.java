@@ -191,8 +191,8 @@ public class AsyncTdMiddleEventBusClient implements AsyncTdMiddle {
 				.doOnSubscribe(s -> Schedulers.boundedElastic().schedule(() -> {
 					cluster.getEventBus().<byte[]>send(botAddress + ".ready-to-receive", EMPTY, deliveryOptionsWithTimeout);
 				}))
-				.flatMap(updates -> Mono.fromCallable((Callable<Object>) updates::body).publishOn(Schedulers.boundedElastic()))
-				.flatMap(updates -> {
+				.flatMapSequential(updates -> Mono.fromCallable((Callable<Object>) updates::body).publishOn(Schedulers.boundedElastic()))
+				.flatMapSequential(updates -> {
 					var result = (TdResultList) updates;
 					if (result.succeeded()) {
 						return Flux.fromIterable(result.value());
@@ -200,7 +200,7 @@ public class AsyncTdMiddleEventBusClient implements AsyncTdMiddle {
 						return Mono.fromCallable(() -> TdResult.failed(result.error()).orElseThrow());
 					}
 				})
-				.flatMap(this::interceptUpdate)
+				.flatMapSequential(this::interceptUpdate)
 				.doOnError(crash::tryEmitError)
 				.doOnTerminate(updatesStreamEnd::tryEmitEmpty)
 				.publishOn(Schedulers.single());

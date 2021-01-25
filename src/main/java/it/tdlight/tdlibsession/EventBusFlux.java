@@ -95,7 +95,7 @@ public class EventBusFlux {
 													})
 													.then(Mono.empty())
 											)
-											.flatMap(item -> Mono.<Message<T>>create(itemSink -> {
+											.flatMapSequential(item -> Mono.<Message<T>>create(itemSink -> {
 												var responseHandler = MonoUtils.toHandler(itemSink);
 												eventBus.request(subscriptionAddress + ".signal", SignalMessage.<T>onNext(item), signalDeliveryOptions, responseHandler);
 											}))
@@ -292,7 +292,7 @@ public class EventBusFlux {
 						}
 					});
 
-					var pingSubscription = Flux.interval(Duration.ofSeconds(10)).flatMap(n -> Mono.create(pingSink ->
+					var pingSubscription = Flux.interval(Duration.ofSeconds(10)).flatMapSequential(n -> Mono.create(pingSink ->
 							eventBus.<byte[]>request(subscriptionAddress + ".ping", EMPTY, deliveryOptions, pingMsg -> {
 								if (pingMsg.succeeded()) {
 									pingSink.success(pingMsg.result().body());

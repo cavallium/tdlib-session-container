@@ -216,8 +216,7 @@
                 <version>3.8.1</version>
                 <configuration>
                     <release>11</release>
-                    <source>11</source>
-                    <target>11</target>
+                    <useIncrementalCompilation>false</useIncrementalCompilation>
                 </configuration>
             </plugin>
             <plugin>

@@ -165,19 +165,21 @@ public class TDLibRemoteClient implements AutoCloseable {
 						var mediaPath = getMediaDirectory(req.id());
 						var blPath = getSessionBinlogDirectory(req.id());
 
-						BinlogUtils
-								.chooseBinlog(clusterManager.getVertx().fileSystem(), blPath, req.binlog(), req.binlogDate())
-								.then(BinlogUtils.cleanSessionPath(clusterManager.getVertx().fileSystem(), blPath, sessPath, mediaPath))
-								.then(clusterManager.getVertx().rxDeployVerticle(verticle, deploymentOptions).as(MonoUtils::toMono))
-								.subscribeOn(Schedulers.single())
-								.subscribe(
-										v -> {},
-										ex -> {
-											logger.error("Failed to deploy bot verticle", ex);
-											msg.fail(500, "Failed to deploy bot verticle: " + ex.getMessage());
-										},
-										() -> msg.reply(new byte[0])
-								);
+						Schedulers.boundedElastic().schedule(() -> {
+							BinlogUtils
+									.chooseBinlog(clusterManager.getVertx().fileSystem(), blPath, req.binlog(), req.binlogDate())
+									.then(BinlogUtils.cleanSessionPath(clusterManager.getVertx().fileSystem(), blPath, sessPath, mediaPath))
+									.then(clusterManager.getVertx().rxDeployVerticle(verticle, deploymentOptions).as(MonoUtils::toMono))
+									.publishOn(Schedulers.single())
+									.subscribe(
+											v -> {},
+											ex -> {
+												logger.error("Failed to deploy bot verticle", ex);
+												msg.fail(500, "Failed to deploy bot verticle: " + ex.getMessage());
+											},
+											() -> msg.reply(new byte[0])
+									);
+						});
 					});
 					return startBotConsumer.rxCompletionHandler().as(MonoUtils::toMono);
 				})

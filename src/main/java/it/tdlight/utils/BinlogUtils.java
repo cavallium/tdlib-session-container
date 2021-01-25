@@ -117,7 +117,7 @@ public class BinlogUtils {
 					readBinlogConsumer.handler(sink::next);
 					readBinlogConsumer.endHandler(h -> sink.complete());
 				})
-				.flatMap(req -> BinlogUtils
+				.flatMapSequential(req -> BinlogUtils
 						.retrieveBinlog(vertx.fileSystem(), TDLibRemoteClient.getSessionBinlogDirectory(botId))
 						.flatMap(BinlogAsyncFile::readFullyBytes)
 						.single()

@@ -141,7 +141,7 @@ public class AsyncTdMiddleEventBusServer extends AbstractVerticle {
 						executeConsumer.handler(sink::next);
 						executeConsumer.endHandler(h -> sink.complete());
 					})
-					.flatMap(msg -> {
+					.flatMapSequential(msg -> {
 						logger.trace("Received execute request {}", msg.body());
 						var request = overrideRequest(msg.body().getRequest(), botId);
 						return td
@@ -324,7 +324,7 @@ public class AsyncTdMiddleEventBusServer extends AbstractVerticle {
 					}
 					return false;
 				})
-				.flatMap(update -> Mono.fromCallable(() -> {
+				.flatMapSequential(update -> Mono.fromCallable(() -> {
 					if (update.getConstructor() == TdApi.Error.CONSTRUCTOR) {
 						var error = (Error) update;
 						throw new TdError(error.code, error.message);
@@ -351,14 +351,14 @@ public class AsyncTdMiddleEventBusServer extends AbstractVerticle {
 				.sender(botAddress + ".updates", opts);
 
 		var pipeFlux = updatesFlux
-				.flatMap(updatesList -> updatesSender
+				.flatMapSequential(updatesList -> updatesSender
 						.rxWrite(updatesList)
 						.as(MonoUtils::toMono)
 						.thenReturn(updatesList)
 				)
-				.flatMap(updatesList -> Flux
+				.flatMapSequential(updatesList -> Flux
 						.fromIterable(updatesList.value())
-						.flatMap(item -> {
+						.flatMapSequential(item -> {
 							if (item instanceof Update) {
 								var tdUpdate = (Update) item;
 								if (tdUpdate.getConstructor() == UpdateAuthorizationState.CONSTRUCTOR) {

@@ -75,8 +75,8 @@ public class AsyncTdEasy {
 
 		// todo: use Duration.ZERO instead of 10ms interval
 		this.incomingUpdates = td.receive()
-				.flatMap(this::preprocessUpdates)
-				.flatMap(update -> Mono.from(this.getState()).single().map(state -> new AsyncTdUpdateObj(state, update)))
+				.flatMapSequential(this::preprocessUpdates)
+				.flatMapSequential(update -> Mono.from(this.getState()).single().map(state -> new AsyncTdUpdateObj(state, update)))
 				.map(upd -> (TdApi.Update) upd.getUpdate())
 				.doOnError(ex -> {
 					if (ex instanceof TdError) {
