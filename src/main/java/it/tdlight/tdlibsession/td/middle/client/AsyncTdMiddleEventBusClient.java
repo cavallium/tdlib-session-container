@@ -127,7 +127,8 @@ public class AsyncTdMiddleEventBusClient implements AsyncTdMiddle {
 							.then(Mono.defer(() -> local ? Mono.empty()
 									: cluster.getEventBus().<byte[]>rxRequest("bots.start-bot", msg).as(MonoUtils::toMono)))
 							.then();
-				});
+				})
+				.publishOn(Schedulers.single());
 	}
 
 	@SuppressWarnings("CallingSubscribeInNonBlockingScope")
@@ -158,9 +159,10 @@ public class AsyncTdMiddleEventBusClient implements AsyncTdMiddle {
 				.doOnSuccess(s -> logger.trace("Sent ready-to-receive, received reply"))
 				.doOnSuccess(s -> logger.trace("About to read updates flux"))
 				.thenMany(updates.readAsFlux())
+				// Cast to fix bug of reactivex
 				.cast(io.vertx.core.eventbus.Message.class)
-				.timeout(Duration.ofSeconds(20), Mono.fromCallable(() -> {
-					var ex = new ConnectException("Server did not respond to 4 pings after 20 seconds (5 seconds per ping)");
+				.timeout(Duration.ofMinutes(1), Mono.fromCallable(() -> {
+					var ex = new ConnectException("Server did not respond to 12 pings after 1 minute (5 seconds per ping)");
 					ex.setStackTrace(new StackTraceElement[0]);
 					throw ex;
 				}))
@@ -175,7 +177,8 @@ public class AsyncTdMiddleEventBusClient implements AsyncTdMiddle {
 				})
 				.flatMap(this::interceptUpdate)
 				.doOnError(crash::tryEmitError)
-				.doOnTerminate(updatesStreamEnd::tryEmitEmpty);
+				.doOnTerminate(updatesStreamEnd::tryEmitEmpty)
+				.publishOn(Schedulers.single());
 	}
 
 	private Mono<TdApi.Object> interceptUpdate(TdApi.Object update) {
@@ -219,6 +222,7 @@ public class AsyncTdMiddleEventBusClient implements AsyncTdMiddle {
 		)
 				.switchIfEmpty(Mono.defer(() -> Mono.fromCallable(() -> {
 					throw ResponseError.newResponseError(request, botAlias, new TdError(500, "Client is closed or response is empty"));
-				})));
+				})))
+				.publishOn(Schedulers.single());
 	}
 }

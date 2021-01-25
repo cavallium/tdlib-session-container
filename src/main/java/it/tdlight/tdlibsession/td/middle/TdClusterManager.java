@@ -34,6 +34,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import org.jetbrains.annotations.Nullable;
 import reactor.core.publisher.Mono;
+import reactor.core.scheduler.Schedulers;
 
 public class TdClusterManager {
 
@@ -180,8 +181,10 @@ public class TdClusterManager {
 					} else {
 						sink.success(Vertx.vertx(vertxOptions));
 					}
-				})
-				.map(vertx -> new TdClusterManager(mgr, vertxOptions, vertx));
+				}).flatMap(vertx -> Mono
+						.fromCallable(() -> new TdClusterManager(mgr, vertxOptions, vertx))
+						.subscribeOn(Schedulers.boundedElastic())
+				);
 	}
 
 	public Vertx getVertx() {

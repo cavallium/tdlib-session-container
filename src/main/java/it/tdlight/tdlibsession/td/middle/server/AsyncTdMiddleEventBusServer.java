@@ -111,6 +111,7 @@ public class AsyncTdMiddleEventBusServer extends AbstractVerticle {
 						})
 						.flatMap(Mono::hide)
 						.doOnSuccess(s -> logger.trace("Stated verticle"))
+						.publishOn(Schedulers.single())
 				);
 	}
 
@@ -299,7 +300,10 @@ public class AsyncTdMiddleEventBusServer extends AbstractVerticle {
 								.timeout(Duration.ofSeconds(5), Mono.empty())
 								.flatMap(ec -> ec.rxUnregister().as(MonoUtils::toMono)))
 						.doOnError(ex -> logger.error("Undeploy of bot \"" + botAlias + "\": stop failed", ex))
-						.doOnTerminate(() -> logger.info("Undeploy of bot \"" + botAlias + "\": stopped"))));
+						.doOnTerminate(() -> logger.info("Undeploy of bot \"" + botAlias + "\": stopped"))
+				)
+				.publishOn(Schedulers.single())
+		);
 	}
 
 	private Mono<Void> pipe(AsyncTdDirectImpl td, String botAddress, String botAlias, int botId, boolean local) {
