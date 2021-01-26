@@ -1,5 +1,6 @@
 package it.tdlight.tdlibsession.remoteclient;
 
+import com.akaita.java.rxjava2debug.RxJava2Debug;
 import io.vertx.core.DeploymentOptions;
 import io.vertx.core.json.JsonObject;
 import io.vertx.core.net.JksOptions;
@@ -61,6 +62,7 @@ public class TDLibRemoteClient implements AutoCloseable {
 
 		if (enableStacktraces && !runningFromIntelliJ()) {
 			ReactorDebugAgent.init();
+			RxJava2Debug.enableRxJava2AssemblyTracking(new String[] {"it.tdlight.utils", "it.tdlight.tdlibsession"});
 		}
 
 		try {
