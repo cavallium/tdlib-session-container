@@ -150,10 +150,13 @@ public class AsyncTdMiddleEventBusClient implements AsyncTdMiddle {
 			// Disable ping on local servers
 			if (!local) {
 				Mono
-						.defer(() -> cluster.getEventBus().<byte[]>rxRequest(botAddress + ".ping",
-								EMPTY,
-								deliveryOptionsWithTimeout
-						).as(MonoUtils::toMono))
+						.defer(() -> {
+							logger.trace("Requesting ping...");
+							return cluster.getEventBus().<byte[]>rxRequest(botAddress + ".ping",
+									EMPTY,
+									deliveryOptionsWithTimeout
+							).as(MonoUtils::toMono);
+						})
 						.flatMap(msg -> Mono.fromCallable(msg::body).subscribeOn(Schedulers.boundedElastic()))
 						.repeatWhen(l -> l.delayElements(Duration.ofSeconds(10)).takeWhile(x -> true))
 						.takeUntilOther(Mono.firstWithSignal(this.updatesStreamEnd.asMono().doOnTerminate(() -> {
