@@ -43,9 +43,12 @@ import reactor.core.publisher.Sinks.Empty;
 import reactor.core.publisher.Sinks.Many;
 import reactor.core.publisher.Sinks.One;
 import reactor.core.publisher.SynchronousSink;
+import reactor.core.scheduler.Scheduler;
 import reactor.core.scheduler.Schedulers;
 import reactor.util.concurrent.Queues;
 import reactor.util.context.Context;
+import reactor.util.function.Tuple2;
+import reactor.util.function.Tuples;
 
 public class MonoUtils {
 
@@ -300,34 +303,35 @@ public class MonoUtils {
 		return fromEmitResultFuture(sink.tryEmitEmpty());
 	}
 
-	public static <T> Mono<SinkRWStream<T>> unicastBackpressureSinkStream() {
+	public static <T> Mono<SinkRWStream<T>> unicastBackpressureSinkStream(Scheduler scheduler) {
 		Many<T> sink = Sinks.many().unicast().onBackpressureBuffer();
-		return asStream(sink, null, null, 1);
+		return asStream(sink, scheduler, null, null, 1);
 	}
 
 	/**
 	 * Create a sink that can be written from a writeStream
 	 */
-	public static <T> Mono<SinkRWStream<T>> unicastBackpressureStream(int maxBackpressureQueueSize) {
+	public static <T> Mono<SinkRWStream<T>> unicastBackpressureStream(Scheduler scheduler, int maxBackpressureQueueSize) {
 		Queue<T> boundedQueue = Queues.<T>get(maxBackpressureQueueSize).get();
 		var queueSize = Flux
 				.interval(Duration.ZERO, Duration.ofMillis(500))
 				.map(n -> boundedQueue.size());
 		Empty<Void> termination = Sinks.empty();
 		Many<T> sink = Sinks.many().unicast().onBackpressureBuffer(boundedQueue, termination::tryEmitEmpty);
-		return asStream(sink, queueSize, termination, maxBackpressureQueueSize);
+		return asStream(sink, scheduler, queueSize, termination, maxBackpressureQueueSize);
 	}
 
-	public static <T> Mono<SinkRWStream<T>> unicastBackpressureErrorStream() {
+	public static <T> Mono<SinkRWStream<T>> unicastBackpressureErrorStream(Scheduler scheduler) {
 		Many<T> sink = Sinks.many().unicast().onBackpressureError();
-		return asStream(sink, null, null, 1);
+		return asStream(sink, scheduler, null, null, 1);
 	}
 
 	public static <T> Mono<SinkRWStream<T>> asStream(Many<T> sink,
+			Scheduler scheduler,
 			@Nullable Flux<Integer> backpressureSize,
 			@Nullable Empty<Void> termination,
 			int maxBackpressureQueueSize) {
-		return SinkRWStream.create(sink, backpressureSize, termination, maxBackpressureQueueSize);
+		return SinkRWStream.create(sink, scheduler, backpressureSize, termination, maxBackpressureQueueSize);
 	}
 
 	private static Future<Void> toVertxFuture(Mono<Void> toTransform) {
@@ -341,20 +345,59 @@ public class MonoUtils {
 		return (Mono) mono;
 	}
 
+	/**
+	 * This method fails to guarantee that the consumer gets registered on all clusters before returning.
+	 * Use fromConsumerAdvanced if you want better stability.
+	 */
+	@Deprecated
 	public static <T> Flux<T> fromConsumer(MessageConsumer<T> messageConsumer) {
 		return Flux.<Message<T>>create(sink -> {
-					messageConsumer.handler(sink::next);
-					messageConsumer.endHandler(e -> sink.complete());
-					sink.onDispose(messageConsumer::unregister);
-				})
-				.startWith(MonoUtils.castVoid(messageConsumer.rxCompletionHandler().as(MonoUtils::toMono)))
+			messageConsumer.endHandler(e -> sink.complete());
+			sink.onDispose(messageConsumer::unregister);
+		})
+				//.startWith(MonoUtils.castVoid(messageConsumer.rxCompletionHandler().as(MonoUtils::toMono)))
 				.flatMapSequential(msg -> Mono.fromCallable(msg::body).subscribeOn(Schedulers.boundedElastic()))
 				.subscribeOn(Schedulers.boundedElastic());
+	}
+
+	public static <T> Mono<Tuple2<Mono<Void>, Flux<T>>> fromConsumerAdvanced(MessageConsumer<T> messageConsumer) {
+		return Mono.<Tuple2<Mono<Void>, Flux<T>>>fromCallable(() -> {
+			Many<Message<T>> messages = Sinks.many().unicast().onBackpressureError();
+			Empty<Void> registrationRequested = Sinks.empty();
+			Empty<Void> registrationCompletion = Sinks.empty();
+			messageConsumer.endHandler(e -> {
+				messages.tryEmitComplete();
+				registrationCompletion.tryEmitEmpty();
+			});
+			messageConsumer.<T>handler(messages::tryEmitNext);
+
+			Flux<T> dataFlux = Flux
+					.<T>concatDelayError(
+							messages.asFlux()
+									.<T>flatMap(msg -> Mono
+											.fromCallable(msg::body)
+											.subscribeOn(Schedulers.boundedElastic())
+									),
+							messageConsumer.rxUnregister().as(MonoUtils::toMono)
+					)
+					.doOnSubscribe(s -> registrationRequested.tryEmitEmpty());
+
+			Mono<Void> registrationCompletionMono = Mono.empty()
+					.doOnSubscribe(s -> registrationRequested.tryEmitEmpty())
+					.then(registrationRequested.asMono())
+					.doOnSuccess(s -> logger.trace("Subscribed to registration completion mono"))
+					.doOnSuccess(s -> logger.trace("Waiting for consumer registration completion..."))
+					.<Void>then(messageConsumer.rxCompletionHandler().as(MonoUtils::toMono))
+					.doOnSuccess(s -> logger.trace("Consumer registered"))
+					.share();
+			return Tuples.of(registrationCompletionMono, dataFlux);
+		}).subscribeOn(Schedulers.boundedElastic());
 	}
 
 	public static class SinkRWStream<T> implements io.vertx.core.streams.WriteStream<T>, io.vertx.core.streams.ReadStream<T> {
 
 		private final Many<T> sink;
+		private final Scheduler scheduler;
 		private final Flux<Integer> backpressureSize;
 		private final Empty<Void> termination;
 		private Handler<Throwable> exceptionHandler = e -> {};
@@ -364,6 +407,7 @@ public class MonoUtils {
 		private volatile boolean writeQueueFull = false;
 
 		private SinkRWStream(Many<T> sink,
+				Scheduler scheduler,
 				@Nullable Flux<Integer> backpressureSize,
 				@Nullable Empty<Void> termination,
 				int maxBackpressureQueueSize) {
@@ -372,6 +416,7 @@ public class MonoUtils {
 			this.backpressureSize = backpressureSize;
 			this.termination = termination;
 			this.sink = sink;
+			this.scheduler = scheduler;
 		}
 
 		public Mono<SinkRWStream<T>> initialize() {
@@ -409,14 +454,15 @@ public class MonoUtils {
 		}
 
 		public static <T> Mono<SinkRWStream<T>> create(Many<T> sink,
+				Scheduler scheduler,
 				@Nullable Flux<Integer> backpressureSize,
 				@Nullable Empty<Void> termination,
 				int maxBackpressureQueueSize) {
-			return new SinkRWStream<T>(sink, backpressureSize, termination, maxBackpressureQueueSize).initialize();
+			return new SinkRWStream<T>(sink, scheduler, backpressureSize, termination, maxBackpressureQueueSize).initialize();
 		}
 
 		public Flux<T> readAsFlux() {
-			return sink.asFlux().publishOn(Schedulers.parallel());
+			return sink.asFlux();
 		}
 
 		public ReactiveReactorReadStream<T> readAsStream() {
@@ -449,7 +495,7 @@ public class MonoUtils {
 
 		@Override
 		public io.vertx.core.streams.ReadStream<T> handler(@io.vertx.codegen.annotations.Nullable Handler<T> handler) {
-			sink.asFlux().publishOn(Schedulers.boundedElastic()).subscribe(new CoreSubscriber<T>() {
+			sink.asFlux().publishOn(scheduler).subscribe(new CoreSubscriber<T>() {
 
 				@Override
 				public void onSubscribe(@NotNull Subscription s) {
@@ -554,10 +600,12 @@ public class MonoUtils {
 	public static class FluxReadStream<T> implements io.vertx.core.streams.ReadStream<T> {
 
 		private final Flux<T> flux;
+		private final Scheduler scheduler;
 		private Handler<Throwable> exceptionHandler = e -> {};
 
-		public FluxReadStream(Flux<T> flux) {
+		public FluxReadStream(Flux<T> flux, Scheduler scheduler) {
 			this.flux = flux;
+			this.scheduler = scheduler;
 		}
 
 		public Flux<T> readAsFlux() {
@@ -587,7 +635,7 @@ public class MonoUtils {
 		@SuppressWarnings("DuplicatedCode")
 		@Override
 		public io.vertx.core.streams.ReadStream<T> handler(@io.vertx.codegen.annotations.Nullable Handler<T> handler) {
-			flux.publishOn(Schedulers.boundedElastic()).subscribe(new CoreSubscriber<T>() {
+			flux.publishOn(scheduler).subscribe(new CoreSubscriber<T>() {
 
 				@Override
 				public void onSubscribe(@NotNull Subscription s) {
@@ -740,8 +788,8 @@ public class MonoUtils {
 			this.rs = ReadStream.newInstance(rs);
 		}
 
-		public ReactiveReactorReadStream(Flux<T> s) {
-			this.rs = ReadStream.newInstance(new FluxReadStream<>(s));
+		public ReactiveReactorReadStream(Flux<T> s, Scheduler scheduler) {
+			this.rs = ReadStream.newInstance(new FluxReadStream<>(s, scheduler));
 		}
 
 		@Override

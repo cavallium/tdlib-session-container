@@ -53,16 +53,19 @@ public class TDLibRemoteClient implements AutoCloseable {
 			String netInterface,
 			int port,
 			Set<String> membersAddresses,
-			boolean enableStacktraces) {
+			boolean enableAsyncStacktraces,
+			boolean enableFullAsyncStacktraces) {
 		this.securityInfo = securityInfo;
 		this.masterHostname = masterHostname;
 		this.netInterface = netInterface;
 		this.port = port;
 		this.membersAddresses = membersAddresses;
 
-		if (enableStacktraces && !runningFromIntelliJ()) {
+		if (enableAsyncStacktraces && !runningFromIntelliJ()) {
 			ReactorDebugAgent.init();
-			RxJava2Debug.enableRxJava2AssemblyTracking(new String[] {"it.tdlight.utils", "it.tdlight.tdlibsession"});
+		}
+		if (enableAsyncStacktraces && enableFullAsyncStacktraces) {
+			RxJava2Debug.enableRxJava2AssemblyTracking(new String[]{"it.tdlight.utils", "it.tdlight.tdlibsession"});
 		}
 
 		try {
@@ -91,14 +94,22 @@ public class TDLibRemoteClient implements AutoCloseable {
 		Path keyStorePasswordPath = Paths.get(args[4]);
 		Path trustStorePath = Paths.get(args[5]);
 		Path trustStorePasswordPath = Paths.get(args[6]);
-		boolean enableStacktraces = Boolean.parseBoolean(args[7]);
+		boolean enableAsyncStacktraces = Boolean.parseBoolean(args[7]);
+		boolean enableFullAsyncStacktraces = Boolean.parseBoolean(args[8]);
 
 		var loggerContext = (org.apache.logging.log4j.core.LoggerContext) LogManager.getContext(false);
 		loggerContext.setConfigLocation(TDLibRemoteClient.class.getResource("/tdlib-session-container-log4j2.xml").toURI());
 
 		var securityInfo = new SecurityInfo(keyStorePath, keyStorePasswordPath, trustStorePath, trustStorePasswordPath);
 
-		var client = new TDLibRemoteClient(securityInfo, masterHostname, netInterface, port, membersAddresses, enableStacktraces);
+		var client = new TDLibRemoteClient(securityInfo,
+				masterHostname,
+				netInterface,
+				port,
+				membersAddresses,
+				enableAsyncStacktraces,
+				enableFullAsyncStacktraces
+		);
 
 		client
 				.start()

@@ -23,7 +23,6 @@ import io.vertx.reactivex.core.eventbus.MessageConsumer;
 import io.vertx.reactivex.core.shareddata.SharedData;
 import io.vertx.spi.cluster.hazelcast.HazelcastClusterManager;
 import it.tdlight.common.ConstructorDetector;
-import it.tdlight.tdlibsession.td.TdResultMessage;
 import it.tdlight.utils.MonoUtils;
 import java.nio.channels.AlreadyBoundException;
 import java.util.ArrayList;
@@ -55,9 +54,9 @@ public class TdClusterManager {
 			vertx
 					.eventBus()
 					.getDelegate()
-					.registerDefaultCodec(TdResultList.class, new TdResultListMessageCodec())
-					.registerDefaultCodec(ExecuteObject.class, new TdExecuteObjectMessageCodec())
-					.registerDefaultCodec(TdResultMessage.class, new TdResultMessageCodec())
+					.registerDefaultCodec(TdResultList.class, new LazyTdResultListMessageCodec())
+					.registerDefaultCodec(ExecuteObject.class, new LazyTdExecuteObjectMessageCodec())
+					.registerDefaultCodec(TdResultMessage.class, new LazyTdResultMessageCodec())
 					.registerDefaultCodec(StartSessionMessage.class, new StartSessionMessageCodec())
 					.registerDefaultCodec(EndSessionMessage.class, new EndSessionMessageCodec());
 			for (Class<?> value : ConstructorDetector.getTDConstructorsUnsafe().values()) {

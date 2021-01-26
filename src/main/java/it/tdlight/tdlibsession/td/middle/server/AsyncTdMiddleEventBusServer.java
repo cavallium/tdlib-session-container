@@ -17,7 +17,7 @@ import it.tdlight.jni.TdApi.Update;
 import it.tdlight.jni.TdApi.UpdateAuthorizationState;
 import it.tdlight.tdlibsession.remoteclient.TDLibRemoteClient;
 import it.tdlight.tdlibsession.td.TdError;
-import it.tdlight.tdlibsession.td.TdResultMessage;
+import it.tdlight.tdlibsession.td.middle.TdResultMessage;
 import it.tdlight.tdlibsession.td.direct.AsyncTdDirectImpl;
 import it.tdlight.tdlibsession.td.direct.AsyncTdDirectOptions;
 import it.tdlight.tdlibsession.td.direct.TelegramClientFactory;
@@ -148,7 +148,7 @@ public class AsyncTdMiddleEventBusServer extends AbstractVerticle {
 					.flatMapSequential(tuple -> {
 						var msg = tuple.getT1();
 						var body = tuple.getT2();
-						logger.trace("Received execute request {}", body);
+						logger.trace("Received execute request {}", body.getRequest().getClass().getSimpleName());
 						var request = overrideRequest(body.getRequest(), botId);
 						return td
 								.execute(request, body.isExecuteDirectly())
@@ -202,16 +202,20 @@ public class AsyncTdMiddleEventBusServer extends AbstractVerticle {
 					.take(1)
 					.limitRequest(1)
 					.single()
+					.doOnNext(s -> logger.trace("Received ready-to-receive request from client"))
 					.flatMap(msg -> this.pipeFlux
 							.asMono()
 							.timeout(Duration.ofSeconds(5))
 							.map(pipeFlux -> Tuples.of(msg, pipeFlux)))
 					.doOnError(ex -> logger.error("Error when processing a ready-to-receive request", ex))
+					.doOnNext(s -> logger.trace("Replying to ready-to-receive request"))
 					.flatMapMany(tuple -> {
 						var opts = new DeliveryOptions().setLocalOnly(local).setSendTimeout(Duration.ofSeconds(10).toMillis());
 
 						tuple.getT1().reply(EMPTY, opts);
 						logger.trace("Replied to ready-to-receive");
+
+						logger.trace("Start piping data");
 
 						// Start piping the data
 						return tuple.getT2().doOnSubscribe(s -> {

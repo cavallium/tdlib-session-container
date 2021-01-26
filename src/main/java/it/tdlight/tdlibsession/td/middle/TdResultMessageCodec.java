@@ -3,7 +3,6 @@ package it.tdlight.tdlibsession.td.middle;
 import io.vertx.core.buffer.Buffer;
 import io.vertx.core.eventbus.MessageCodec;
 import it.tdlight.jni.TdApi;
-import it.tdlight.tdlibsession.td.TdResultMessage;
 import it.tdlight.utils.VertxBufferInputStream;
 import it.tdlight.utils.VertxBufferOutputStream;
 import java.io.IOException;
