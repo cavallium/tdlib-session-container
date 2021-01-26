@@ -170,6 +170,10 @@ public class TDLibRemoteClient implements AutoCloseable {
 									.chooseBinlog(clusterManager.getVertx().fileSystem(), blPath, req.binlog(), req.binlogDate())
 									.then(BinlogUtils.cleanSessionPath(clusterManager.getVertx().fileSystem(), blPath, sessPath, mediaPath))
 									.then(clusterManager.getVertx().rxDeployVerticle(verticle, deploymentOptions).as(MonoUtils::toMono))
+									.then(MonoUtils.fromBlockingMaybe(() -> {
+										msg.reply(new byte[0]);
+										return null;
+									}))
 									.publishOn(Schedulers.single())
 									.subscribe(
 											v -> {},
@@ -177,7 +181,7 @@ public class TDLibRemoteClient implements AutoCloseable {
 												logger.error("Failed to deploy bot verticle", ex);
 												msg.fail(500, "Failed to deploy bot verticle: " + ex.getMessage());
 											},
-											() -> msg.reply(new byte[0])
+											() -> {}
 									);
 						});
 					});

@@ -106,7 +106,8 @@ public class AsyncTdDirectImpl implements AsyncTdDirect {
 							});
 						})
 						.subscribeOn(Schedulers.boundedElastic())
-						.publishOn(Schedulers.single())
-				);
+						.publishOn(Schedulers.boundedElastic())
+				)
+				.subscribeOn(Schedulers.boundedElastic());
 	}
 }

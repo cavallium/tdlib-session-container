@@ -327,7 +327,7 @@ public class AsyncTdMiddleEventBusServer extends AbstractVerticle {
 					}
 					return false;
 				})
-				.flatMapSequential(update -> Mono.fromCallable(() -> {
+				.flatMapSequential(update -> MonoUtils.fromBlockingSingle(() -> {
 					if (update.getConstructor() == TdApi.Error.CONSTRUCTOR) {
 						var error = (Error) update;
 						throw new TdError(error.code, error.message);

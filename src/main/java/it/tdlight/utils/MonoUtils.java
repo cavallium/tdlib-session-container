@@ -100,7 +100,7 @@ public class MonoUtils {
 	}
 
 	public static <T> Mono<T> fromBlockingMaybe(Callable<T> callable) {
-		return Mono.fromCallable(callable).subscribeOn(Schedulers.boundedElastic()).publishOn(Schedulers.single());
+		return Mono.fromCallable(callable).subscribeOn(Schedulers.boundedElastic());
 	}
 
 	public static <T> Mono<T> fromBlockingSingle(Callable<T> callable) {
@@ -230,15 +230,15 @@ public class MonoUtils {
 	}
 
 	public static <T> Mono<T> toMono(Single<T> single) {
-		return Mono.fromDirect(single.toFlowable());
+		return Mono.from(single.toFlowable());
 	}
 
 	public static <T> Mono<T> toMono(Maybe<T> single) {
-		return Mono.fromDirect(single.toFlowable());
+		return Mono.from(single.toFlowable());
 	}
 
 	public static <T> Mono<T> toMono(Completable completable) {
-		return Mono.fromDirect(completable.toFlowable());
+		return Mono.from(completable.toFlowable());
 	}
 
 	public static <T> Completable toCompletable(Mono<T> s) {
@@ -348,8 +348,7 @@ public class MonoUtils {
 			sink.onDispose(messageConsumer::unregister);
 		})
 				.subscribeOn(Schedulers.boundedElastic())
-				.publishOn(Schedulers.single())
-				.flatMapSequential(msg -> Mono.fromCallable(msg::body).publishOn(Schedulers.boundedElastic()));
+				.flatMapSequential(msg -> Mono.fromCallable(msg::body).subscribeOn(Schedulers.boundedElastic()));
 	}
 
 	public static class SinkRWStream<T> implements io.vertx.core.streams.WriteStream<T>, io.vertx.core.streams.ReadStream<T> {

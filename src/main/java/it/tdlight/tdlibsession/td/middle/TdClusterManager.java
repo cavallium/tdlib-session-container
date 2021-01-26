@@ -154,21 +154,25 @@ public class TdClusterManager {
 			vertxOptions.getEventBusOptions().setTrustStoreOptions(trustStoreOptions);
 			vertxOptions.getEventBusOptions().setHost(masterHostname);
 			vertxOptions.getEventBusOptions().setPort(port + 1);
-			vertxOptions.getEventBusOptions().setSsl(true).setEnabledSecureTransportProtocols(Set.of("TLSv1.3", "TLSv1.2"));
+			vertxOptions
+					.getEventBusOptions()
+					.setUseAlpn(true)
+					.setSsl(true)
+					.setEnabledSecureTransportProtocols(Set.of("TLSv1.3", "TLSv1.2"));
 			vertxOptions.getEventBusOptions().setClientAuth(ClientAuth.REQUIRED);
 		} else {
 			mgr = null;
 			vertxOptions.setClusterManager(null);
 		}
 
-		vertxOptions.setPreferNativeTransport(false);
+		vertxOptions.setPreferNativeTransport(true);
 		vertxOptions.setMetricsOptions(new MetricsOptions().setEnabled(false));
 		// check for blocked threads every 5s
 		vertxOptions.setBlockedThreadCheckInterval(5);
 		vertxOptions.setBlockedThreadCheckIntervalUnit(TimeUnit.SECONDS);
-		// warn if an event loop thread handler took more than 100ms to execute
-		vertxOptions.setMaxEventLoopExecuteTime(100);
-		vertxOptions.setMaxEventLoopExecuteTimeUnit(TimeUnit.MILLISECONDS);
+		// warn if an event loop thread handler took more than 10s to execute
+		vertxOptions.setMaxEventLoopExecuteTime(10);
+		vertxOptions.setMaxEventLoopExecuteTimeUnit(TimeUnit.SECONDS);
 		// warn if an worker thread handler took more than 10s to execute
 		vertxOptions.setMaxWorkerExecuteTime(10);
 		vertxOptions.setMaxWorkerExecuteTimeUnit(TimeUnit.SECONDS);
@@ -177,14 +181,14 @@ public class TdClusterManager {
 		vertxOptions.setWarningExceptionTimeUnit(TimeUnit.MILLISECONDS);
 
 		return Mono
-				.<Vertx>create(sink -> {
+				.defer(() -> {
 					if (mgr != null) {
-						Vertx.clusteredVertx(vertxOptions, MonoUtils.toHandler(sink));
+						return Vertx.rxClusteredVertx(vertxOptions).as(MonoUtils::toMono).subscribeOn(Schedulers.boundedElastic());
 					} else {
-						sink.success(Vertx.vertx(vertxOptions));
+						return Mono.just(Vertx.vertx(vertxOptions));
 					}
 				})
-				.publishOn(Schedulers.boundedElastic())
+				.publishOn(Schedulers.single())
 				.flatMap(vertx -> Mono
 						.fromCallable(() -> new TdClusterManager(mgr, vertxOptions, vertx))
 						.publishOn(Schedulers.boundedElastic())

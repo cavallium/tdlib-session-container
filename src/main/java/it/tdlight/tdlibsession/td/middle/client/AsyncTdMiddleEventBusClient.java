@@ -170,16 +170,15 @@ public class AsyncTdMiddleEventBusClient implements AsyncTdMiddle {
 				.timeout(Duration.ofSeconds(5))
 				.publishOn(Schedulers.single())
 				.flatMapMany(tdResultListFlux -> tdResultListFlux.publishOn(Schedulers.single()))
-				.startWith(MonoUtils
-						.castVoid(Mono.<Void>fromRunnable(() -> {
-							cluster.getEventBus().<byte[]>send(botAddress + ".ready-to-receive", EMPTY, deliveryOptionsWithTimeout);
-						}).subscribeOn(Schedulers.boundedElastic()))
-				)
 				.timeout(Duration.ofMinutes(1), Mono.fromCallable(() -> {
 					var ex = new ConnectException("Server did not respond to 12 pings after 1 minute (5 seconds per ping)");
 					ex.setStackTrace(new StackTraceElement[0]);
 					throw ex;
 				}))
+				.doOnSubscribe(s -> cluster.getEventBus().<byte[]>send(botAddress + ".ready-to-receive",
+						EMPTY,
+						deliveryOptionsWithTimeout
+				))
 				.flatMapSequential(updates -> {
 					if (updates.succeeded()) {
 						return Flux.fromIterable(updates.value());
