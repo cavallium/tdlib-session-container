@@ -3,6 +3,7 @@ package it.tdlight.tdlibsession.td.middle.client;
 import io.vertx.core.eventbus.DeliveryOptions;
 import io.vertx.core.json.JsonObject;
 import io.vertx.reactivex.core.Vertx;
+import io.vertx.reactivex.core.buffer.Buffer;
 import io.vertx.reactivex.core.eventbus.MessageConsumer;
 import it.tdlight.jni.TdApi;
 import it.tdlight.jni.TdApi.Function;
@@ -99,7 +100,7 @@ public class AsyncTdMiddleEventBusClient implements AsyncTdMiddle {
 		return BinlogUtils.retrieveBinlog(vertx.fileSystem(), binlogsArchiveDirectory.resolve(botId + ".binlog"));
 	}
 
-	private Mono<Void> saveBinlog(byte[] data) {
+	private Mono<Void> saveBinlog(Buffer data) {
 		return this.binlog.asMono().flatMap(binlog -> BinlogUtils.saveBinlog(binlog, data));
 	}
 
@@ -116,7 +117,7 @@ public class AsyncTdMiddleEventBusClient implements AsyncTdMiddle {
 		return MonoUtils
 				.emitValue(this.binlog, binlog)
 				.then(binlog.getLastModifiedTime())
-				.zipWith(binlog.readFullyBytes())
+				.zipWith(binlog.readFully().map(Buffer::getDelegate))
 				.single()
 				.flatMap(tuple -> {
 					var binlogLastModifiedTime = tuple.getT1();
@@ -124,7 +125,7 @@ public class AsyncTdMiddleEventBusClient implements AsyncTdMiddle {
 
 					var msg = new StartSessionMessage(this.botId,
 							this.botAlias,
-							binlogData,
+							Buffer.newInstance(binlogData),
 							binlogLastModifiedTime,
 							implementationDetails
 					);
@@ -262,7 +263,7 @@ public class AsyncTdMiddleEventBusClient implements AsyncTdMiddle {
 						return Mono.fromRunnable(() -> logger.trace("Received AuthorizationStateClosed from tdlib"))
 								.then(cluster.getEventBus().<EndSessionMessage>rxRequest(this.botAddress + ".read-binlog", EMPTY).as(MonoUtils::toMono))
 								.flatMap(latestBinlogMsg -> Mono.fromCallable(() -> latestBinlogMsg.body()).subscribeOn(Schedulers.boundedElastic()))
-								.doOnNext(latestBinlog -> logger.info("Received binlog from server. Size: " + BinlogUtils.humanReadableByteCountBin(latestBinlog.binlog().length)))
+								.doOnNext(latestBinlog -> logger.info("Received binlog from server. Size: " + BinlogUtils.humanReadableByteCountBin(latestBinlog.binlog().length())))
 								.flatMap(latestBinlog -> this.saveBinlog(latestBinlog.binlog()))
 								.doOnSuccess(s -> logger.info("Overwritten binlog from server"))
 								.publishOn(Schedulers.boundedElastic())

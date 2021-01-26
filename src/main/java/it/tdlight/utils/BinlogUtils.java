@@ -44,13 +44,13 @@ public class BinlogUtils {
 				.publishOn(Schedulers.boundedElastic());
 	}
 
-	public static Mono<Void> saveBinlog(BinlogAsyncFile binlog, byte[] data) {
+	public static Mono<Void> saveBinlog(BinlogAsyncFile binlog, Buffer data) {
 		return binlog.overwrite(data);
 	}
 
 	public static Mono<Void> chooseBinlog(FileSystem vertxFilesystem,
 			Path binlogPath,
-			byte[] remoteBinlog,
+			Buffer remoteBinlog,
 			long remoteBinlogDate) {
 		var path = binlogPath.toString();
 		return retrieveBinlog(vertxFilesystem, binlogPath)
@@ -64,7 +64,7 @@ public class BinlogUtils {
 				.doOnNext(v -> logger.info("Using local binlog: " + binlogPath))
 				.map(Tuple2::getT1)
 				.switchIfEmpty(Mono.defer(() -> Mono.fromRunnable(() -> logger.info("Using remote binlog. Overwriting " + binlogPath)))
-						.then(vertxFilesystem.rxWriteFile(path, Buffer.buffer(remoteBinlog)).as(MonoUtils::toMono))
+						.then(vertxFilesystem.rxWriteFile(path, remoteBinlog.copy()).as(MonoUtils::toMono))
 						.then(retrieveBinlog(vertxFilesystem, binlogPath))
 				)
 				.single()
@@ -119,7 +119,8 @@ public class BinlogUtils {
 				})
 				.flatMapSequential(req -> BinlogUtils
 						.retrieveBinlog(vertx.fileSystem(), TDLibRemoteClient.getSessionBinlogDirectory(botId))
-						.flatMap(BinlogAsyncFile::readFullyBytes)
+						.flatMap(BinlogAsyncFile::readFully)
+						.map(Buffer::copy)
 						.single()
 						.map(binlog -> Tuples.of(req, binlog))
 				)

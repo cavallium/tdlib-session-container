@@ -1,14 +1,15 @@
 package it.tdlight.tdlibsession.td.middle;
 
-import java.util.Arrays;
+import io.vertx.reactivex.core.buffer.Buffer;
 import java.util.Objects;
+import java.util.StringJoiner;
 
 public final class EndSessionMessage {
 
 	private final int id;
-	private final byte[] binlog;
+	private final Buffer binlog;
 
-	public EndSessionMessage(int id, byte[] binlog) {
+	public EndSessionMessage(int id, Buffer binlog) {
 		this.id = id;
 		this.binlog = binlog;
 	}
@@ -17,20 +18,20 @@ public final class EndSessionMessage {
 		return id;
 	}
 
-	public byte[] binlog() {
+	public Buffer binlog() {
 		return binlog;
 	}
 
 	@Override
-	public boolean equals(Object obj) {
-		if (obj == this) {
+	public boolean equals(Object o) {
+		if (this == o) {
 			return true;
 		}
-		if (obj == null || obj.getClass() != this.getClass()) {
+		if (o == null || getClass() != o.getClass()) {
 			return false;
 		}
-		var that = (EndSessionMessage) obj;
-		return this.id == that.id && Arrays.equals(this.binlog, that.binlog);
+		EndSessionMessage that = (EndSessionMessage) o;
+		return id == that.id && Objects.equals(binlog, that.binlog);
 	}
 
 	@Override
@@ -40,6 +41,9 @@ public final class EndSessionMessage {
 
 	@Override
 	public String toString() {
-		return "EndSessionMessage[" + "id=" + id + ", " + "binlog=" + Arrays.hashCode(binlog) + ']';
+		return new StringJoiner(", ", EndSessionMessage.class.getSimpleName() + "[", "]")
+				.add("id=" + id)
+				.add("binlog=" + binlog)
+				.toString();
 	}
 }

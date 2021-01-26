@@ -1,13 +1,11 @@
 package it.tdlight.tdlibsession.td.middle;
 
+import io.netty.buffer.ByteBufInputStream;
+import io.netty.buffer.ByteBufOutputStream;
 import io.vertx.core.buffer.Buffer;
 import io.vertx.core.eventbus.MessageCodec;
 import it.tdlight.jni.TdApi;
-import it.tdlight.utils.VertxBufferInputStream;
-import it.unimi.dsi.fastutil.io.FastByteArrayOutputStream;
-import java.io.DataOutputStream;
 import java.io.IOException;
-import org.warp.commonutils.stream.SafeDataInputStream;
 
 public class TdMessageCodec<T extends TdApi.Object> implements MessageCodec<T, T> {
 
@@ -22,28 +20,21 @@ public class TdMessageCodec<T extends TdApi.Object> implements MessageCodec<T, T
 
 	@Override
 	public void encodeToWire(Buffer buffer, T t) {
-		try (var bos = new FastByteArrayOutputStream()) {
-			try (var dos = new DataOutputStream(bos)) {
-				t.serialize(dos);
-			}
-			bos.trim();
-			buffer.appendBytes(bos.array);
+		try (var os = new ByteBufOutputStream(buffer.getByteBuf())) {
+			t.serialize(os);
 		} catch (IOException ex) {
-			ex.printStackTrace();
+			throw new RuntimeException(ex);
 		}
 	}
 
 	@Override
 	public T decodeFromWire(int pos, Buffer buffer) {
-		try (var fis = new VertxBufferInputStream(buffer, pos)) {
-			try (var dis = new SafeDataInputStream(fis)) {
-				//noinspection unchecked
-				return (T) TdApi.Deserializer.deserialize(dis);
-			}
+		try (var is = new ByteBufInputStream(buffer.getByteBuf(), pos)) {
+			//noinspection unchecked
+			return (T) TdApi.Deserializer.deserialize(is);
 		} catch (IOException ex) {
-			ex.printStackTrace();
+			throw new RuntimeException(ex);
 		}
-		return null;
 	}
 
 	@Override

@@ -2,10 +2,7 @@ package it.tdlight.tdlibsession.td.middle;
 
 import io.vertx.core.buffer.Buffer;
 import io.vertx.core.eventbus.MessageCodec;
-import it.tdlight.utils.VertxBufferInputStream;
-import it.tdlight.utils.VertxBufferOutputStream;
-import org.warp.commonutils.stream.SafeDataInputStream;
-import org.warp.commonutils.stream.SafeDataOutputStream;
+import it.tdlight.utils.BufferUtils;
 
 public class EndSessionMessageCodec implements MessageCodec<EndSessionMessage, EndSessionMessage> {
 
@@ -18,22 +15,15 @@ public class EndSessionMessageCodec implements MessageCodec<EndSessionMessage, E
 
 	@Override
 	public void encodeToWire(Buffer buffer, EndSessionMessage t) {
-		try (var bos = new VertxBufferOutputStream(buffer)) {
-			try (var dos = new SafeDataOutputStream(bos)) {
-				dos.writeInt(t.id());
-				dos.writeInt(t.binlog().length);
-				dos.write(t.binlog());
-			}
-		}
+		BufferUtils.encode(buffer, os -> {
+			os.writeInt(t.id());
+			BufferUtils.writeBuf(os, t.binlog());
+		});
 	}
 
 	@Override
 	public EndSessionMessage decodeFromWire(int pos, Buffer buffer) {
-		try (var fis = new VertxBufferInputStream(buffer, pos)) {
-			try (var dis = new SafeDataInputStream(fis)) {
-				return new EndSessionMessage(dis.readInt(), dis.readNBytes(dis.readInt()));
-			}
-		}
+		return BufferUtils.decode(pos, buffer, is -> new EndSessionMessage(is.readInt(), BufferUtils.rxReadBuf(is)));
 	}
 
 	@Override

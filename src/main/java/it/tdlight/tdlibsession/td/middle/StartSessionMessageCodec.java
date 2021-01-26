@@ -3,10 +3,8 @@ package it.tdlight.tdlibsession.td.middle;
 import io.vertx.core.buffer.Buffer;
 import io.vertx.core.eventbus.MessageCodec;
 import io.vertx.core.json.JsonObject;
-import it.tdlight.utils.VertxBufferInputStream;
-import it.tdlight.utils.VertxBufferOutputStream;
-import org.warp.commonutils.stream.SafeDataInputStream;
-import org.warp.commonutils.stream.SafeDataOutputStream;
+import it.tdlight.utils.BufferUtils;
+import org.warp.commonutils.serialization.UTFUtils;
 
 public class StartSessionMessageCodec implements MessageCodec<StartSessionMessage, StartSessionMessage> {
 
@@ -19,30 +17,23 @@ public class StartSessionMessageCodec implements MessageCodec<StartSessionMessag
 
 	@Override
 	public void encodeToWire(Buffer buffer, StartSessionMessage t) {
-		try (var bos = new VertxBufferOutputStream(buffer)) {
-			try (var dos = new SafeDataOutputStream(bos)) {
-				dos.writeInt(t.id());
-				dos.writeUTF(t.alias());
-				dos.writeInt(t.binlog().length);
-				dos.write(t.binlog());
-				dos.writeLong(t.binlogDate());
-				dos.writeUTF(t.implementationDetails().toString());
-			}
-		}
+		BufferUtils.encode(buffer, os -> {
+			os.writeInt(t.id());
+			UTFUtils.writeUTF(os, t.alias());
+			BufferUtils.writeBuf(os, t.binlog());
+			os.writeLong(t.binlogDate());
+			UTFUtils.writeUTF(os, t.implementationDetails().toString());
+		});
 	}
 
 	@Override
 	public StartSessionMessage decodeFromWire(int pos, Buffer buffer) {
-		try (var fis = new VertxBufferInputStream(buffer, pos)) {
-			try (var dis = new SafeDataInputStream(fis)) {
-				return new StartSessionMessage(dis.readInt(),
-						dis.readUTF(),
-						dis.readNBytes(dis.readInt()),
-						dis.readLong(),
-						new JsonObject(dis.readUTF())
-				);
-			}
-		}
+		return BufferUtils.decode(pos, buffer, is -> new StartSessionMessage(is.readInt(),
+				UTFUtils.readUTF(is),
+				BufferUtils.rxReadBuf(is),
+				is.readLong(),
+				new JsonObject(UTFUtils.readUTF(is))
+		));
 	}
 
 	@Override
