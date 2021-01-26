@@ -106,6 +106,13 @@ public class MonoUtils {
 		return Mono.fromCallable(callable).subscribeOn(Schedulers.boundedElastic());
 	}
 
+	public static Mono<Void> fromBlockingEmpty(EmptyCallable callable) {
+		return Mono.<Void>fromCallable(() -> {
+			callable.call();
+			return null;
+		}).subscribeOn(Schedulers.boundedElastic());
+	}
+
 	public static <T> Mono<T> fromBlockingSingle(Callable<T> callable) {
 		return fromBlockingMaybe(callable).single();
 	}
@@ -350,7 +357,7 @@ public class MonoUtils {
 	 * Use fromConsumerAdvanced if you want better stability.
 	 */
 	@Deprecated
-	public static <T> Flux<T> fromConsumer(MessageConsumer<T> messageConsumer) {
+	public static <T> Flux<T> fromConsumerUnsafe(MessageConsumer<T> messageConsumer) {
 		return Flux.<Message<T>>create(sink -> {
 			messageConsumer.endHandler(e -> sink.complete());
 			sink.onDispose(messageConsumer::unregister);
@@ -360,8 +367,24 @@ public class MonoUtils {
 				.subscribeOn(Schedulers.boundedElastic());
 	}
 
-	public static <T> Mono<Tuple2<Mono<Void>, Flux<T>>> fromConsumerAdvanced(MessageConsumer<T> messageConsumer) {
-		return Mono.<Tuple2<Mono<Void>, Flux<T>>>fromCallable(() -> {
+	public static <T> Mono<Tuple2<Mono<Void>, Flux<T>>> fromMessageConsumer(MessageConsumer<T> messageConsumer) {
+		return fromReplyableMessageConsumer(messageConsumer)
+				.map(tuple -> tuple.mapT2(msgs -> msgs.flatMapSequential(msg -> Mono
+						.fromCallable(msg::body)
+						.subscribeOn(Schedulers.boundedElastic())))
+				);
+	}
+
+	public static <T> Mono<Tuple2<Mono<Void>, Flux<Tuple2<Message<?>, T>>>> fromReplyableResolvedMessageConsumer(MessageConsumer<T> messageConsumer) {
+		return fromReplyableMessageConsumer(messageConsumer)
+				.map(tuple -> tuple.mapT2(msgs -> msgs.flatMapSequential(msg -> Mono
+						.fromCallable(() -> Tuples.<Message<?>, T>of(msg, msg.body()))
+						.subscribeOn(Schedulers.boundedElastic())))
+				);
+	}
+
+	public static <T> Mono<Tuple2<Mono<Void>, Flux<Message<T>>>> fromReplyableMessageConsumer(MessageConsumer<T> messageConsumer) {
+		return Mono.<Tuple2<Mono<Void>, Flux<Message<T>>>>fromCallable(() -> {
 			Many<Message<T>> messages = Sinks.many().unicast().onBackpressureError();
 			Empty<Void> registrationRequested = Sinks.empty();
 			Empty<Void> registrationCompletion = Sinks.empty();
@@ -369,15 +392,11 @@ public class MonoUtils {
 				messages.tryEmitComplete();
 				registrationCompletion.tryEmitEmpty();
 			});
-			messageConsumer.<T>handler(messages::tryEmitNext);
+			messageConsumer.<Message<T>>handler(messages::tryEmitNext);
 
-			Flux<T> dataFlux = Flux
-					.<T>concatDelayError(
-							messages.asFlux()
-									.<T>flatMap(msg -> Mono
-											.fromCallable(msg::body)
-											.subscribeOn(Schedulers.boundedElastic())
-									),
+			Flux<Message<T>> dataFlux = Flux
+					.<Message<T>>concatDelayError(
+							messages.asFlux(),
 							messageConsumer.rxUnregister().as(MonoUtils::toMono)
 					)
 					.doOnSubscribe(s -> registrationRequested.tryEmitEmpty());

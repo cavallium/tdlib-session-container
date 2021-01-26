@@ -100,6 +100,7 @@ public class AsyncTdEasy {
 							logger.warn("Updates stream has closed while"
 									+ " the current authorization state is"
 									+ " still {}. Setting authorization state as closed!", authState.getClass().getSimpleName());
+							this.fatalError.tryEmitValue(FatalErrorType.CONNECTION_KILLED);
 							this.authState.tryEmitNext(new AuthorizationStateClosed());
 						}
 					});
@@ -110,6 +111,7 @@ public class AsyncTdEasy {
 							logger.warn("Updates stream has terminated with an error while"
 									+ " the current authorization state is"
 									+ " still {}. Setting authorization state as closed!", authState.getClass().getSimpleName());
+							this.fatalError.tryEmitValue(FatalErrorType.CONNECTION_KILLED);
 							this.authState.tryEmitNext(new AuthorizationStateClosed());
 						}
 					});

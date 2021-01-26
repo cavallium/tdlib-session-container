@@ -4,6 +4,7 @@ import com.akaita.java.rxjava2debug.RxJava2Debug;
 import io.vertx.core.DeploymentOptions;
 import io.vertx.core.json.JsonObject;
 import io.vertx.core.net.JksOptions;
+import io.vertx.reactivex.core.eventbus.Message;
 import io.vertx.reactivex.core.eventbus.MessageConsumer;
 import it.tdlight.common.Init;
 import it.tdlight.common.utils.CantLoadLibrary;
@@ -22,11 +23,13 @@ import java.util.concurrent.atomic.AtomicInteger;
 import org.apache.logging.log4j.LogManager;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.core.publisher.Sinks;
 import reactor.core.publisher.Sinks.One;
 import reactor.core.scheduler.Schedulers;
 import reactor.tools.agent.ReactorDebugAgent;
+import reactor.util.function.Tuple2;
 
 public class TDLibRemoteClient implements AutoCloseable {
 
@@ -130,7 +133,7 @@ public class TDLibRemoteClient implements AutoCloseable {
 				.setPassword(securityInfo.getTrustStorePassword());
 
 		return MonoUtils
-				.fromBlockingMaybe(() -> {
+				.fromBlockingEmpty(() -> {
 					// Set verbosity level here, before creating the bots
 					if (Files.notExists(Paths.get("logs"))) {
 						try {
@@ -141,7 +144,6 @@ public class TDLibRemoteClient implements AutoCloseable {
 
 					logger.info(
 							"TDLib remote client is being hosted on" + netInterface + ":" + port + ". Master: " + masterHostname);
-					return null;
 				})
 				.then(TdClusterManager.ofNodes(keyStoreOptions,
 						trustStoreOptions,
@@ -161,46 +163,52 @@ public class TDLibRemoteClient implements AutoCloseable {
 				.single()
 				.flatMap(clusterManager -> {
 					MessageConsumer<StartSessionMessage> startBotConsumer = clusterManager.getEventBus().consumer("bots.start-bot");
-					startBotConsumer.handler(msg -> {
+					return MonoUtils
+							.fromReplyableResolvedMessageConsumer(startBotConsumer)
+							.flatMap(tuple -> this.listenForStartBotsCommand(clusterManager, tuple.getT1(), tuple.getT2()));
+				})
+				.then();
+	}
 
-						StartSessionMessage req = msg.body();
-						DeploymentOptions deploymentOptions = clusterManager
-								.newDeploymentOpts()
-								.setConfig(new JsonObject()
-										.put("botId", req.id())
-										.put("botAlias", req.alias())
-										.put("local", false)
-										.put("implementationDetails", req.implementationDetails()));
-						var verticle = new AsyncTdMiddleEventBusServer();
+	private Mono<Void> listenForStartBotsCommand(TdClusterManager clusterManager,
+			Mono<Void> completion,
+			Flux<Tuple2<Message<?>, StartSessionMessage>> messages) {
+		return MonoUtils
+				.fromBlockingEmpty(() -> messages
+						.flatMapSequential(msg -> {
+							StartSessionMessage req = msg.getT2();
+							DeploymentOptions deploymentOptions = clusterManager
+									.newDeploymentOpts()
+									.setConfig(new JsonObject()
+											.put("botId", req.id())
+											.put("botAlias", req.alias())
+											.put("local", false)
+											.put("implementationDetails", req.implementationDetails()));
+							var verticle = new AsyncTdMiddleEventBusServer();
 
-						// Binlog path
-						var sessPath = getSessionDirectory(req.id());
-						var mediaPath = getMediaDirectory(req.id());
-						var blPath = getSessionBinlogDirectory(req.id());
+							// Binlog path
+							var sessPath = getSessionDirectory(req.id());
+							var mediaPath = getMediaDirectory(req.id());
+							var blPath = getSessionBinlogDirectory(req.id());
 
-						Schedulers.boundedElastic().schedule(() -> {
-							BinlogUtils
+							return BinlogUtils
 									.chooseBinlog(clusterManager.getVertx().fileSystem(), blPath, req.binlog(), req.binlogDate())
 									.then(BinlogUtils.cleanSessionPath(clusterManager.getVertx().fileSystem(), blPath, sessPath, mediaPath))
 									.then(clusterManager.getVertx().rxDeployVerticle(verticle, deploymentOptions).as(MonoUtils::toMono))
-									.then(MonoUtils.fromBlockingMaybe(() -> {
-										msg.reply(new byte[0]);
-										return null;
-									}))
-									.publishOn(Schedulers.single())
-									.subscribe(
-											v -> {},
-											ex -> {
-												logger.error("Failed to deploy bot verticle", ex);
-												msg.fail(500, "Failed to deploy bot verticle: " + ex.getMessage());
-											},
-											() -> {}
-									);
-						});
-					});
-					return startBotConsumer.rxCompletionHandler().as(MonoUtils::toMono);
-				})
-				.then();
+									.then(MonoUtils.fromBlockingEmpty(() -> msg.getT1().reply(new byte[0])))
+									.onErrorResume(ex -> {
+										msg.getT1().fail(500, "Failed to deploy bot verticle: " + ex.getMessage());
+										logger.error("Failed to deploy bot verticle", ex);
+										return Mono.empty();
+									});
+						})
+						.publishOn(Schedulers.parallel())
+						.subscribe(
+								v -> {},
+								ex -> logger.error("Bots starter activity crashed. From now on, no new bots can be started anymore", ex)
+						)
+				)
+				.then(completion);
 	}
 
 	public static Path getSessionDirectory(int botId) {

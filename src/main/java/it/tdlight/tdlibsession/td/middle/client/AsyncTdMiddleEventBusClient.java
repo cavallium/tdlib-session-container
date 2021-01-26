@@ -152,10 +152,8 @@ public class AsyncTdMiddleEventBusClient implements AsyncTdMiddle {
 				Mono
 						.defer(() -> {
 							logger.trace("Requesting ping...");
-							return cluster.getEventBus().<byte[]>rxRequest(botAddress + ".ping",
-									EMPTY,
-									deliveryOptionsWithTimeout
-							).as(MonoUtils::toMono);
+							return cluster.getEventBus()
+									.<byte[]>rxRequest(botAddress + ".ping", EMPTY, deliveryOptionsWithTimeout).as(MonoUtils::toMono);
 						})
 						.flatMap(msg -> Mono.fromCallable(() -> msg.body()).subscribeOn(Schedulers.boundedElastic()))
 						.repeatWhen(l -> l.delayElements(Duration.ofSeconds(10)).takeWhile(x -> true))
@@ -164,12 +162,13 @@ public class AsyncTdMiddleEventBusClient implements AsyncTdMiddle {
 						}), this.crash.asMono().onErrorResume(ex -> Mono.empty()).doOnTerminate(() -> {
 							logger.trace("About to kill pinger because it has seen a crash signal");
 						})))
-						.doOnNext(s -> logger.warn("REPEATING PING"))
-						.map(x -> 1)
-						.defaultIfEmpty(0)
-						.doOnNext(s -> logger.warn("PING"))
+						.doOnNext(s -> logger.trace("PING"))
 						.then()
-						.doOnNext(s -> logger.warn("END PING"))
+						.onErrorResume(ex -> {
+							logger.trace("Ping failed", ex);
+							return Mono.empty();
+						})
+						.doOnNext(s -> logger.debug("END PING"))
 						.then(MonoUtils.emitEmpty(this.pingFail))
 						.subscribeOn(Schedulers.single())
 						.subscribe();
@@ -209,7 +208,7 @@ public class AsyncTdMiddleEventBusClient implements AsyncTdMiddle {
 				.then(updates.asMono().publishOn(Schedulers.single()))
 				.timeout(Duration.ofSeconds(5))
 				.publishOn(Schedulers.single())
-				.flatMap(MonoUtils::fromConsumerAdvanced)
+				.flatMap(MonoUtils::fromMessageConsumer)
 				.flatMapMany(registration -> Mono
 						.fromRunnable(() -> logger.trace("Registering updates flux"))
 						.then(registration.getT1())

@@ -17,24 +17,23 @@ import it.tdlight.jni.TdApi.Update;
 import it.tdlight.jni.TdApi.UpdateAuthorizationState;
 import it.tdlight.tdlibsession.remoteclient.TDLibRemoteClient;
 import it.tdlight.tdlibsession.td.TdError;
-import it.tdlight.tdlibsession.td.middle.TdResultMessage;
 import it.tdlight.tdlibsession.td.direct.AsyncTdDirectImpl;
 import it.tdlight.tdlibsession.td.direct.AsyncTdDirectOptions;
 import it.tdlight.tdlibsession.td.direct.TelegramClientFactory;
 import it.tdlight.tdlibsession.td.middle.ExecuteObject;
 import it.tdlight.tdlibsession.td.middle.TdResultList;
 import it.tdlight.tdlibsession.td.middle.TdResultListMessageCodec;
+import it.tdlight.tdlibsession.td.middle.TdResultMessage;
 import it.tdlight.utils.BinlogUtils;
 import it.tdlight.utils.MonoUtils;
 import java.net.ConnectException;
 import java.time.Duration;
-import java.util.Collections;
+import java.util.List;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.core.publisher.Sinks;
-import reactor.core.publisher.Sinks.Empty;
 import reactor.core.publisher.Sinks.One;
 import reactor.core.scheduler.Schedulers;
 import reactor.util.function.Tuples;
@@ -63,7 +62,6 @@ public class AsyncTdMiddleEventBusServer extends AbstractVerticle {
 	private final One<MessageConsumer<byte[]>> readyToReceiveConsumer = Sinks.one();
 	private final One<MessageConsumer<byte[]>> pingConsumer = Sinks.one();
 	private final One<Flux<Void>> pipeFlux = Sinks.one();
-	private final Empty<Void> terminatePingOverPipeFlux = Sinks.empty();
 
 	public AsyncTdMiddleEventBusServer() {
 		this.tdOptions = new AsyncTdDirectOptions(WAIT_DURATION, 50);
@@ -346,12 +344,9 @@ public class AsyncTdMiddleEventBusServer extends AbstractVerticle {
 						return update;
 					}
 				}))
-				.bufferTimeout(tdOptions.getEventsSize(), local ? Duration.ofMillis(1) : Duration.ofMillis(100))
-				.doFinally(signalType -> terminatePingOverPipeFlux.tryEmitEmpty())
-				.mergeWith(Flux
-						.interval(Duration.ofSeconds(5))
-						.map(l -> Collections.<TdApi.Object>emptyList())
-						.takeUntilOther(terminatePingOverPipeFlux.asMono()))
+				//.transform(normal -> new BufferTimeOutPublisher<>(normal, Math.max(1, tdOptions.getEventsSize()), local ? Duration.ofMillis(1) : Duration.ofMillis(100)))
+				//.bufferTimeout(Math.max(1, tdOptions.getEventsSize()), local ? Duration.ofMillis(1) : Duration.ofMillis(100))
+				.map(List::of)
 				.map(TdResultList::new);
 
 		var fluxCodec = new TdResultListMessageCodec();
