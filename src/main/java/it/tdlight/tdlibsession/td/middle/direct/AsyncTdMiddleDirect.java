@@ -88,7 +88,7 @@ public class AsyncTdMiddleDirect extends AbstractVerticle implements AsyncTdMidd
 		return td
 				.receive(new AsyncTdDirectOptions(WAIT_DURATION, 100))
 				.takeUntilOther(closeRequest.asMono())
-				.doOnNext(s -> logger.trace("Received update from tdlib: {}", s))
+				.doOnNext(s -> logger.trace("Received update from tdlib: {}", s.getClass().getSimpleName()))
 				.doOnError(ex -> logger.info("TdMiddle verticle error", ex))
 				.doOnTerminate(() -> logger.debug("TdMiddle verticle stopped"))
 				.subscribeOn(Schedulers.boundedElastic())

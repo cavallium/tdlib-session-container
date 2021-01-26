@@ -48,6 +48,8 @@ public class AsyncTdMiddleEventBusClient implements AsyncTdMiddle {
 	private final Empty<Void> updatesStreamEnd = Sinks.one();
 	// This will only result in a crash, never completes in other ways
 	private final Empty<Void> crash = Sinks.one();
+	// This will only result in a successful completion, never completes in other ways
+	private final Empty<Void> pingFail = Sinks.one();
 
 	private int botId;
 	private String botAddress;
@@ -131,29 +133,71 @@ public class AsyncTdMiddleEventBusClient implements AsyncTdMiddle {
 								if (local) {
 									return Mono.empty();
 								}
+								logger.trace("Requesting bots.start-bot");
 								return cluster.getEventBus()
 										.<byte[]>rxRequest("bots.start-bot", msg).as(MonoUtils::toMono)
-										.publishOn(Schedulers.boundedElastic());
+										.doOnSuccess(s -> logger.trace("bots.start-bot returned successfully"))
+										.subscribeOn(Schedulers.boundedElastic());
 							}))
-							.then();
+							.then(setupPing());
 				})
 				.publishOn(Schedulers.single());
 	}
 
-	private Mono<Void> setupUpdatesListener() {
-		return MonoUtils
-				.fromBlockingMaybe(() -> {
-					MessageConsumer<TdResultList> updateConsumer = MessageConsumer.newInstance(cluster.getEventBus().<TdResultList>consumer(
-							botAddress + ".updates").setMaxBufferedMessages(5000).getDelegate());
+	private Mono<Void> setupPing() {
+		return Mono.<Void>fromCallable(() -> {
+			logger.trace("Setting up ping");
+			// Disable ping on local servers
+			if (!local) {
+				Mono
+						.defer(() -> cluster.getEventBus().<byte[]>rxRequest(botAddress + ".ping",
+								EMPTY,
+								deliveryOptionsWithTimeout
+						).as(MonoUtils::toMono))
+						.flatMap(msg -> Mono.fromCallable(msg::body).subscribeOn(Schedulers.boundedElastic()))
+						.repeatWhen(l -> l.delayElements(Duration.ofSeconds(10)).takeWhile(x -> true))
+						.takeUntilOther(Mono.firstWithSignal(this.updatesStreamEnd.asMono().doOnTerminate(() -> {
+							logger.trace("About to kill pinger because updates stream ended");
+						}), this.crash.asMono().onErrorResume(ex -> Mono.empty()).doOnTerminate(() -> {
+							logger.trace("About to kill pinger because it has seen a crash signal");
+						})))
+						.doOnNext(s -> logger.warn("REPEATING PING"))
+						.map(x -> 1)
+						.defaultIfEmpty(0)
+						.doOnNext(s -> logger.warn("PING"))
+						.then()
+						.doOnNext(s -> logger.warn("END PING"))
+						.then(MonoUtils.emitEmpty(this.pingFail))
+						.subscribeOn(Schedulers.single())
+						.subscribe();
+			}
+			logger.trace("Ping setup success");
+			return null;
+		}).subscribeOn(Schedulers.boundedElastic());
+	}
 
+	private Mono<Void> setupUpdatesListener() {
+		return Mono
+				.fromRunnable(() -> logger.trace("Setting up updates listener..."))
+				.then(MonoUtils.<MessageConsumer<TdResultList>>fromBlockingSingle(() -> {
+					return MessageConsumer.newInstance(cluster.getEventBus().<TdResultList>consumer(botAddress + ".updates")
+							.setMaxBufferedMessages(5000)
+							.getDelegate());
+				}))
+				.flatMap(updateConsumer -> {
 					// Here the updates will be piped from the server to the client
 					var updateConsumerFlux = MonoUtils.fromConsumer(updateConsumer);
 
 					// Return when the registration of all the consumers has been done across the cluster
-					return MonoUtils
-							.emitValue(updates, updateConsumerFlux)
-							.then(updateConsumer.rxCompletionHandler().as(MonoUtils::toMono));
+					return Mono
+							.fromRunnable(() -> logger.trace("Emitting updates flux to sink"))
+							.then(MonoUtils.emitValue(updates, updateConsumerFlux))
+							.doOnSuccess(s -> logger.trace("Emitted updates flux to sink"))
+							.doOnSuccess(s -> logger.trace("Waiting to register update consumer across the cluster"))
+							.then(updateConsumer.rxCompletionHandler().as(MonoUtils::toMono))
+							.doOnSuccess(s -> logger.trace("Registered update consumer across the cluster"));
 				})
+				.doOnSuccess(s ->logger.trace("Set up updates listener"))
 				.then();
 	}
 
@@ -163,22 +207,24 @@ public class AsyncTdMiddleEventBusClient implements AsyncTdMiddle {
 		return Mono
 				.fromRunnable(() -> logger.trace("Called receive() from parent"))
 				.doOnSuccess(s -> logger.trace("Sending ready-to-receive"))
-				.then()
 				.doOnSuccess(s -> logger.trace("Sent ready-to-receive, received reply"))
 				.doOnSuccess(s -> logger.trace("About to read updates flux"))
 				.then(updates.asMono().publishOn(Schedulers.single()))
 				.timeout(Duration.ofSeconds(5))
 				.publishOn(Schedulers.single())
-				.flatMapMany(tdResultListFlux -> tdResultListFlux.publishOn(Schedulers.single()))
-				.timeout(Duration.ofMinutes(1), Mono.fromCallable(() -> {
-					var ex = new ConnectException("Server did not respond to 12 pings after 1 minute (5 seconds per ping)");
-					ex.setStackTrace(new StackTraceElement[0]);
-					throw ex;
-				}))
-				.doOnSubscribe(s -> cluster.getEventBus().<byte[]>send(botAddress + ".ready-to-receive",
-						EMPTY,
-						deliveryOptionsWithTimeout
-				))
+				.flatMapMany(updatesFlux -> updatesFlux.publishOn(Schedulers.single()))
+				.takeUntilOther(Flux
+						.merge(
+								crash.asMono()
+										.onErrorResume(ex -> Mono.empty()),
+								pingFail.asMono()
+										.then(Mono.fromCallable(() -> {
+											var ex = new ConnectException("Server did not respond to ping");
+											ex.setStackTrace(new StackTraceElement[0]);
+											throw ex;
+										}).onErrorResume(ex -> MonoUtils.emitError(crash, ex)))
+						)
+				)
 				.flatMapSequential(updates -> {
 					if (updates.succeeded()) {
 						return Flux.fromIterable(updates.value());
@@ -188,7 +234,10 @@ public class AsyncTdMiddleEventBusClient implements AsyncTdMiddle {
 				})
 				.publishOn(Schedulers.single())
 				.flatMapSequential(this::interceptUpdate)
+				// Redirect errors to crash sink
 				.doOnError(crash::tryEmitError)
+				.onErrorResume(ex -> Mono.empty())
+
 				.doOnTerminate(updatesStreamEnd::tryEmitEmpty)
 				.publishOn(Schedulers.single());
 	}

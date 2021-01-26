@@ -261,23 +261,23 @@ public class MonoUtils {
 	}
 
 	public static <T> Mono<Void> emitValue(One<T> sink, T value) {
-		return fromEmitResult(sink.tryEmitValue(value));
+		return Mono.defer(() -> fromEmitResult(sink.tryEmitValue(value)));
 	}
 
 	public static <T> Mono<Void> emitNext(Many<T> sink, T value) {
-		return fromEmitResult(sink.tryEmitNext(value));
+		return Mono.defer(() -> fromEmitResult(sink.tryEmitNext(value)));
 	}
 
 	public static <T> Mono<Void> emitComplete(Many<T> sink) {
-		return fromEmitResult(sink.tryEmitComplete());
+		return Mono.defer(() -> fromEmitResult(sink.tryEmitComplete()));
+	}
+
+	public static <T> Mono<Void> emitEmpty(Empty<T> sink) {
+		return Mono.defer(() -> fromEmitResult(sink.tryEmitEmpty()));
 	}
 
 	public static <T> Mono<Void> emitError(Empty<T> sink, Throwable value) {
-		return fromEmitResult(sink.tryEmitError(value));
-	}
-
-	public static <T> Future<Void> emitEmpty(Empty<T> sink) {
-		return fromEmitResultFuture(sink.tryEmitEmpty());
+		return Mono.defer(() -> fromEmitResult(sink.tryEmitError(value)));
 	}
 
 	public static <T> Future<Void> emitValueFuture(One<T> sink, T value) {
@@ -343,12 +343,13 @@ public class MonoUtils {
 
 	public static <T> Flux<T> fromConsumer(MessageConsumer<T> messageConsumer) {
 		return Flux.<Message<T>>create(sink -> {
-			messageConsumer.handler(sink::next);
-			messageConsumer.endHandler(e -> sink.complete());
-			sink.onDispose(messageConsumer::unregister);
-		})
-				.subscribeOn(Schedulers.boundedElastic())
-				.flatMapSequential(msg -> Mono.fromCallable(msg::body).subscribeOn(Schedulers.boundedElastic()));
+					messageConsumer.handler(sink::next);
+					messageConsumer.endHandler(e -> sink.complete());
+					sink.onDispose(messageConsumer::unregister);
+				})
+				.startWith(MonoUtils.castVoid(messageConsumer.rxCompletionHandler().as(MonoUtils::toMono)))
+				.flatMapSequential(msg -> Mono.fromCallable(msg::body).subscribeOn(Schedulers.boundedElastic()))
+				.subscribeOn(Schedulers.boundedElastic());
 	}
 
 	public static class SinkRWStream<T> implements io.vertx.core.streams.WriteStream<T>, io.vertx.core.streams.ReadStream<T> {

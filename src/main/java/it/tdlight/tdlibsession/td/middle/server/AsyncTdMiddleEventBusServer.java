@@ -141,15 +141,21 @@ public class AsyncTdMiddleEventBusServer extends AbstractVerticle {
 						executeConsumer.handler(sink::next);
 						executeConsumer.endHandler(h -> sink.complete());
 					})
-					.flatMapSequential(msg -> {
-						logger.trace("Received execute request {}", msg.body());
-						var request = overrideRequest(msg.body().getRequest(), botId);
+					.flatMapSequential(msg -> Mono
+							.fromCallable(() -> Tuples.of(msg, msg.body()))
+							.subscribeOn(Schedulers.boundedElastic())
+					)
+					.flatMapSequential(tuple -> {
+						var msg = tuple.getT1();
+						var body = tuple.getT2();
+						logger.trace("Received execute request {}", body);
+						var request = overrideRequest(body.getRequest(), botId);
 						return td
-								.execute(request, msg.body().isExecuteDirectly())
+								.execute(request, body.isExecuteDirectly())
 								.map(result -> Tuples.of(msg, result))
 								.doOnSuccess(s -> logger.trace("Executed successfully"));
 					})
-					.handle((tuple, sink) -> {
+					.flatMapSequential(tuple -> Mono.fromCallable(() -> {
 						var msg = tuple.getT1();
 						var response = tuple.getT2();
 						var replyOpts = new DeliveryOptions().setLocalOnly(local);
@@ -157,13 +163,13 @@ public class AsyncTdMiddleEventBusServer extends AbstractVerticle {
 						try {
 							logger.trace("Replying with success response");
 							msg.reply(replyValue, replyOpts);
-							sink.next(response);
+							return response;
 						} catch (Exception ex) {
-							logger.trace("Replying with error response: {}", ex.getLocalizedMessage());
+							logger.debug("Replying with error response: {}", ex.getLocalizedMessage());
 							msg.fail(500, ex.getLocalizedMessage());
-							sink.error(ex);
+							throw ex;
 						}
-					})
+					}).subscribeOn(Schedulers.boundedElastic()))
 					.then()
 					.publishOn(Schedulers.single())
 					.subscribe(v -> {},
@@ -214,7 +220,7 @@ public class AsyncTdMiddleEventBusServer extends AbstractVerticle {
 					})
 					.then()
 					.doOnSuccess(s -> logger.trace("Finished handling ready-to-receive requests (updates pipe ended)"))
-					.publishOn(Schedulers.single())
+					.subscribeOn(Schedulers.boundedElastic())
 					// Don't handle errors here. Handle them in pipeFlux
 					.subscribe(v -> {});
 
@@ -228,12 +234,13 @@ public class AsyncTdMiddleEventBusServer extends AbstractVerticle {
 						pingConsumer.handler(sink::next);
 						pingConsumer.endHandler(h -> sink.complete());
 					})
-					.doOnNext(msg -> {
+					.flatMapSequential(msg -> Mono.fromCallable(() -> {
 						var opts = new DeliveryOptions().setLocalOnly(local).setSendTimeout(Duration.ofSeconds(10).toMillis());
 						msg.reply(EMPTY, opts);
-					})
+						return null;
+					}))
 					.then()
-					.publishOn(Schedulers.single())
+					.subscribeOn(Schedulers.boundedElastic())
 					.subscribe(v -> {},
 							ex -> logger.error("Error when processing a ping request", ex),
 							() -> logger.trace("Finished handling ping requests")
