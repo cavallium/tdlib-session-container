@@ -107,9 +107,9 @@ public class AsyncTdMiddleEventBusServer extends AbstractVerticle {
 							}
 							return onSuccessfulStartRequest(td, botAddress, botAlias, botId, local);
 						})
-						.flatMap(voidMono -> voidMono.hide().subscribeOn(Schedulers.boundedElastic()).publishOn(Schedulers.single()))
+						.flatMap(voidMono -> voidMono.hide().subscribeOn(Schedulers.boundedElastic()).publishOn(Schedulers.parallel()))
 						.doOnSuccess(s -> logger.trace("Stated verticle"))
-						.publishOn(Schedulers.single())
+						.publishOn(Schedulers.parallel())
 				);
 	}
 
@@ -141,7 +141,7 @@ public class AsyncTdMiddleEventBusServer extends AbstractVerticle {
 					})
 					.flatMapSequential(msg -> Mono
 							.fromCallable(() -> Tuples.of(msg, msg.body()))
-							.subscribeOn(Schedulers.boundedElastic())
+							.subscribeOn(Schedulers.parallel())
 					)
 					.flatMapSequential(tuple -> {
 						var msg = tuple.getT1();
@@ -169,7 +169,7 @@ public class AsyncTdMiddleEventBusServer extends AbstractVerticle {
 						}
 					}).subscribeOn(Schedulers.boundedElastic()))
 					.then()
-					.publishOn(Schedulers.single())
+					.publishOn(Schedulers.parallel())
 					.subscribe(v -> {},
 							ex -> logger.error("Error when processing an execute request", ex),
 							() -> logger.trace("Finished handling execute requests")
@@ -182,7 +182,7 @@ public class AsyncTdMiddleEventBusServer extends AbstractVerticle {
 			}
 			BinlogUtils
 					.readBinlogConsumer(vertx, readBinlogConsumer, botId, local)
-					.publishOn(Schedulers.single())
+					.publishOn(Schedulers.parallel())
 					.subscribe(v -> {}, ex -> logger.error("Error when processing a read-binlog request", ex));
 
 			MessageConsumer<byte[]> readyToReceiveConsumer = vertx.eventBus().consumer(botAddress + ".ready-to-receive");
@@ -255,11 +255,11 @@ public class AsyncTdMiddleEventBusServer extends AbstractVerticle {
 					.andThen(pingConsumer.rxCompletionHandler())
 					.as(MonoUtils::toMono)
 					.doOnSuccess(s -> logger.trace("Finished preparing listeners"))
-					.publishOn(Schedulers.single())
+					.publishOn(Schedulers.parallel())
 					.subscribe(v -> {}, registrationSink::error, registrationSink::success);
 		})
 				.subscribeOn(Schedulers.boundedElastic())
-				.publishOn(Schedulers.single());
+				.publishOn(Schedulers.parallel());
 	}
 
 	/**
@@ -298,10 +298,10 @@ public class AsyncTdMiddleEventBusServer extends AbstractVerticle {
 											// Since every consumer of ReadBinLog is identical, this should not pose a problem.
 											.delay(Duration.ofMinutes(30))
 											.then(ec.rxUnregister().as(MonoUtils::toMono))
-											.publishOn(Schedulers.single())
+											.publishOn(Schedulers.parallel())
 											.subscribe();
 									return null;
-								}).subscribeOn(Schedulers.boundedElastic()).publishOn(Schedulers.single()))
+								}).subscribeOn(Schedulers.boundedElastic()).publishOn(Schedulers.parallel()))
 						)
 						.then(readyToReceiveConsumer
 								.asMono()
@@ -314,7 +314,7 @@ public class AsyncTdMiddleEventBusServer extends AbstractVerticle {
 						.doOnError(ex -> logger.error("Undeploy of bot \"" + botAlias + "\": stop failed", ex))
 						.doOnTerminate(() -> logger.info("Undeploy of bot \"" + botAlias + "\": stopped"))
 				)
-				.publishOn(Schedulers.single())
+				.publishOn(Schedulers.parallel())
 		);
 	}
 

@@ -91,8 +91,7 @@ public class AsyncTdMiddleDirect extends AbstractVerticle implements AsyncTdMidd
 				.doOnNext(s -> logger.trace("Received update from tdlib: {}", s.getClass().getSimpleName()))
 				.doOnError(ex -> logger.info("TdMiddle verticle error", ex))
 				.doOnTerminate(() -> logger.debug("TdMiddle verticle stopped"))
-				.subscribeOn(Schedulers.boundedElastic())
-				.publishOn(Schedulers.single());
+				.subscribeOn(Schedulers.parallel());
 	}
 
 	@Override
@@ -100,6 +99,6 @@ public class AsyncTdMiddleDirect extends AbstractVerticle implements AsyncTdMidd
 		return td
 				.<T>execute(requestFunction, executeDirectly)
 				.onErrorMap(error -> ResponseError.newResponseError(requestFunction, botAlias, error))
-				.publishOn(Schedulers.single());
+				.publishOn(Schedulers.parallel());
 	}
 }

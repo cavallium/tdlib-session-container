@@ -140,7 +140,7 @@ public class AsyncTdEasy {
 
 					return true;
 				})
-				.publishOn(Schedulers.boundedElastic())
+				.subscribeOn(Schedulers.boundedElastic())
 				.flatMap(_v -> {
 					this.settings.tryEmitNext(settings);
 					return Mono.empty();
@@ -563,7 +563,7 @@ public class AsyncTdEasy {
 											))
 											.filterWhen(file -> Mono
 													.fromCallable(() -> Files.exists(file))
-													.publishOn(Schedulers.boundedElastic()))
+													.subscribeOn(Schedulers.boundedElastic()))
 											.doOnNext(directory -> {
 												try {
 													if (!Files.walk(directory)

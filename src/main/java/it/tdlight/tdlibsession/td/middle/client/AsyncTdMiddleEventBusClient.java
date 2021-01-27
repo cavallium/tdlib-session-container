@@ -142,7 +142,7 @@ public class AsyncTdMiddleEventBusClient implements AsyncTdMiddle {
 							}))
 							.then(setupPing());
 				})
-				.publishOn(Schedulers.single());
+				.publishOn(Schedulers.parallel());
 	}
 
 	private Mono<Void> setupPing() {
@@ -171,7 +171,7 @@ public class AsyncTdMiddleEventBusClient implements AsyncTdMiddle {
 						})
 						.doOnNext(s -> logger.debug("END PING"))
 						.then(MonoUtils.emitEmpty(this.pingFail))
-						.subscribeOn(Schedulers.single())
+						.subscribeOn(Schedulers.parallel())
 						.subscribe();
 			}
 			logger.trace("Ping setup success");
@@ -206,9 +206,9 @@ public class AsyncTdMiddleEventBusClient implements AsyncTdMiddle {
 
 		return Mono
 				.fromRunnable(() -> logger.trace("Called receive() from parent"))
-				.then(updates.asMono().publishOn(Schedulers.single()))
+				.then(updates.asMono().publishOn(Schedulers.parallel()))
 				.timeout(Duration.ofSeconds(5))
-				.publishOn(Schedulers.single())
+				.publishOn(Schedulers.parallel())
 				.flatMap(MonoUtils::fromMessageConsumer)
 				.flatMapMany(registration -> Mono
 						.fromRunnable(() -> logger.trace("Registering updates flux"))
@@ -240,7 +240,7 @@ public class AsyncTdMiddleEventBusClient implements AsyncTdMiddle {
 						return Mono.fromCallable(() -> TdResult.failed(updates.error()).orElseThrow());
 					}
 				})
-				.publishOn(Schedulers.single())
+				.publishOn(Schedulers.parallel())
 				.flatMapSequential(this::interceptUpdate)
 				// Redirect errors to crash sink
 				.doOnError(crash::tryEmitError)
@@ -250,7 +250,7 @@ public class AsyncTdMiddleEventBusClient implements AsyncTdMiddle {
 				})
 
 				.doOnTerminate(updatesStreamEnd::tryEmitEmpty)
-				.publishOn(Schedulers.single());
+				.publishOn(Schedulers.parallel());
 	}
 
 	private Mono<TdApi.Object> interceptUpdate(TdApi.Object update) {
@@ -262,11 +262,11 @@ public class AsyncTdMiddleEventBusClient implements AsyncTdMiddle {
 					case TdApi.AuthorizationStateClosed.CONSTRUCTOR:
 						return Mono.fromRunnable(() -> logger.trace("Received AuthorizationStateClosed from tdlib"))
 								.then(cluster.getEventBus().<EndSessionMessage>rxRequest(this.botAddress + ".read-binlog", EMPTY).as(MonoUtils::toMono))
-								.flatMap(latestBinlogMsg -> Mono.fromCallable(() -> latestBinlogMsg.body()).subscribeOn(Schedulers.boundedElastic()))
+								.flatMap(latestBinlogMsg -> Mono.fromCallable(() -> latestBinlogMsg.body()).subscribeOn(Schedulers.parallel()))
 								.doOnNext(latestBinlog -> logger.info("Received binlog from server. Size: " + BinlogUtils.humanReadableByteCountBin(latestBinlog.binlog().length())))
 								.flatMap(latestBinlog -> this.saveBinlog(latestBinlog.binlog()))
 								.doOnSuccess(s -> logger.info("Overwritten binlog from server"))
-								.publishOn(Schedulers.boundedElastic())
+								.publishOn(Schedulers.parallel())
 								.thenReturn(update);
 				}
 				break;
@@ -291,13 +291,13 @@ public class AsyncTdMiddleEventBusClient implements AsyncTdMiddle {
 											} else {
 												return resp.body().toTdResult();
 											}
-										}).subscribeOn(Schedulers.boundedElastic())
+										}).subscribeOn(Schedulers.parallel())
 								)
 								.doOnSuccess(s -> logger.trace("Executed request"))
 		)
 				.switchIfEmpty(Mono.defer(() -> Mono.fromCallable(() -> {
 					throw ResponseError.newResponseError(request, botAlias, new TdError(500, "Client is closed or response is empty"));
 				})))
-				.publishOn(Schedulers.single());
+				.publishOn(Schedulers.parallel());
 	}
 }

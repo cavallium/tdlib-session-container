@@ -187,7 +187,7 @@ public class TdClusterManager {
 						return Mono.just(Vertx.vertx(vertxOptions));
 					}
 				})
-				.publishOn(Schedulers.single())
+				.publishOn(Schedulers.parallel())
 				.flatMap(vertx -> Mono
 						.fromCallable(() -> new TdClusterManager(mgr, vertxOptions, vertx))
 						.publishOn(Schedulers.boundedElastic())

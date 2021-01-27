@@ -343,7 +343,7 @@ public class MonoUtils {
 
 	private static Future<Void> toVertxFuture(Mono<Void> toTransform) {
 		var promise = Promise.<Void>promise();
-		toTransform.publishOn(Schedulers.single()).subscribe(next -> {}, promise::fail, promise::complete);
+		toTransform.publishOn(Schedulers.parallel()).subscribe(next -> {}, promise::fail, promise::complete);
 		return promise.future();
 	}
 
@@ -363,15 +363,17 @@ public class MonoUtils {
 			sink.onDispose(messageConsumer::unregister);
 		})
 				//.startWith(MonoUtils.castVoid(messageConsumer.rxCompletionHandler().as(MonoUtils::toMono)))
-				.flatMapSequential(msg -> Mono.fromCallable(msg::body).subscribeOn(Schedulers.boundedElastic()))
-				.subscribeOn(Schedulers.boundedElastic());
+				.flatMapSequential(msg -> Mono
+						.fromCallable(msg::body)
+						.subscribeOn(Schedulers.parallel())
+				);
 	}
 
 	public static <T> Mono<Tuple2<Mono<Void>, Flux<T>>> fromMessageConsumer(MessageConsumer<T> messageConsumer) {
 		return fromReplyableMessageConsumer(messageConsumer)
 				.map(tuple -> tuple.mapT2(msgs -> msgs.flatMapSequential(msg -> Mono
 						.fromCallable(msg::body)
-						.subscribeOn(Schedulers.boundedElastic())))
+						.subscribeOn(Schedulers.parallel())))
 				);
 	}
 
@@ -379,7 +381,7 @@ public class MonoUtils {
 		return fromReplyableMessageConsumer(messageConsumer)
 				.map(tuple -> tuple.mapT2(msgs -> msgs.flatMapSequential(msg -> Mono
 						.fromCallable(() -> Tuples.<Message<?>, T>of(msg, msg.body()))
-						.subscribeOn(Schedulers.boundedElastic())))
+						.subscribeOn(Schedulers.parallel())))
 				);
 	}
 
