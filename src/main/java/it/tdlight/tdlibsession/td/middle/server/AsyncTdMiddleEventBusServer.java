@@ -169,7 +169,7 @@ public class AsyncTdMiddleEventBusServer extends AbstractVerticle {
 						}
 					}).subscribeOn(Schedulers.boundedElastic()))
 					.then()
-					.publishOn(Schedulers.parallel())
+					.subscribeOn(Schedulers.parallel())
 					.subscribe(v -> {},
 							ex -> logger.error("Error when processing an execute request", ex),
 							() -> logger.trace("Finished handling execute requests")
@@ -182,7 +182,7 @@ public class AsyncTdMiddleEventBusServer extends AbstractVerticle {
 			}
 			BinlogUtils
 					.readBinlogConsumer(vertx, readBinlogConsumer, botId, local)
-					.publishOn(Schedulers.parallel())
+					.subscribeOn(Schedulers.parallel())
 					.subscribe(v -> {}, ex -> logger.error("Error when processing a read-binlog request", ex));
 
 			MessageConsumer<byte[]> readyToReceiveConsumer = vertx.eventBus().consumer(botAddress + ".ready-to-receive");
@@ -255,7 +255,7 @@ public class AsyncTdMiddleEventBusServer extends AbstractVerticle {
 					.andThen(pingConsumer.rxCompletionHandler())
 					.as(MonoUtils::toMono)
 					.doOnSuccess(s -> logger.trace("Finished preparing listeners"))
-					.publishOn(Schedulers.parallel())
+					.subscribeOn(Schedulers.parallel())
 					.subscribe(v -> {}, registrationSink::error, registrationSink::success);
 		})
 				.subscribeOn(Schedulers.boundedElastic())

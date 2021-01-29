@@ -102,7 +102,7 @@ public class AsyncTdDirectImpl implements AsyncTdDirect {
 											result -> logger.warn("Close result: {}", result),
 											ex -> logger.error("Error when disposing td client", ex)
 									);
-								}).publishOn(Schedulers.parallel()).subscribe();
+								}).subscribeOn(Schedulers.parallel()).subscribe();
 							});
 						})
 						.subscribeOn(Schedulers.boundedElastic())

@@ -99,7 +99,7 @@ public class EventBusFlux {
 												var responseHandler = MonoUtils.toHandler(itemSink);
 												eventBus.request(subscriptionAddress + ".signal", SignalMessage.<T>onNext(item), signalDeliveryOptions, responseHandler);
 											}))
-											.publishOn(Schedulers.parallel())
+											.subscribeOn(Schedulers.parallel())
 											.subscribe(response -> {}, error -> {
 												if (error instanceof ReplyException) {
 													var errorMessageCode = ((ReplyException) error).failureCode();
@@ -313,7 +313,7 @@ public class EventBusFlux {
 							})))
 							.publishOn(Schedulers.boundedElastic())
 							.onBackpressureBuffer()
-							.publishOn(Schedulers.parallel())
+							.subscribeOn(Schedulers.parallel())
 							.subscribe(v -> {}, emitter::error);
 
 					emitter.onDispose(() -> {

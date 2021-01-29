@@ -94,7 +94,7 @@ public class AsyncTdEasy {
 					}
 				})
 				.doOnComplete(() -> {
-					authState.asFlux().take(1).single().publishOn(scheduler).subscribe(authState -> {
+					authState.asFlux().take(1).single().subscribeOn(scheduler).subscribe(authState -> {
 						onUpdatesTerminated();
 						if (authState.getConstructor() != AuthorizationStateClosed.CONSTRUCTOR) {
 							logger.warn("Updates stream has closed while"
@@ -105,7 +105,7 @@ public class AsyncTdEasy {
 						}
 					});
 				}).doOnError(ex -> {
-					authState.asFlux().take(1).single().publishOn(scheduler).subscribe(authState -> {
+					authState.asFlux().take(1).single().subscribeOn(scheduler).subscribe(authState -> {
 						onUpdatesTerminated();
 						if (authState.getConstructor() != AuthorizationStateClosed.CONSTRUCTOR) {
 							logger.warn("Updates stream has terminated with an error while"
@@ -136,7 +136,7 @@ public class AsyncTdEasy {
 					}
 
 					// Register fatal error handler
-					fatalError.asMono().flatMap(settings.getFatalErrorHandler()::onFatalError).publishOn(scheduler).subscribe();
+					fatalError.asMono().flatMap(settings.getFatalErrorHandler()::onFatalError).subscribeOn(scheduler).subscribe();
 
 					return true;
 				})

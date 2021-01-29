@@ -343,7 +343,7 @@ public class MonoUtils {
 
 	private static Future<Void> toVertxFuture(Mono<Void> toTransform) {
 		var promise = Promise.<Void>promise();
-		toTransform.publishOn(Schedulers.parallel()).subscribe(next -> {}, promise::fail, promise::complete);
+		toTransform.subscribeOn(Schedulers.parallel()).subscribe(next -> {}, promise::fail, promise::complete);
 		return promise.future();
 	}
 
@@ -445,7 +445,7 @@ public class MonoUtils {
 				if (backpressureSize != null) {
 					AtomicBoolean drained = new AtomicBoolean(true);
 					var drainSubscription = backpressureSize
-							.publishOn(Schedulers.boundedElastic())
+							.subscribeOn(Schedulers.boundedElastic())
 							.subscribe(size -> {
 								writeQueueFull = size >= this.writeQueueMaxSize;
 
@@ -465,7 +465,7 @@ public class MonoUtils {
 						termination
 								.asMono()
 								.doOnTerminate(drainSubscription::dispose)
-								.publishOn(Schedulers.boundedElastic())
+								.subscribeOn(Schedulers.boundedElastic())
 								.subscribe();
 					}
 				}
@@ -516,7 +516,7 @@ public class MonoUtils {
 
 		@Override
 		public io.vertx.core.streams.ReadStream<T> handler(@io.vertx.codegen.annotations.Nullable Handler<T> handler) {
-			sink.asFlux().publishOn(scheduler).subscribe(new CoreSubscriber<T>() {
+			sink.asFlux().subscribeOn(scheduler).subscribe(new CoreSubscriber<T>() {
 
 				@Override
 				public void onSubscribe(@NotNull Subscription s) {
@@ -656,7 +656,7 @@ public class MonoUtils {
 		@SuppressWarnings("DuplicatedCode")
 		@Override
 		public io.vertx.core.streams.ReadStream<T> handler(@io.vertx.codegen.annotations.Nullable Handler<T> handler) {
-			flux.publishOn(scheduler).subscribe(new CoreSubscriber<T>() {
+			flux.subscribeOn(scheduler).subscribe(new CoreSubscriber<T>() {
 
 				@Override
 				public void onSubscribe(@NotNull Subscription s) {

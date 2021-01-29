@@ -202,7 +202,7 @@ public class TDLibRemoteClient implements AutoCloseable {
 										return Mono.empty();
 									});
 						})
-						.publishOn(Schedulers.parallel())
+						.subscribeOn(Schedulers.parallel())
 						.subscribe(
 								v -> {},
 								ex -> logger.error("Bots starter activity crashed. From now on, no new bots can be started anymore", ex)
