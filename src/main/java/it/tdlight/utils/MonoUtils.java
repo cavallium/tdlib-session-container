@@ -54,6 +54,12 @@ public class MonoUtils {
 
 	private static final Logger logger = LoggerFactory.getLogger(MonoUtils.class);
 
+	public static <T> Mono<T> notImplemented() {
+		return Mono.fromCallable(() -> {
+			throw new UnsupportedOperationException("Method not implemented");
+		});
+	}
+
 	public static <T> Handler<AsyncResult<T>> toHandler(SynchronousSink<T> sink) {
 		return event -> {
 			if (event.succeeded()) {
