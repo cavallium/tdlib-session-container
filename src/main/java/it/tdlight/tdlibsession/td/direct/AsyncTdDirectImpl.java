@@ -74,6 +74,7 @@ public class AsyncTdDirectImpl implements AsyncTdDirect {
 		return telegramClientFactory.create(implementationDetails)
 				.flatMapMany(client -> Flux
 						.<TdApi.Object>create(updatesSink -> {
+							client.execute(new TdApi.SetLogVerbosityLevel(1));
 							client.initialize((TdApi.Object object) -> {
 								updatesSink.next(object);
 								// Close the emitter if receive closed state
