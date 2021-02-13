@@ -2,12 +2,11 @@ package it.tdlight.tdlibsession.td.direct;
 
 import io.vertx.core.json.JsonArray;
 import io.vertx.core.json.JsonObject;
-import it.tdlight.common.ExceptionHandler;
-import it.tdlight.common.ResultHandler;
-import it.tdlight.common.TelegramClient;
-import it.tdlight.common.UpdatesHandler;
 import it.tdlight.jni.TdApi;
+import it.tdlight.jni.TdApi.AuthorizationStateClosed;
+import it.tdlight.jni.TdApi.AuthorizationStateClosing;
 import it.tdlight.jni.TdApi.AuthorizationStateReady;
+import it.tdlight.jni.TdApi.Close;
 import it.tdlight.jni.TdApi.ConnectionStateReady;
 import it.tdlight.jni.TdApi.Error;
 import it.tdlight.jni.TdApi.FormattedText;
@@ -25,29 +24,27 @@ import it.tdlight.jni.TdApi.TextEntity;
 import it.tdlight.jni.TdApi.UpdateAuthorizationState;
 import it.tdlight.jni.TdApi.UpdateConnectionState;
 import it.tdlight.jni.TdApi.UpdateNewMessage;
+import it.tdlight.tdlibsession.td.ReactorTelegramClient;
 import it.tdlight.tdlibsession.td.TdError;
 import java.util.ArrayList;
+import java.util.Iterator;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicLong;
+import org.jetbrains.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.core.publisher.Sinks;
-import reactor.core.publisher.Sinks.Many;
-import reactor.core.scheduler.Scheduler;
-import reactor.core.scheduler.Schedulers;
+import reactor.core.publisher.Sinks.Empty;
 
-public class TestClient implements TelegramClient {
+public class TestClient implements ReactorTelegramClient {
 
 	private static final Logger logger = LoggerFactory.getLogger(TestClient.class);
 
 	private static final AtomicLong incrementalMessageId = new AtomicLong(1);
-	private final Many<Object> updates = Sinks.many().unicast().onBackpressureError();
-	private final Scheduler testClientScheduler = Schedulers.newSingle("test-client", true);
 	private final List<String> features;
-	private UpdatesHandler updatesHandler;
-	private ExceptionHandler updateExceptionHandler;
-	private ExceptionHandler defaultExceptionHandler;
+	private final Empty<java.lang.Object> closedSink = Sinks.empty();
 
 	public TestClient(JsonObject testClientSettings) {
 		JsonArray features = testClientSettings.getJsonArray("features", new JsonArray());
@@ -55,52 +52,6 @@ public class TestClient implements TelegramClient {
 		for (java.lang.Object feature : features) {
 			var featureName = (String) feature;
 			this.features.add(featureName);
-		}
-	}
-
-	@Override
-	public void initialize(UpdatesHandler updatesHandler,
-			ExceptionHandler updateExceptionHandler,
-			ExceptionHandler defaultExceptionHandler) {
-		this.updatesHandler = updatesHandler;
-		this.updateExceptionHandler = updateExceptionHandler;
-		this.defaultExceptionHandler = defaultExceptionHandler;
-
-		updates
-				.asFlux()
-				.buffer(50)
-				.doOnNext(ub -> logger.trace("Received update block of size {}", ub.size()))
-				.subscribeOn(testClientScheduler)
-				.subscribe(updatesHandler::onUpdates, updateExceptionHandler::onException);
-
-		for (String featureName : features) {
-			switch (featureName) {
-				case "status-update":
-					Mono
-							.<List<TdApi.Object>>just(List.of(
-									new UpdateAuthorizationState(new AuthorizationStateReady()),
-									new UpdateConnectionState(new ConnectionStateReady()))
-							)
-							.doOnNext(updatesHandler::onUpdates)
-							.subscribeOn(testClientScheduler)
-							.subscribe();
-					break;
-				case "infinite-messages":
-					Mono
-							.<TdApi.Object>fromSupplier(() -> new UpdateNewMessage(generateRandomMessage(
-									features.contains("random-senders"),
-									features.contains("random-chats"),
-									features.contains("random-text")))
-							)
-							.repeat()
-							.buffer(100)
-							.doOnNext(updatesHandler::onUpdates)
-							.subscribeOn(testClientScheduler)
-							.subscribe();
-					break;
-				default:
-					throw new IllegalArgumentException("Unknown feature name: " + featureName);
-			}
 		}
 	}
 
@@ -117,27 +68,74 @@ public class TestClient implements TelegramClient {
 	}
 
 	@Override
-	public void send(Function query, ResultHandler resultHandler, ExceptionHandler exceptionHandler) {
-		switch (query.getConstructor()) {
-			case SetLogVerbosityLevel.CONSTRUCTOR:
-			case SetLogTagVerbosityLevel.CONSTRUCTOR:
-			case SetTdlibParameters.CONSTRUCTOR:
-			case SetOption.CONSTRUCTOR:
-				resultHandler.onResult(new Ok());
-				return;
-		}
-		exceptionHandler.onException(new TdError(500, "Unsupported"));
+	public Flux<TdApi.Object> initialize() {
+		return Flux.fromIterable(features).flatMap(featureName -> {
+			switch (featureName) {
+				case "status-update":
+					return Flux.<TdApi.Object>just(
+							new UpdateAuthorizationState(new AuthorizationStateReady()),
+							new UpdateConnectionState(new ConnectionStateReady())
+					).mergeWith(closedSink
+							.asMono()
+							.thenMany(Flux.just(new UpdateAuthorizationState(new AuthorizationStateClosing()),
+									new UpdateAuthorizationState(new AuthorizationStateClosed())
+							)));
+				case "infinite-messages":
+					var randomSenders = features.contains("random-senders");
+					var randomChats = features.contains("random-chats");
+					var randomTexts = features.contains("random-text");
+					return Flux
+							.<TdApi.Object>fromIterable(() -> new Iterator<>() {
+								@Override
+								public boolean hasNext() {
+									return true;
+								}
+
+								@Override
+								public TdApi.Object next() {
+									return new UpdateNewMessage(generateRandomMessage(randomSenders, randomChats, randomTexts));
+								}
+							}).takeUntilOther(this.closedSink.asMono());
+				default:
+					return Mono.fromCallable(() -> {
+						throw new IllegalArgumentException("Unknown feature name: " + featureName);
+					});
+			}
+		});
 	}
 
 	@Override
-	public Object execute(Function query) {
+	public Mono<Object> send(Function query) {
+		return Mono.fromCallable(() -> {
+			TdApi.Object result = executeCommon(query);
+			if (result != null) {
+				return result;
+			}
+			throw new TdError(500, "Unsupported");
+		});
+	}
+
+	@Override
+	public TdApi.Object execute(Function query) {
+		TdApi.Object result = executeCommon(query);
+		if (result != null) {
+			return result;
+		}
+		return new Error(500, "Unsupported");
+	}
+
+	@Nullable
+	public TdApi.Object executeCommon(Function query) {
 		switch (query.getConstructor()) {
 			case SetLogVerbosityLevel.CONSTRUCTOR:
 			case SetLogTagVerbosityLevel.CONSTRUCTOR:
 			case SetTdlibParameters.CONSTRUCTOR:
 			case SetOption.CONSTRUCTOR:
 				return new Ok();
+			case Close.CONSTRUCTOR:
+				closedSink.tryEmitEmpty();
+				return new Ok();
 		}
-		return new Error(500, "Unsupported");
+		return null;
 	}
 }
