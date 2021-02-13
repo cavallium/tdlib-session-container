@@ -7,19 +7,28 @@ import it.tdlight.common.ResultHandler;
 import it.tdlight.common.TelegramClient;
 import it.tdlight.common.UpdatesHandler;
 import it.tdlight.jni.TdApi;
-import it.tdlight.jni.TdApi.AuthorizationStateWaitTdlibParameters;
+import it.tdlight.jni.TdApi.AuthorizationStateReady;
+import it.tdlight.jni.TdApi.ConnectionStateReady;
 import it.tdlight.jni.TdApi.Error;
+import it.tdlight.jni.TdApi.FormattedText;
 import it.tdlight.jni.TdApi.Function;
+import it.tdlight.jni.TdApi.Message;
+import it.tdlight.jni.TdApi.MessageSenderUser;
+import it.tdlight.jni.TdApi.MessageText;
 import it.tdlight.jni.TdApi.Object;
 import it.tdlight.jni.TdApi.Ok;
 import it.tdlight.jni.TdApi.SetLogTagVerbosityLevel;
 import it.tdlight.jni.TdApi.SetLogVerbosityLevel;
 import it.tdlight.jni.TdApi.SetOption;
 import it.tdlight.jni.TdApi.SetTdlibParameters;
+import it.tdlight.jni.TdApi.TextEntity;
 import it.tdlight.jni.TdApi.UpdateAuthorizationState;
+import it.tdlight.jni.TdApi.UpdateConnectionState;
+import it.tdlight.jni.TdApi.UpdateNewMessage;
 import it.tdlight.tdlibsession.td.TdError;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicLong;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import reactor.core.publisher.Mono;
@@ -32,6 +41,7 @@ public class TestClient implements TelegramClient {
 
 	private static final Logger logger = LoggerFactory.getLogger(TestClient.class);
 
+	private static final AtomicLong incrementalMessageId = new AtomicLong(1);
 	private final Many<Object> updates = Sinks.many().unicast().onBackpressureError();
 	private final Scheduler testClientScheduler = Schedulers.newSingle("test-client", true);
 	private final List<String> features;
@@ -65,8 +75,23 @@ public class TestClient implements TelegramClient {
 
 		for (String featureName : features) {
 			switch (featureName) {
-				case "infinite-status-update":
-					Mono.<TdApi.Object>just(new UpdateAuthorizationState(new AuthorizationStateWaitTdlibParameters()))
+				case "status-update":
+					Mono
+							.<List<TdApi.Object>>just(List.of(
+									new UpdateAuthorizationState(new AuthorizationStateReady()),
+									new UpdateConnectionState(new ConnectionStateReady()))
+							)
+							.doOnNext(updatesHandler::onUpdates)
+							.subscribeOn(testClientScheduler)
+							.subscribe();
+					break;
+				case "infinite-messages":
+					Mono
+							.<TdApi.Object>fromSupplier(() -> new UpdateNewMessage(generateRandomMessage(
+									features.contains("random-senders"),
+									features.contains("random-chats"),
+									features.contains("random-text")))
+							)
 							.repeat()
 							.buffer(100)
 							.doOnNext(updatesHandler::onUpdates)
@@ -77,6 +102,18 @@ public class TestClient implements TelegramClient {
 					throw new IllegalArgumentException("Unknown feature name: " + featureName);
 			}
 		}
+	}
+
+	private static Message generateRandomMessage(boolean randomSender, boolean randomChat, boolean randomText) {
+		var msg = new Message();
+		msg.sender = new MessageSenderUser(312042);
+		msg.chatId = 240213;
+		msg.id = incrementalMessageId.getAndIncrement();
+		var content = new MessageText();
+		content.text = new FormattedText("Text", new TextEntity[0]);
+		msg.content = content;
+		msg.date = (int) System.currentTimeMillis() / 1000;
+		return msg;
 	}
 
 	@Override
