@@ -54,9 +54,9 @@ public class TdClusterManager {
 			vertx
 					.eventBus()
 					.getDelegate()
-					.registerDefaultCodec(TdResultList.class, new LazyTdResultListMessageCodec())
-					.registerDefaultCodec(ExecuteObject.class, new LazyTdExecuteObjectMessageCodec())
-					.registerDefaultCodec(TdResultMessage.class, new LazyTdResultMessageCodec())
+					.registerDefaultCodec(TdResultList.class, new TdResultListMessageCodec())
+					.registerDefaultCodec(ExecuteObject.class, new TdExecuteObjectMessageCodec())
+					.registerDefaultCodec(TdResultMessage.class, new TdResultMessageCodec())
 					.registerDefaultCodec(StartSessionMessage.class, new StartSessionMessageCodec())
 					.registerDefaultCodec(EndSessionMessage.class, new EndSessionMessageCodec());
 			for (Class<?> value : ConstructorDetector.getTDConstructorsUnsafe().values()) {
