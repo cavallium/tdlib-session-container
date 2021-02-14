@@ -65,7 +65,7 @@ public class TdClusterManager {
 		}
 	}
 
-	public static Mono<TdClusterManager> ofMaster(JksOptions keyStoreOptions, JksOptions trustStoreOptions, boolean onlyLocal, String masterHostname, String netInterface, int port, Set<String> nodesAddresses) {
+	public static Mono<TdClusterManager> ofMaster(@Nullable JksOptions keyStoreOptions, @Nullable JksOptions trustStoreOptions, boolean onlyLocal, String masterHostname, String netInterface, int port, Set<String> nodesAddresses) {
 		if (definedMasterCluster.compareAndSet(false, true)) {
 			var vertxOptions = new VertxOptions();
 			netInterface = onlyLocal ? "127.0.0.1" : netInterface;
@@ -84,7 +84,7 @@ public class TdClusterManager {
 		}
 	}
 
-	public static Mono<TdClusterManager> ofNodes(JksOptions keyStoreOptions, JksOptions trustStoreOptions, boolean onlyLocal, String masterHostname, String netInterface, int port, Set<String> nodesAddresses) {
+	public static Mono<TdClusterManager> ofNodes(@Nullable JksOptions keyStoreOptions, @Nullable JksOptions trustStoreOptions, boolean onlyLocal, String masterHostname, String netInterface, int port, Set<String> nodesAddresses) {
 		return Mono.defer(() -> {
 			if (definedNodesCluster.compareAndSet(false, true)) {
 				var vertxOptions = new VertxOptions();
@@ -105,8 +105,8 @@ public class TdClusterManager {
 
 	public static Mono<TdClusterManager> of(@Nullable Config cfg,
 			VertxOptions vertxOptions,
-			JksOptions keyStoreOptions,
-			JksOptions trustStoreOptions,
+			@Nullable JksOptions keyStoreOptions,
+			@Nullable JksOptions trustStoreOptions,
 			String masterHostname,
 			String netInterface,
 			int port,
@@ -149,15 +149,21 @@ public class TdClusterManager {
 			//vertxOptions.getEventBusOptions().setSsl(false);
 
 			vertxOptions.getEventBusOptions().setSslHandshakeTimeout(120000).setSslHandshakeTimeoutUnit(TimeUnit.MILLISECONDS);
-			vertxOptions.getEventBusOptions().setKeyStoreOptions(keyStoreOptions);
-			vertxOptions.getEventBusOptions().setTrustStoreOptions(trustStoreOptions);
+			if (keyStoreOptions != null && trustStoreOptions != null) {
+				vertxOptions.getEventBusOptions().setKeyStoreOptions(keyStoreOptions);
+				vertxOptions.getEventBusOptions().setTrustStoreOptions(trustStoreOptions);
+				vertxOptions
+						.getEventBusOptions()
+						.setUseAlpn(true)
+						.setSsl(true)
+						.setEnabledSecureTransportProtocols(Set.of("TLSv1.3", "TLSv1.2"));
+			} else {
+				vertxOptions
+						.getEventBusOptions()
+						.setSsl(false);
+			}
 			vertxOptions.getEventBusOptions().setHost(masterHostname);
 			vertxOptions.getEventBusOptions().setPort(port + 1);
-			vertxOptions
-					.getEventBusOptions()
-					.setUseAlpn(true)
-					.setSsl(true)
-					.setEnabledSecureTransportProtocols(Set.of("TLSv1.3", "TLSv1.2"));
 			vertxOptions.getEventBusOptions().setClientAuth(ClientAuth.REQUIRED);
 		} else {
 			mgr = null;
@@ -187,12 +193,10 @@ public class TdClusterManager {
 						return Mono.just(Vertx.vertx(vertxOptions));
 					}
 				})
-				.subscribeOn(Schedulers.boundedElastic())
 				.flatMap(vertx -> Mono
 						.fromCallable(() -> new TdClusterManager(mgr, vertxOptions, vertx))
 						.subscribeOn(Schedulers.boundedElastic())
-				)
-				.publishOn(Schedulers.parallel());
+				);
 	}
 
 	public Vertx getVertx() {

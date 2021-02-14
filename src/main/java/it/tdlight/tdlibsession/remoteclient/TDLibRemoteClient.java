@@ -21,6 +21,7 @@ import java.nio.file.Paths;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.apache.logging.log4j.LogManager;
+import org.jetbrains.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import reactor.core.publisher.Flux;
@@ -35,6 +36,7 @@ public class TDLibRemoteClient implements AutoCloseable {
 
 	private static final Logger logger = LoggerFactory.getLogger(TDLibRemoteClient.class);
 
+	@Nullable
 	private final SecurityInfo securityInfo;
 	private final String masterHostname;
 	private final String netInterface;
@@ -51,7 +53,7 @@ public class TDLibRemoteClient implements AutoCloseable {
 				|| System.getProperty("idea.test.cyclic.buffer.size") != null;
 	}
 
-	public TDLibRemoteClient(SecurityInfo securityInfo,
+	public TDLibRemoteClient(@Nullable SecurityInfo securityInfo,
 			String masterHostname,
 			String netInterface,
 			int port,
@@ -124,13 +126,15 @@ public class TDLibRemoteClient implements AutoCloseable {
 	}
 
 	public Mono<Void> start() {
-		var keyStoreOptions = securityInfo == null ? null : new JksOptions()
+		var ksp = securityInfo == null ? null : securityInfo.getKeyStorePassword(false);
+		var keyStoreOptions = securityInfo == null || ksp == null ? null : new JksOptions()
 				.setPath(securityInfo.getKeyStorePath().toAbsolutePath().toString())
-				.setPassword(securityInfo.getKeyStorePassword());
+				.setPassword(ksp);
 
-		var trustStoreOptions = securityInfo == null ? null : new JksOptions()
+		var tsp = securityInfo == null ? null : securityInfo.getTrustStorePassword(false);
+		var trustStoreOptions = securityInfo == null || tsp == null ? null : new JksOptions()
 				.setPath(securityInfo.getTrustStorePath().toAbsolutePath().toString())
-				.setPassword(securityInfo.getTrustStorePassword());
+				.setPassword(tsp);
 
 		return MonoUtils
 				.fromBlockingEmpty(() -> {
@@ -144,6 +148,8 @@ public class TDLibRemoteClient implements AutoCloseable {
 
 					logger.info(
 							"TDLib remote client is being hosted on" + netInterface + ":" + port + ". Master: " + masterHostname);
+					logger.info(
+							"TDLib remote client SSL enabled: " + (keyStoreOptions != null && trustStoreOptions != null));
 				})
 				.then(TdClusterManager.ofNodes(keyStoreOptions,
 						trustStoreOptions,

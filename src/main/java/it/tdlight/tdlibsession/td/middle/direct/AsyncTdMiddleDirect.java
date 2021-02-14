@@ -98,7 +98,6 @@ public class AsyncTdMiddleDirect extends AbstractVerticle implements AsyncTdMidd
 	public <T extends Object> Mono<TdResult<T>> execute(Function requestFunction, boolean executeDirectly) {
 		return td
 				.<T>execute(requestFunction, executeDirectly)
-				.onErrorMap(error -> ResponseError.newResponseError(requestFunction, botAlias, error))
-				.publishOn(Schedulers.parallel());
+				.onErrorMap(error -> ResponseError.newResponseError(requestFunction, botAlias, error));
 	}
 }

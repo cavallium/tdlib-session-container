@@ -107,9 +107,8 @@ public class AsyncTdMiddleEventBusServer extends AbstractVerticle {
 							}
 							return onSuccessfulStartRequest(td, botAddress, botAlias, botId, local);
 						})
-						.flatMap(voidMono -> voidMono.hide().subscribeOn(Schedulers.boundedElastic()).publishOn(Schedulers.parallel()))
+						.flatMap(voidMono -> voidMono.hide().subscribeOn(Schedulers.boundedElastic()))
 						.doOnSuccess(s -> logger.trace("Stated verticle"))
-						.publishOn(Schedulers.parallel())
 				);
 	}
 
@@ -258,8 +257,7 @@ public class AsyncTdMiddleEventBusServer extends AbstractVerticle {
 					.subscribeOn(Schedulers.parallel())
 					.subscribe(v -> {}, registrationSink::error, registrationSink::success);
 		})
-				.subscribeOn(Schedulers.boundedElastic())
-				.publishOn(Schedulers.parallel());
+				.subscribeOn(Schedulers.boundedElastic());
 	}
 
 	/**
@@ -298,10 +296,9 @@ public class AsyncTdMiddleEventBusServer extends AbstractVerticle {
 											// Since every consumer of ReadBinLog is identical, this should not pose a problem.
 											.delay(Duration.ofMinutes(30))
 											.then(ec.rxUnregister().as(MonoUtils::toMono))
-											.publishOn(Schedulers.parallel())
 											.subscribe();
 									return null;
-								}).subscribeOn(Schedulers.boundedElastic()).publishOn(Schedulers.parallel()))
+								}).subscribeOn(Schedulers.boundedElastic()))
 						)
 						.then(readyToReceiveConsumer
 								.asMono()
@@ -314,7 +311,6 @@ public class AsyncTdMiddleEventBusServer extends AbstractVerticle {
 						.doOnError(ex -> logger.error("Undeploy of bot \"" + botAlias + "\": stop failed", ex))
 						.doOnTerminate(() -> logger.info("Undeploy of bot \"" + botAlias + "\": stopped"))
 				)
-				.publishOn(Schedulers.parallel())
 		);
 	}
 

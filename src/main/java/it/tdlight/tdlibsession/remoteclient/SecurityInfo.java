@@ -30,16 +30,17 @@ public class SecurityInfo {
 		return keyStorePasswordPath;
 	}
 
-	public String getKeyStorePassword() {
+	public String getKeyStorePassword(boolean required) {
 		try {
 			if (Files.isReadable(keyStorePasswordPath) && Files.size(keyStorePasswordPath) >= 6) {
 				return Files.readString(keyStorePasswordPath, StandardCharsets.UTF_8).split("\n")[0];
-			} else {
+			} else if (required) {
 				throw new NoSuchElementException("No keystore password is set on '" + keyStorePasswordPath.toString() + "'");
 			}
 		} catch (IOException ex) {
 			throw new FileSystemException(ex);
 		}
+		return null;
 	}
 
 	public Path getTrustStorePath() {
@@ -50,16 +51,17 @@ public class SecurityInfo {
 		return trustStorePasswordPath;
 	}
 
-	public String getTrustStorePassword() {
+	public String getTrustStorePassword(boolean required) {
 		try {
 			if (Files.isReadable(trustStorePasswordPath) && Files.size(trustStorePasswordPath) >= 6) {
 				return Files.readString(trustStorePasswordPath, StandardCharsets.UTF_8).split("\n")[0];
-			} else {
+			} else if (required) {
 				throw new NoSuchElementException("No truststore password is set on '" + trustStorePasswordPath.toString() + "'");
 			}
 		} catch (IOException ex) {
 			throw new FileSystemException(ex);
 		}
+		return null;
 	}
 
 	@Override

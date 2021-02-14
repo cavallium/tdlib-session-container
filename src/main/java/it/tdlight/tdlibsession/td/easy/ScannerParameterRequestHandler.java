@@ -42,6 +42,6 @@ public class ScannerParameterRequestHandler implements ParameterRequestHandler {
 			} else {
 				return result;
 			}
-		}).publishOn(Schedulers.boundedElastic());
+		}).subscribeOn(Schedulers.boundedElastic());
 	}
 }

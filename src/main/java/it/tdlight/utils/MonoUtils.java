@@ -477,7 +477,7 @@ public class MonoUtils {
 				}
 
 				return this;
-			}).publishOn(Schedulers.boundedElastic());
+			}).subscribeOn(Schedulers.boundedElastic());
 		}
 
 		public static <T> Mono<SinkRWStream<T>> create(Many<T> sink,
@@ -636,7 +636,7 @@ public class MonoUtils {
 		}
 
 		public Flux<T> readAsFlux() {
-			return flux.publishOn(Schedulers.parallel());
+			return flux;
 		}
 
 		public ReactiveReactorReadStream<T> readAsStream() {

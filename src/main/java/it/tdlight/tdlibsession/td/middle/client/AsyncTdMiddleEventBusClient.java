@@ -141,8 +141,7 @@ public class AsyncTdMiddleEventBusClient implements AsyncTdMiddle {
 										.subscribeOn(Schedulers.boundedElastic());
 							}))
 							.then(setupPing());
-				})
-				.publishOn(Schedulers.parallel());
+				});
 	}
 
 	private Mono<Void> setupPing() {
@@ -206,9 +205,9 @@ public class AsyncTdMiddleEventBusClient implements AsyncTdMiddle {
 
 		return Mono
 				.fromRunnable(() -> logger.trace("Called receive() from parent"))
-				.then(updates.asMono().publishOn(Schedulers.parallel()))
-				.timeout(Duration.ofSeconds(5))
+				.then(updates.asMono())
 				.publishOn(Schedulers.parallel())
+				.timeout(Duration.ofSeconds(5))
 				.flatMap(MonoUtils::fromMessageConsumer)
 				.flatMapMany(registration -> Mono
 						.fromRunnable(() -> logger.trace("Registering updates flux"))
@@ -240,7 +239,6 @@ public class AsyncTdMiddleEventBusClient implements AsyncTdMiddle {
 						return Mono.fromCallable(() -> TdResult.failed(updates.error()).orElseThrow());
 					}
 				})
-				.publishOn(Schedulers.parallel())
 				.flatMapSequential(this::interceptUpdate)
 				// Redirect errors to crash sink
 				.doOnError(crash::tryEmitError)
@@ -249,8 +247,7 @@ public class AsyncTdMiddleEventBusClient implements AsyncTdMiddle {
 					return Mono.empty();
 				})
 
-				.doOnTerminate(updatesStreamEnd::tryEmitEmpty)
-				.publishOn(Schedulers.parallel());
+				.doOnTerminate(updatesStreamEnd::tryEmitEmpty);
 	}
 
 	private Mono<TdApi.Object> interceptUpdate(TdApi.Object update) {
@@ -266,7 +263,6 @@ public class AsyncTdMiddleEventBusClient implements AsyncTdMiddle {
 								.doOnNext(latestBinlog -> logger.info("Received binlog from server. Size: " + BinlogUtils.humanReadableByteCountBin(latestBinlog.binlog().length())))
 								.flatMap(latestBinlog -> this.saveBinlog(latestBinlog.binlog()))
 								.doOnSuccess(s -> logger.info("Overwritten binlog from server"))
-								.publishOn(Schedulers.parallel())
 								.thenReturn(update);
 				}
 				break;
@@ -297,7 +293,6 @@ public class AsyncTdMiddleEventBusClient implements AsyncTdMiddle {
 		)
 				.switchIfEmpty(Mono.defer(() -> Mono.fromCallable(() -> {
 					throw ResponseError.newResponseError(request, botAlias, new TdError(500, "Client is closed or response is empty"));
-				})))
-				.publishOn(Schedulers.parallel());
+				})));
 	}
 }
