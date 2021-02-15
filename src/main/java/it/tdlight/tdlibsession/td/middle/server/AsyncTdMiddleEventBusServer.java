@@ -25,7 +25,6 @@ import it.tdlight.tdlibsession.td.middle.TdResultList;
 import it.tdlight.tdlibsession.td.middle.TdResultListMessageCodec;
 import it.tdlight.tdlibsession.td.middle.TdResultMessage;
 import it.tdlight.utils.BinlogUtils;
-import it.tdlight.utils.BufferTimeOutPublisher;
 import it.tdlight.utils.MonoUtils;
 import java.net.ConnectException;
 import java.time.Duration;
@@ -64,7 +63,7 @@ public class AsyncTdMiddleEventBusServer extends AbstractVerticle {
 	private final One<Flux<Void>> pipeFlux = Sinks.one();
 
 	public AsyncTdMiddleEventBusServer() {
-		this.tdOptions = new AsyncTdDirectOptions(WAIT_DURATION, 50);
+		this.tdOptions = new AsyncTdDirectOptions(WAIT_DURATION, 100);
 		this.clientFactory = new TelegramClientFactory();
 	}
 
@@ -340,9 +339,11 @@ public class AsyncTdMiddleEventBusServer extends AbstractVerticle {
 						return update;
 					}
 				}))
-				.transform(normal -> new BufferTimeOutPublisher<>(normal, Math.max(1, tdOptions.getEventsSize()), local ? Duration.ofMillis(1) : Duration.ofMillis(100)))
-				//.bufferTimeout(Math.max(1, tdOptions.getEventsSize()), local ? Duration.ofMillis(1) : Duration.ofMillis(100))
+				.limitRate(Math.max(1, tdOptions.getEventsSize()))
+				//.transform(normal -> new BufferTimeOutPublisher<>(normal, Math.max(1, tdOptions.getEventsSize()), local ? Duration.ofMillis(1) : Duration.ofMillis(100)))
+				.bufferTimeout(Math.max(1, tdOptions.getEventsSize()), local ? Duration.ofMillis(1) : Duration.ofMillis(100))
 				//.map(List::of)
+				.limitRate(Math.max(1, tdOptions.getEventsSize()))
 				.map(TdResultList::new);
 
 		var fluxCodec = new TdResultListMessageCodec();
