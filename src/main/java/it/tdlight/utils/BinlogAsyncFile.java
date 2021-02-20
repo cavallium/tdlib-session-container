@@ -4,8 +4,8 @@ import io.vertx.reactivex.core.buffer.Buffer;
 import io.vertx.reactivex.core.file.AsyncFile;
 import io.vertx.reactivex.core.file.FileProps;
 import io.vertx.reactivex.core.file.FileSystem;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import org.warp.commonutils.log.Logger;
+import org.warp.commonutils.log.LoggerFactory;
 import reactor.core.publisher.Mono;
 
 public class BinlogAsyncFile {
