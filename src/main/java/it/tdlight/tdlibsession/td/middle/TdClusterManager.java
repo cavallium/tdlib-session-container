@@ -59,8 +59,11 @@ public class TdClusterManager {
 					.registerDefaultCodec(TdResultMessage.class, new TdResultMessageCodec())
 					.registerDefaultCodec(StartSessionMessage.class, new StartSessionMessageCodec())
 					.registerDefaultCodec(EndSessionMessage.class, new EndSessionMessageCodec());
-			for (Class<?> value : ConstructorDetector.getTDConstructorsUnsafe().values()) {
-				vertx.eventBus().getDelegate().registerDefaultCodec(value, new TdMessageCodec(value));
+			var constructors = ConstructorDetector.getTDConstructorsUnsafe();
+			if (constructors != null) {
+				for (Class<?> value : constructors.values()) {
+					vertx.eventBus().getDelegate().registerDefaultCodec(value, new TdMessageCodec(value));
+				}
 			}
 		}
 	}
