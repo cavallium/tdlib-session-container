@@ -41,6 +41,7 @@ public class AsyncTdMiddleEventBusClient implements AsyncTdMiddle {
 	private final TdClusterManager cluster;
 	private final DeliveryOptions deliveryOptions;
 	private final DeliveryOptions deliveryOptionsWithTimeout;
+	private final DeliveryOptions pingDeliveryOptions;
 
 	private final One<BinlogAsyncFile> binlog = Sinks.one();
 
@@ -62,6 +63,7 @@ public class AsyncTdMiddleEventBusClient implements AsyncTdMiddle {
 		this.cluster = clusterManager;
 		this.deliveryOptions = cluster.newDeliveryOpts().setLocalOnly(local);
 		this.deliveryOptionsWithTimeout = cluster.newDeliveryOpts().setLocalOnly(local).setSendTimeout(30000);
+		this.pingDeliveryOptions = cluster.newDeliveryOpts().setLocalOnly(local).setSendTimeout(60000);
 	}
 
 	private Mono<AsyncTdMiddleEventBusClient> initializeEb() {
@@ -70,6 +72,7 @@ public class AsyncTdMiddleEventBusClient implements AsyncTdMiddle {
 
 	@Override
 	public Mono<Void> initialize() {
+		// Do nothing here.
 		return Mono.empty();
 	}
 
@@ -158,7 +161,8 @@ public class AsyncTdMiddleEventBusClient implements AsyncTdMiddle {
 						.defer(() -> {
 							logger.trace("Requesting ping...");
 							return cluster.getEventBus()
-									.<byte[]>rxRequest(botAddress + ".ping", EMPTY, deliveryOptionsWithTimeout).as(MonoUtils::toMono);
+									.<byte[]>rxRequest(botAddress + ".ping", EMPTY, pingDeliveryOptions)
+									.as(MonoUtils::toMono);
 						})
 						.flatMap(msg -> Mono.fromCallable(() -> msg.body()).subscribeOn(Schedulers.boundedElastic()))
 						.repeatWhen(l -> l.delayElements(Duration.ofSeconds(10)).takeWhile(x -> true))
@@ -170,7 +174,7 @@ public class AsyncTdMiddleEventBusClient implements AsyncTdMiddle {
 						.doOnNext(s -> logger.trace("PING"))
 						.then()
 						.onErrorResume(ex -> {
-							logger.trace("Ping failed", ex);
+							logger.warn("Ping failed", ex);
 							return Mono.empty();
 						})
 						.doOnNext(s -> logger.debug("END PING"))
@@ -204,6 +208,7 @@ public class AsyncTdMiddleEventBusClient implements AsyncTdMiddle {
 				.then();
 	}
 
+	@SuppressWarnings("Convert2MethodRef")
 	@Override
 	public Flux<TdApi.Object> receive() {
 		// Here the updates will be received
@@ -212,14 +217,17 @@ public class AsyncTdMiddleEventBusClient implements AsyncTdMiddle {
 				.fromRunnable(() -> logger.trace("Called receive() from parent"))
 				.then(updates.asMono())
 				.publishOn(Schedulers.parallel())
-				.timeout(Duration.ofSeconds(5))
+				.timeout(Duration.ofSeconds(30))
 				.flatMap(MonoUtils::fromMessageConsumer)
 				.flatMapMany(registration -> Mono
 						.fromRunnable(() -> logger.trace("Registering updates flux"))
 						.then(registration.getT1())
 						.doOnSuccess(s -> logger.trace("Registered updates flux"))
 						.doOnSuccess(s -> logger.trace("Sending ready-to-receive"))
-						.then(cluster.getEventBus().<byte[]>rxRequest(botAddress + ".ready-to-receive", EMPTY, deliveryOptionsWithTimeout).as(MonoUtils::toMono))
+						.then(cluster.getEventBus().<byte[]>rxRequest(botAddress + ".ready-to-receive",
+								EMPTY,
+								deliveryOptionsWithTimeout
+						).as(MonoUtils::toMono))
 						.doOnSuccess(s -> logger.trace("Sent ready-to-receive, received reply"))
 						.doOnSuccess(s -> logger.trace("About to read updates flux"))
 						.thenMany(registration.getT2())
@@ -227,7 +235,10 @@ public class AsyncTdMiddleEventBusClient implements AsyncTdMiddle {
 				.takeUntilOther(Flux
 						.merge(
 								crash.asMono()
-										.onErrorResume(ex -> Mono.empty()),
+										.onErrorResume(ex -> {
+											logger.error("TDLib crashed", ex);
+											return Mono.empty();
+										}),
 								pingFail.asMono()
 										.then(Mono.fromCallable(() -> {
 											var ex = new ConnectException("Server did not respond to ping");
@@ -246,7 +257,7 @@ public class AsyncTdMiddleEventBusClient implements AsyncTdMiddle {
 				})
 				.flatMapSequential(this::interceptUpdate)
 				// Redirect errors to crash sink
-				.doOnError(crash::tryEmitError)
+				.doOnError(error -> crash.tryEmitError(error))
 				.onErrorResume(ex -> {
 					logger.trace("Absorbing the error, the error has been published using the crash sink", ex);
 					return Mono.empty();
@@ -262,7 +273,7 @@ public class AsyncTdMiddleEventBusClient implements AsyncTdMiddle {
 				var updateAuthorizationState = (TdApi.UpdateAuthorizationState) update;
 				switch (updateAuthorizationState.authorizationState.getConstructor()) {
 					case TdApi.AuthorizationStateClosed.CONSTRUCTOR:
-						return Mono.fromRunnable(() -> logger.trace("Received AuthorizationStateClosed from tdlib"))
+						return Mono.fromRunnable(() -> logger.info("Received AuthorizationStateClosed from tdlib"))
 								.then(cluster.getEventBus().<EndSessionMessage>rxRequest(this.botAddress + ".read-binlog", EMPTY).as(MonoUtils::toMono))
 								.flatMap(latestBinlogMsg -> Mono.fromCallable(() -> latestBinlogMsg.body()).subscribeOn(Schedulers.parallel()))
 								.doOnNext(latestBinlog -> logger.info("Received binlog from server. Size: " + BinlogUtils.humanReadableByteCountBin(latestBinlog.binlog().length())))

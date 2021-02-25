@@ -316,7 +316,8 @@ public class AsyncTdMiddleEventBusServer extends AbstractVerticle {
 	private Mono<Void> pipe(AsyncTdDirectImpl td, String botAddress, String botAlias, int botId, boolean local) {
 		logger.trace("Preparing to pipe requests");
 		Flux<TdResultList> updatesFlux = td
-				.receive(tdOptions)
+				.initialize()
+				.thenMany(td.receive(tdOptions))
 				.takeUntil(item -> {
 					if (item instanceof Update) {
 						var tdUpdate = (Update) item;
@@ -371,13 +372,13 @@ public class AsyncTdMiddleEventBusServer extends AbstractVerticle {
 									var tdUpdateAuthorizationState = (UpdateAuthorizationState) tdUpdate;
 									if (tdUpdateAuthorizationState.authorizationState.getConstructor()
 											== AuthorizationStateClosed.CONSTRUCTOR) {
-										logger.debug("Undeploying after receiving AuthorizationStateClosed");
+										logger.info("Undeploying after receiving AuthorizationStateClosed");
 										return rxStop().as(MonoUtils::toMono).thenReturn(item);
 									}
 								}
 							} else if (item instanceof Error) {
 								// An error in updates means that a fatal error occurred
-								logger.debug("Undeploying after receiving a fatal error");
+								logger.info("Undeploying after receiving a fatal error");
 								return rxStop().as(MonoUtils::toMono).thenReturn(item);
 							}
 							return Mono.just(item);
