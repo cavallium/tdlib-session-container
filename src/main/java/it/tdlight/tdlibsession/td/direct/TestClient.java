@@ -68,7 +68,12 @@ public class TestClient implements ReactorTelegramClient {
 	}
 
 	@Override
-	public Flux<TdApi.Object> initialize() {
+	public Mono<Void> initialize() {
+		return Mono.empty();
+	}
+
+	@Override
+	public Flux<TdApi.Object> receive() {
 		return Flux.fromIterable(features).flatMap(featureName -> {
 			switch (featureName) {
 				case "status-update":

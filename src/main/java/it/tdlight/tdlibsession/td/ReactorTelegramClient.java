@@ -7,7 +7,9 @@ import reactor.core.publisher.Mono;
 
 public interface ReactorTelegramClient {
 
-	Flux<Object> initialize();
+	Mono<Void> initialize();
+
+	Flux<Object> receive();
 
 	Mono<Object> send(TdApi.Function query);
 

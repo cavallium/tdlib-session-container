@@ -144,6 +144,7 @@ public class TdClusterManager {
 			cfg.setProperty("hazelcast.wait.seconds.before.join", "0");
 			cfg.setProperty("hazelcast.tcp.join.port.try.count", "5");
 			cfg.setProperty("hazelcast.socket.bind.any", "false");
+			cfg.setProperty("hazelcast.health.monitoring.level", "OFF");
 			cfg.setClusterName("tdlib-session-container");
 			mgr = new HazelcastClusterManager(cfg);
 			vertxOptions.setClusterManager(mgr);

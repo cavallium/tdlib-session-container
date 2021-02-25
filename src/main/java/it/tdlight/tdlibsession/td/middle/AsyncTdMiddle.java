@@ -7,6 +7,8 @@ import reactor.core.publisher.Mono;
 
 public interface AsyncTdMiddle {
 
+	Mono<Void> initialize();
+
 	/**
 	 * Receives incoming updates from TDLib.
 	 *

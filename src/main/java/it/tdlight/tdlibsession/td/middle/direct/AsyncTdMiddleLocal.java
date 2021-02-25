@@ -69,6 +69,11 @@ public class AsyncTdMiddleLocal implements AsyncTdMiddle {
 	}
 
 	@Override
+	public Mono<Void> initialize() {
+		return cli.asMono().single().flatMap(AsyncTdMiddle::initialize);
+	}
+
+	@Override
 	public Flux<TdApi.Object> receive() {
 		return cli.asMono().single().flatMapMany(AsyncTdMiddle::receive);
 	}

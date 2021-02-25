@@ -144,7 +144,8 @@ public class AsyncTdEasy {
 				.flatMap(_v -> {
 					this.settings.tryEmitNext(settings);
 					return Mono.empty();
-				});
+				})
+				.then(td.initialize());
 	}
 
 	/**

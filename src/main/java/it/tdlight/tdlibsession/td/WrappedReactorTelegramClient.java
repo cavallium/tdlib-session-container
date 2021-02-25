@@ -2,6 +2,7 @@ package it.tdlight.tdlibsession.td;
 
 import it.tdlight.common.ReactiveTelegramClient;
 import it.tdlight.jni.TdApi;
+import it.tdlight.utils.MonoUtils;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
@@ -13,19 +14,27 @@ public class WrappedReactorTelegramClient implements ReactorTelegramClient {
 		this.reactiveTelegramClient = reactiveTelegramClient;
 	}
 
+	@SuppressWarnings("Convert2MethodRef")
+	public Mono<Void> initialize() {
+		return MonoUtils
+				.fromBlockingEmpty(() -> reactiveTelegramClient.createAndRegisterClient());
+	}
+
 	@Override
-	public Flux<TdApi.Object> initialize() {
-		return Flux.from(reactiveTelegramClient).concatMap(item -> {
-			if (item.isUpdate()) {
-				return Mono.just(item.getUpdate());
-			} else if (item.isHandleException()) {
-				return Mono.error(item.getHandleException());
-			} else if (item.isUpdateException()) {
-				return Mono.error(item.getUpdateException());
-			} else {
-				return Mono.error(new IllegalStateException("This shouldn't happen. Received unknown ReactiveItem type"));
-			}
-		});
+	public Flux<TdApi.Object> receive() {
+		return Flux
+				.from(reactiveTelegramClient)
+				.concatMap(item -> {
+					if (item.isUpdate()) {
+						return Mono.just(item.getUpdate());
+					} else if (item.isHandleException()) {
+						return Mono.error(item.getHandleException());
+					} else if (item.isUpdateException()) {
+						return Mono.error(item.getUpdateException());
+					} else {
+						return Mono.error(new IllegalStateException("This shouldn't happen. Received unknown ReactiveItem type"));
+					}
+				});
 	}
 
 	/**

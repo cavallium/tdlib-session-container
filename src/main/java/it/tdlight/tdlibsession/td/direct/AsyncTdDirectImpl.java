@@ -71,11 +71,10 @@ public class AsyncTdDirectImpl implements AsyncTdDirect {
 	}
 
 	@Override
-	public Flux<TdApi.Object> receive(AsyncTdDirectOptions options) {
-		// If closed it will be either true or false
-		final One<Boolean> closedFromTd = Sinks.one();
+	public Mono<Void> initialize() {
 		return telegramClientFactory
 				.create(implementationDetails)
+				.flatMap(reactorTelegramClient -> reactorTelegramClient.initialize().thenReturn(reactorTelegramClient))
 				.doOnNext(client -> client.execute(new TdApi.SetLogVerbosityLevel(1)))
 				.flatMap(client -> {
 					if (td.tryEmitValue(client).isFailure()) {
@@ -83,7 +82,16 @@ public class AsyncTdDirectImpl implements AsyncTdDirect {
 					}
 					return Mono.just(client);
 				})
-				.flatMapMany(ReactorTelegramClient::initialize)
+				.then();
+	}
+
+	@Override
+	public Flux<TdApi.Object> receive(AsyncTdDirectOptions options) {
+		// If closed it will be either true or false
+		final One<Boolean> closedFromTd = Sinks.one();
+		return td
+				.asMono()
+				.flatMapMany(ReactorTelegramClient::receive)
 				.doOnNext(update -> {
 					// Close the emitter if receive closed state
 					if (update.getConstructor() == UpdateAuthorizationState.CONSTRUCTOR

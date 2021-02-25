@@ -8,6 +8,8 @@ import reactor.core.publisher.Mono;
 
 public interface AsyncTdDirect {
 
+	Mono<Void> initialize();
+
 	/**
 	 * Receives incoming updates and request responses from TDLib.
 	 * Can be called only once.

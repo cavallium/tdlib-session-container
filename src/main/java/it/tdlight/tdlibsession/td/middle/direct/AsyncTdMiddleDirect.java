@@ -84,6 +84,12 @@ public class AsyncTdMiddleDirect extends AbstractVerticle implements AsyncTdMidd
 	}
 
 	@Override
+	public Mono<Void> initialize() {
+		return td
+				.initialize();
+	}
+
+	@Override
 	public Flux<TdApi.Object> receive() {
 		return td
 				.receive(new AsyncTdDirectOptions(WAIT_DURATION, 100))

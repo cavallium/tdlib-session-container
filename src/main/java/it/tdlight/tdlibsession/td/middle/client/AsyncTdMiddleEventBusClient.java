@@ -64,8 +64,13 @@ public class AsyncTdMiddleEventBusClient implements AsyncTdMiddle {
 		this.deliveryOptionsWithTimeout = cluster.newDeliveryOpts().setLocalOnly(local).setSendTimeout(30000);
 	}
 
-	private Mono<AsyncTdMiddleEventBusClient> initialize() {
+	private Mono<AsyncTdMiddleEventBusClient> initializeEb() {
 		return Mono.just(this);
+	}
+
+	@Override
+	public Mono<Void> initialize() {
+		return Mono.empty();
 	}
 
 	public static Mono<AsyncTdMiddle> getAndDeployInstance(TdClusterManager clusterManager,
@@ -75,7 +80,7 @@ public class AsyncTdMiddleEventBusClient implements AsyncTdMiddle {
 			JsonObject implementationDetails,
 			Path binlogsArchiveDirectory) {
 		return new AsyncTdMiddleEventBusClient(clusterManager)
-				.initialize()
+				.initializeEb()
 				.flatMap(instance -> retrieveBinlog(clusterManager.getVertx(), binlogsArchiveDirectory, botId)
 						.flatMap(binlog -> binlog
 								.getLastModifiedTime()
