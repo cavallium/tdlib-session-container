@@ -421,6 +421,19 @@ public class MonoUtils {
 		}).subscribeOn(Schedulers.boundedElastic());
 	}
 
+	public static Scheduler newBoundedSingle(String name) {
+		return newBoundedSingle(name, false);
+	}
+
+	public static Scheduler newBoundedSingle(String name, boolean daemon) {
+		return Schedulers.newBoundedElastic(1,
+				Schedulers.DEFAULT_BOUNDED_ELASTIC_QUEUESIZE,
+				name,
+				Integer.MAX_VALUE,
+				daemon
+		);
+	}
+
 	public static class SinkRWStream<T> implements io.vertx.core.streams.WriteStream<T>, io.vertx.core.streams.ReadStream<T> {
 
 		private final Many<T> sink;
