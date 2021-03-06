@@ -142,7 +142,9 @@ public abstract class BatchSubscriber<T> implements CoreSubscriber<T> {
 					? batchSize - buffer.size()
 					: batchSize;
 			log.trace("+ request [{}] -> request {} values", buffer.size(), required);
-			subscription.request(required);
+			if (required > 0) {
+				subscription.request(required);
+			}
 
 			if (!buffer.isEmpty()) scheduleFlush();
 		}

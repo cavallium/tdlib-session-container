@@ -29,7 +29,6 @@ public class BinlogUtils {
 
 	public static Mono<BinlogAsyncFile> retrieveBinlog(FileSystem vertxFilesystem, Path binlogPath) {
 		var path = binlogPath.toString();
-		var openOptions = new OpenOptions().setWrite(true).setRead(true).setCreate(false).setDsync(true);
 		return vertxFilesystem
 				// Create file if not exist to avoid errors
 				.rxExists(path).filter(exists -> exists).as(MonoUtils::toMono)
@@ -38,8 +37,7 @@ public class BinlogUtils {
 						.thenReturn(true)
 				)
 				// Open file
-				.flatMap(x -> vertxFilesystem.rxOpen(path, openOptions).as(MonoUtils::toMono))
-				.map(file -> new BinlogAsyncFile(vertxFilesystem, path, file))
+				.map(x -> new BinlogAsyncFile(vertxFilesystem, path))
 				.single()
 				.publishOn(Schedulers.boundedElastic());
 	}

@@ -6,7 +6,9 @@ import io.vertx.reactivex.core.Vertx;
 import io.vertx.reactivex.core.buffer.Buffer;
 import io.vertx.reactivex.core.eventbus.MessageConsumer;
 import it.tdlight.jni.TdApi;
+import it.tdlight.jni.TdApi.AuthorizationStateClosed;
 import it.tdlight.jni.TdApi.Function;
+import it.tdlight.jni.TdApi.UpdateAuthorizationState;
 import it.tdlight.tdlibsession.td.ResponseError;
 import it.tdlight.tdlibsession.td.TdError;
 import it.tdlight.tdlibsession.td.TdResult;
@@ -52,6 +54,10 @@ public class AsyncTdMiddleEventBusClient implements AsyncTdMiddle {
 	private final Empty<Void> crash = Sinks.one();
 	// This will only result in a successful completion, never completes in other ways
 	private final Empty<Void> pingFail = Sinks.one();
+	// This will only result in a successful completion, never completes in other ways.
+	// It will be called when UpdateAuthorizationStateClosing is intercepted.
+	// If it's completed stop checking if the ping works or not
+	private final Empty<Void> authStateClosing = Sinks.one();
 
 	private int botId;
 	private String botAddress;
@@ -174,7 +180,7 @@ public class AsyncTdMiddleEventBusClient implements AsyncTdMiddle {
 						.doOnNext(s -> logger.trace("PING"))
 						.then()
 						.onErrorResume(ex -> {
-							logger.warn("Ping failed", ex);
+							logger.warn("Ping failed: {}", ex.getMessage());
 							return Mono.empty();
 						})
 						.doOnNext(s -> logger.debug("END PING"))
@@ -245,9 +251,20 @@ public class AsyncTdMiddleEventBusClient implements AsyncTdMiddle {
 											ex.setStackTrace(new StackTraceElement[0]);
 											throw ex;
 										}).onErrorResume(ex -> MonoUtils.emitError(crash, ex)))
+										.takeUntilOther(Mono
+												.firstWithSignal(crash.asMono(), authStateClosing.asMono())
+												.onErrorResume(e -> Mono.empty())
+										)
 						)
 						.doOnTerminate(() -> logger.trace("TakeUntilOther has been trigghered, the receive() flux will end"))
 				)
+				.takeUntil(a -> a.succeeded() && a.value().stream().anyMatch(item -> {
+					if (item.getConstructor() == UpdateAuthorizationState.CONSTRUCTOR) {
+						return ((UpdateAuthorizationState) item).authorizationState.getConstructor()
+								== AuthorizationStateClosed.CONSTRUCTOR;
+					}
+					return false;
+				}))
 				.flatMapSequential(updates -> {
 					if (updates.succeeded()) {
 						return Flux.fromIterable(updates.value());
@@ -272,6 +289,8 @@ public class AsyncTdMiddleEventBusClient implements AsyncTdMiddle {
 			case TdApi.UpdateAuthorizationState.CONSTRUCTOR:
 				var updateAuthorizationState = (TdApi.UpdateAuthorizationState) update;
 				switch (updateAuthorizationState.authorizationState.getConstructor()) {
+					case TdApi.AuthorizationStateClosing.CONSTRUCTOR:
+						authStateClosing.tryEmitEmpty();
 					case TdApi.AuthorizationStateClosed.CONSTRUCTOR:
 						return Mono.fromRunnable(() -> logger.info("Received AuthorizationStateClosed from tdlib"))
 								.then(cluster.getEventBus().<EndSessionMessage>rxRequest(this.botAddress + ".read-binlog", EMPTY).as(MonoUtils::toMono))

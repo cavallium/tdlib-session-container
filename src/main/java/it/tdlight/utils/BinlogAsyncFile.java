@@ -1,5 +1,6 @@
 package it.tdlight.utils;
 
+import io.vertx.core.file.OpenOptions;
 import io.vertx.reactivex.core.buffer.Buffer;
 import io.vertx.reactivex.core.file.AsyncFile;
 import io.vertx.reactivex.core.file.FileProps;
@@ -14,45 +15,49 @@ public class BinlogAsyncFile {
 
 	private final FileSystem filesystem;
 	private final String path;
-	private final AsyncFile file;
+	private final OpenOptions openOptions;
 
-	public BinlogAsyncFile(FileSystem fileSystem, String path, AsyncFile file) {
+	public BinlogAsyncFile(FileSystem fileSystem, String path) {
 		this.filesystem = fileSystem;
 		this.path = path;
-		this.file = file;
+		this.openOptions = new OpenOptions().setWrite(true).setRead(true).setCreate(false).setDsync(true);
+	}
+	
+	private Mono<AsyncFile> openRW() {
+		return filesystem.rxOpen(path, openOptions).as(MonoUtils::toMono);
 	}
 
 	public Mono<Buffer> readFully() {
-		return filesystem
-				.rxProps(path)
-				.map(props -> (int) props.size())
-				.as(MonoUtils::toMono)
-				.flatMap(size -> {
-					var buf = Buffer.buffer(size);
-					logger.debug("Reading binlog from disk. Size: " + BinlogUtils.humanReadableByteCountBin(size));
-					return file.rxRead(buf, 0, 0, size).as(MonoUtils::toMono).thenReturn(buf);
-				});
+		return openRW()
+				.flatMap(asyncFile -> filesystem
+						.rxProps(path)
+						.map(props -> (int) props.size())
+						.as(MonoUtils::toMono)
+						.flatMap(size -> {
+							var buf = Buffer.buffer(size);
+							logger.debug("Reading binlog from disk. Size: " + BinlogUtils.humanReadableByteCountBin(size));
+							return asyncFile.rxRead(buf, 0, 0, size).as(MonoUtils::toMono).thenReturn(buf);
+						})
+				);
 	}
 
 	public Mono<byte[]> readFullyBytes() {
 		return this.readFully().map(Buffer::getBytes);
 	}
 
-	public AsyncFile getFile() {
-		return file;
-	}
-
 	public Mono<Void> overwrite(Buffer newData) {
-		return getSize()
+		return openRW().flatMap(asyncFile -> this
+				.getSize()
 				.doOnNext(size -> logger.debug("Preparing to overwrite binlog. Initial size: " + BinlogUtils.humanReadableByteCountBin(size)))
-				.then(file.rxWrite(newData, 0)
-						.andThen(file.rxFlush())
+				.then(asyncFile.rxWrite(newData, 0)
+						.andThen(asyncFile.rxFlush())
 						.andThen(filesystem.rxTruncate(path, newData.length()))
 						.as(MonoUtils::toMono)
 				)
 				.then(getSize())
 				.doOnNext(size -> logger.debug("Overwritten binlog. Final size: " + BinlogUtils.humanReadableByteCountBin(size)))
-				.then();
+				.then()
+		);
 	}
 
 	public Mono<Void> overwrite(byte[] newData) {

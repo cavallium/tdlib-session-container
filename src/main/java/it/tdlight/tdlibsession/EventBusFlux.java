@@ -304,10 +304,10 @@ public class EventBusFlux {
 										if (pingReplyException.failureCode() == -1) {
 											pingSink.error(new ConnectException( "Can't send a ping to flux \"" + fluxAddress + "\" because the connection was lost"));
 										} else {
-											pingSink.error(new ConnectException("Ping failed:" + pingReplyException.toString()));
+											pingSink.error(new ConnectException("Ping failed: " + pingReplyException.toString()));
 										}
 									} else {
-										pingSink.error(new IllegalStateException("Ping failed", pingError));
+										pingSink.error(new IllegalStateException("Ping failed: " + pingError.getMessage()));
 									}
 								}
 							})))
