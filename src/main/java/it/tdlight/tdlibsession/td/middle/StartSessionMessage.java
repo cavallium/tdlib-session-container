@@ -7,13 +7,13 @@ import java.util.StringJoiner;
 
 public final class StartSessionMessage {
 
-	private final int id;
+	private final long id;
 	private final String alias;
 	private final Buffer binlog;
 	private final long binlogDate;
 	private final JsonObject implementationDetails;
 
-	public StartSessionMessage(int id, String alias, Buffer binlog, long binlogDate, JsonObject implementationDetails) {
+	public StartSessionMessage(long id, String alias, Buffer binlog, long binlogDate, JsonObject implementationDetails) {
 		this.id = id;
 		this.alias = alias;
 		this.binlog = binlog;
@@ -21,7 +21,7 @@ public final class StartSessionMessage {
 		this.implementationDetails = implementationDetails;
 	}
 
-	public int id() {
+	public long id() {
 		return id;
 	}
 

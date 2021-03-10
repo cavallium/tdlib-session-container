@@ -217,15 +217,15 @@ public class TDLibRemoteClient implements AutoCloseable {
 				.then(completion);
 	}
 
-	public static Path getSessionDirectory(int botId) {
+	public static Path getSessionDirectory(long botId) {
 		return Paths.get(".sessions-cache").resolve("id" + botId);
 	}
 
-	public static Path getMediaDirectory(int botId) {
+	public static Path getMediaDirectory(long botId) {
 		return Paths.get(".cache").resolve("media").resolve("id" + botId);
 	}
 
-	public static Path getSessionBinlogDirectory(int botId) {
+	public static Path getSessionBinlogDirectory(long botId) {
 		return getSessionDirectory(botId).resolve("td.binlog");
 	}
 

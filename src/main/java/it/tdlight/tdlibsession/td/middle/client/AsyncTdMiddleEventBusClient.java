@@ -59,7 +59,7 @@ public class AsyncTdMiddleEventBusClient implements AsyncTdMiddle {
 	// If it's completed stop checking if the ping works or not
 	private final Empty<Void> authStateClosing = Sinks.one();
 
-	private int botId;
+	private long botId;
 	private String botAddress;
 	private String botAlias;
 	private boolean local;
@@ -83,7 +83,7 @@ public class AsyncTdMiddleEventBusClient implements AsyncTdMiddle {
 	}
 
 	public static Mono<AsyncTdMiddle> getAndDeployInstance(TdClusterManager clusterManager,
-			int botId,
+			long botId,
 			String botAlias,
 			boolean local,
 			JsonObject implementationDetails,
@@ -110,7 +110,7 @@ public class AsyncTdMiddleEventBusClient implements AsyncTdMiddle {
 	 *
 	 * @return optional result
 	 */
-	public static Mono<BinlogAsyncFile> retrieveBinlog(Vertx vertx, Path binlogsArchiveDirectory, int botId) {
+	public static Mono<BinlogAsyncFile> retrieveBinlog(Vertx vertx, Path binlogsArchiveDirectory, long botId) {
 		return BinlogUtils.retrieveBinlog(vertx.fileSystem(), binlogsArchiveDirectory.resolve(botId + ".binlog"));
 	}
 
@@ -118,7 +118,7 @@ public class AsyncTdMiddleEventBusClient implements AsyncTdMiddle {
 		return this.binlog.asMono().flatMap(binlog -> BinlogUtils.saveBinlog(binlog, data));
 	}
 
-	public Mono<Void> start(int botId,
+	public Mono<Void> start(long botId,
 			String botAlias,
 			boolean local,
 			JsonObject implementationDetails,

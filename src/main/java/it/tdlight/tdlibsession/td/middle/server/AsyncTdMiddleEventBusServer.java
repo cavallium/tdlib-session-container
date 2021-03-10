@@ -25,6 +25,7 @@ import it.tdlight.tdlibsession.td.middle.TdResultList;
 import it.tdlight.tdlibsession.td.middle.TdResultListMessageCodec;
 import it.tdlight.tdlibsession.td.middle.TdResultMessage;
 import it.tdlight.utils.BinlogUtils;
+import it.tdlight.utils.BufferTimeOutPublisher;
 import it.tdlight.utils.MonoUtils;
 import java.net.ConnectException;
 import java.time.Duration;
@@ -341,8 +342,8 @@ public class AsyncTdMiddleEventBusServer extends AbstractVerticle {
 					}
 				}))
 				.limitRate(Math.max(1, tdOptions.getEventsSize()))
-				//.transform(normal -> new BufferTimeOutPublisher<>(normal, Math.max(1, tdOptions.getEventsSize()), local ? Duration.ofMillis(1) : Duration.ofMillis(100)))
-				.bufferTimeout(Math.max(1, tdOptions.getEventsSize()), local ? Duration.ofMillis(1) : Duration.ofMillis(100))
+				.transform(normal -> new BufferTimeOutPublisher<>(normal, Math.max(1, tdOptions.getEventsSize()), local ? Duration.ofMillis(1) : Duration.ofMillis(100)))
+				//.bufferTimeout(Math.max(1, tdOptions.getEventsSize()), local ? Duration.ofMillis(1) : Duration.ofMillis(100))
 				//.map(List::of)
 				.limitRate(Math.max(1, tdOptions.getEventsSize()))
 				.map(TdResultList::new);

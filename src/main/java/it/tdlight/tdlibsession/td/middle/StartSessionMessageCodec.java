@@ -18,7 +18,7 @@ public class StartSessionMessageCodec implements MessageCodec<StartSessionMessag
 	@Override
 	public void encodeToWire(Buffer buffer, StartSessionMessage t) {
 		BufferUtils.encode(buffer, os -> {
-			os.writeInt(t.id());
+			os.writeLong(t.id());
 			UTFUtils.writeUTF(os, t.alias());
 			BufferUtils.writeBuf(os, t.binlog());
 			os.writeLong(t.binlogDate());
@@ -28,7 +28,7 @@ public class StartSessionMessageCodec implements MessageCodec<StartSessionMessag
 
 	@Override
 	public StartSessionMessage decodeFromWire(int pos, Buffer buffer) {
-		return BufferUtils.decode(pos, buffer, is -> new StartSessionMessage(is.readInt(),
+		return BufferUtils.decode(pos, buffer, is -> new StartSessionMessage(is.readLong(),
 				UTFUtils.readUTF(is),
 				BufferUtils.rxReadBuf(is),
 				is.readLong(),
