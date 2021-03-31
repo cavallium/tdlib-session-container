@@ -1,11 +1,8 @@
 package it.tdlight.tdlibsession.td.middle;
 
 import com.hazelcast.config.Config;
-import com.hazelcast.config.EvictionConfig;
-import com.hazelcast.config.EvictionPolicy;
 import com.hazelcast.config.MapConfig;
-import com.hazelcast.config.MaxSizePolicy;
-import com.hazelcast.config.MergePolicyConfig;
+import com.hazelcast.config.MultiMapConfig;
 import com.hazelcast.config.cp.SemaphoreConfig;
 import io.vertx.core.DeploymentOptions;
 import io.vertx.core.Handler;
@@ -120,17 +117,13 @@ public class TdClusterManager {
 			cfg.getNetworkConfig().setPort(port);
 			cfg.getNetworkConfig().setPortAutoIncrement(false);
 			cfg.getPartitionGroupConfig().setEnabled(false);
-			cfg.addMapConfig(new MapConfig()
-					.setName("__vertx.subs")
-					.setBackupCount(1)
-					.setTimeToLiveSeconds(0)
-					.setMaxIdleSeconds(0)
-					.setEvictionConfig(new EvictionConfig()
-							.setMaxSizePolicy(MaxSizePolicy.PER_NODE)
-							.setEvictionPolicy(EvictionPolicy.NONE)
-							.setSize(0))
-					.setMergePolicyConfig(new MergePolicyConfig().setPolicy("com.hazelcast.map.merge.LatestUpdateMapMergePolicy")));
-			cfg.getCPSubsystemConfig().setSemaphoreConfigs(Map.of("__vertx.*", new SemaphoreConfig().setInitialPermits(1)));
+			cfg.addMapConfig(new MapConfig().setName("__vertx.haInfo").setBackupCount(1));
+			cfg.addMapConfig(new MapConfig().setName("__vertx.nodeInfo").setBackupCount(1));
+			cfg
+					.getCPSubsystemConfig()
+					.setCPMemberCount(0)
+					.setSemaphoreConfigs(Map.of("__vertx.*", new SemaphoreConfig().setInitialPermits(1).setJDKCompatible(false)));
+			cfg.addMultiMapConfig(new MultiMapConfig().setName("__vertx.subs").setBackupCount(1).setValueCollectionType("SET"));
 			cfg.getNetworkConfig().getJoin().getMulticastConfig().setEnabled(false);
 			cfg.getNetworkConfig().getJoin().getAwsConfig().setEnabled(false);
 			cfg.getNetworkConfig().getJoin().getTcpIpConfig().setEnabled(true);

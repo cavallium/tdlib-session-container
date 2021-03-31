@@ -113,9 +113,10 @@ public class AsyncTdMiddleEventBusServer extends AbstractVerticle {
 	}
 
 	private Mono<Void> onSuccessfulStartRequest(AsyncTdDirectImpl td, String botAddress, String botAlias, int botId, boolean local) {
-		return this
-				.listen(td, botAddress, botAlias, botId, local)
+		return td
+				.initialize()
 				.then(this.pipe(td, botAddress, botAlias, botId, local))
+				.then(this.listen(td, botAddress, botAlias, botId, local))
 				.doOnSuccess(s -> {
 					logger.info("Deploy and start of bot \"" + botAlias + "\": ✅ Succeeded");
 				})
@@ -138,39 +139,39 @@ public class AsyncTdMiddleEventBusServer extends AbstractVerticle {
 						executeConsumer.handler(sink::next);
 						executeConsumer.endHandler(h -> sink.complete());
 					})
-					.flatMapSequential(msg -> Mono
-							.fromCallable(() -> Tuples.of(msg, msg.body()))
-							.subscribeOn(Schedulers.parallel())
-					)
-					.flatMapSequential(tuple -> {
-						var msg = tuple.getT1();
-						var body = tuple.getT2();
-						logger.trace("Received execute request {}", body.getRequest().getClass().getSimpleName());
+					.flatMap(msg -> {
+						var body = msg.body();
 						var request = overrideRequest(body.getRequest(), botId);
+						if (logger.isTraceEnabled()) {
+							logger.trace("Received execute request {}", request);
+						}
 						return td
 								.execute(request, body.isExecuteDirectly())
-								.map(result -> Tuples.of(msg, result))
-								.doOnSuccess(s -> logger.trace("Executed successfully"));
+								.single()
+								.timeout(Duration.ofSeconds(60 + 30))
+								.doOnSuccess(s -> logger.trace("Executed successfully. Request was {}", request))
+								.onErrorResume(ex -> Mono.fromRunnable(() -> {
+									msg.fail(500, ex.getLocalizedMessage());
+								}))
+								.flatMap(response -> Mono.fromCallable(() -> {
+									var replyOpts = new DeliveryOptions().setLocalOnly(local);
+									var replyValue = new TdResultMessage(response.result(), response.cause());
+									try {
+										logger.trace("Replying with success response. Request was {}", request);
+										msg.reply(replyValue, replyOpts);
+										return response;
+									} catch (Exception ex) {
+										logger.debug("Replying with error response: {}. Request was {}", ex.getLocalizedMessage(), request);
+										msg.fail(500, ex.getLocalizedMessage());
+										throw ex;
+									}
+								}).subscribeOn(Schedulers.boundedElastic()));
 					})
-					.flatMapSequential(tuple -> Mono.fromCallable(() -> {
-						var msg = tuple.getT1();
-						var response = tuple.getT2();
-						var replyOpts = new DeliveryOptions().setLocalOnly(local);
-						var replyValue = new TdResultMessage(response.result(), response.cause());
-						try {
-							logger.trace("Replying with success response");
-							msg.reply(replyValue, replyOpts);
-							return response;
-						} catch (Exception ex) {
-							logger.debug("Replying with error response: {}", ex.getLocalizedMessage());
-							msg.fail(500, ex.getLocalizedMessage());
-							throw ex;
-						}
-					}).subscribeOn(Schedulers.boundedElastic()))
 					.then()
 					.subscribeOn(Schedulers.parallel())
 					.subscribe(v -> {},
-							ex -> logger.error("Error when processing an execute request", ex),
+							ex -> logger.error("Fatal error when processing an execute request."
+									+ " Can't process further requests since the subscription has been broken", ex),
 							() -> logger.trace("Finished handling execute requests")
 					);
 
@@ -235,7 +236,7 @@ public class AsyncTdMiddleEventBusServer extends AbstractVerticle {
 						pingConsumer.handler(sink::next);
 						pingConsumer.endHandler(h -> sink.complete());
 					})
-					.flatMapSequential(msg -> Mono.fromCallable(() -> {
+					.concatMap(msg -> Mono.fromCallable(() -> {
 						var opts = new DeliveryOptions().setLocalOnly(local).setSendTimeout(Duration.ofSeconds(10).toMillis());
 						msg.reply(EMPTY, opts);
 						return null;
@@ -286,7 +287,9 @@ public class AsyncTdMiddleEventBusServer extends AbstractVerticle {
 						.then(executeConsumer
 								.asMono()
 								.timeout(Duration.ofSeconds(5), Mono.empty())
-								.flatMap(ec -> ec.rxUnregister().as(MonoUtils::toMono)))
+								.flatMap(ec -> ec.rxUnregister().as(MonoUtils::toMono))
+								.doOnSuccess(s -> logger.trace("Unregistered execute consumer"))
+						)
 						.then(readBinlogConsumer
 								.asMono()
 								.timeout(Duration.ofSeconds(10), Mono.empty())
@@ -316,24 +319,20 @@ public class AsyncTdMiddleEventBusServer extends AbstractVerticle {
 
 	private Mono<Void> pipe(AsyncTdDirectImpl td, String botAddress, String botAlias, int botId, boolean local) {
 		logger.trace("Preparing to pipe requests");
-		Flux<TdResultList> updatesFlux = td
-				.initialize()
-				.thenMany(td.receive(tdOptions))
+		Flux<TdResultList> updatesFlux = td.receive(tdOptions)
 				.takeUntil(item -> {
 					if (item instanceof Update) {
 						var tdUpdate = (Update) item;
 						if (tdUpdate.getConstructor() == UpdateAuthorizationState.CONSTRUCTOR) {
 							var updateAuthorizationState = (UpdateAuthorizationState) tdUpdate;
-							if (updateAuthorizationState.authorizationState.getConstructor() == AuthorizationStateClosed.CONSTRUCTOR) {
-								return true;
-							}
+							return updateAuthorizationState.authorizationState.getConstructor()
+									== AuthorizationStateClosed.CONSTRUCTOR;
 						}
-					} else if (item instanceof Error) {
-						return true;
-					}
+					} else
+						return item instanceof Error;
 					return false;
 				})
-				.flatMapSequential(update -> MonoUtils.fromBlockingSingle(() -> {
+				.flatMap(update -> Mono.fromCallable(() -> {
 					if (update.getConstructor() == TdApi.Error.CONSTRUCTOR) {
 						var error = (Error) update;
 						throw new TdError(error.code, error.message);
@@ -359,14 +358,14 @@ public class AsyncTdMiddleEventBusServer extends AbstractVerticle {
 				.sender(botAddress + ".updates", opts);
 
 		var pipeFlux = updatesFlux
-				.flatMapSequential(updatesList -> updatesSender
+				.concatMap(updatesList -> updatesSender
 						.rxWrite(updatesList)
 						.as(MonoUtils::toMono)
 						.thenReturn(updatesList)
 				)
-				.flatMapSequential(updatesList -> Flux
+				.concatMap(updatesList -> Flux
 						.fromIterable(updatesList.value())
-						.flatMapSequential(item -> {
+						.concatMap(item -> {
 							if (item instanceof Update) {
 								var tdUpdate = (Update) item;
 								if (tdUpdate.getConstructor() == UpdateAuthorizationState.CONSTRUCTOR) {

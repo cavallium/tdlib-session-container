@@ -403,9 +403,12 @@ public class MonoUtils {
 			messageConsumer.<Message<T>>handler(messages::tryEmitNext);
 
 			Flux<Message<T>> dataFlux = Flux
-					.<Message<T>>concatDelayError(
+					.concatDelayError(
 							messages.asFlux(),
-							messageConsumer.rxUnregister().as(MonoUtils::toMono)
+							messageConsumer
+									.rxUnregister()
+									.as(MonoUtils::<Message<T>>toMono)
+									.doOnSuccess(s -> logger.trace("Unregistered message consumer"))
 					)
 					.doOnSubscribe(s -> registrationRequested.tryEmitEmpty());
 

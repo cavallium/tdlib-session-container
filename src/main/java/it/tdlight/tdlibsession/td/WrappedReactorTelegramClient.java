@@ -46,7 +46,7 @@ public class WrappedReactorTelegramClient implements ReactorTelegramClient {
 	 */
 	@Override
 	public Mono<TdApi.Object> send(TdApi.Function query) {
-		return Mono.from(reactiveTelegramClient.send(query));
+		return Mono.from(reactiveTelegramClient.send(query)).single();
 	}
 
 	/**

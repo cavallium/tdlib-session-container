@@ -8,6 +8,7 @@ import io.vertx.reactivex.core.eventbus.MessageConsumer;
 import it.tdlight.jni.TdApi;
 import it.tdlight.jni.TdApi.AuthorizationStateClosed;
 import it.tdlight.jni.TdApi.Function;
+import it.tdlight.jni.TdApi.Object;
 import it.tdlight.jni.TdApi.UpdateAuthorizationState;
 import it.tdlight.tdlibsession.td.ResponseError;
 import it.tdlight.tdlibsession.td.TdError;
@@ -196,11 +197,12 @@ public class AsyncTdMiddleEventBusClient implements AsyncTdMiddle {
 	private Mono<Void> setupUpdatesListener() {
 		return Mono
 				.fromRunnable(() -> logger.trace("Setting up updates listener..."))
-				.then(MonoUtils.<MessageConsumer<TdResultList>>fromBlockingSingle(() -> {
-					return MessageConsumer.newInstance(cluster.getEventBus().<TdResultList>consumer(botAddress + ".updates")
-							.setMaxBufferedMessages(5000)
-							.getDelegate());
-				}))
+				.then(MonoUtils.<MessageConsumer<TdResultList>>fromBlockingSingle(() -> MessageConsumer
+						.newInstance(cluster.getEventBus().<TdResultList>consumer(botAddress + ".updates")
+								.setMaxBufferedMessages(5000)
+								.getDelegate()
+						))
+				)
 				.flatMap(updateConsumer -> {
 					// Return when the registration of all the consumers has been done across the cluster
 					return Mono
@@ -224,66 +226,68 @@ public class AsyncTdMiddleEventBusClient implements AsyncTdMiddle {
 				.then(updates.asMono())
 				.publishOn(Schedulers.parallel())
 				.timeout(Duration.ofSeconds(30))
-				.flatMap(MonoUtils::fromMessageConsumer)
-				.flatMapMany(registration -> Mono
-						.fromRunnable(() -> logger.trace("Registering updates flux"))
-						.then(registration.getT1())
-						.doOnSuccess(s -> logger.trace("Registered updates flux"))
-						.doOnSuccess(s -> logger.trace("Sending ready-to-receive"))
-						.then(cluster.getEventBus().<byte[]>rxRequest(botAddress + ".ready-to-receive",
-								EMPTY,
-								deliveryOptionsWithTimeout
-						).as(MonoUtils::toMono))
-						.doOnSuccess(s -> logger.trace("Sent ready-to-receive, received reply"))
-						.doOnSuccess(s -> logger.trace("About to read updates flux"))
-						.thenMany(registration.getT2())
-				)
-				.takeUntilOther(Flux
-						.merge(
-								crash.asMono()
-										.onErrorResume(ex -> {
-											logger.error("TDLib crashed", ex);
-											return Mono.empty();
-										}),
-								pingFail.asMono()
-										.then(Mono.fromCallable(() -> {
-											var ex = new ConnectException("Server did not respond to ping");
-											ex.setStackTrace(new StackTraceElement[0]);
-											throw ex;
-										}).onErrorResume(ex -> MonoUtils.emitError(crash, ex)))
-										.takeUntilOther(Mono
-												.firstWithSignal(crash.asMono(), authStateClosing.asMono())
-												.onErrorResume(e -> Mono.empty())
-										)
+				.flatMapMany(updatesMessageConsumer -> MonoUtils
+						.fromMessageConsumer(updatesMessageConsumer)
+						.flatMapMany(registration -> Mono
+								.fromRunnable(() -> logger.trace("Registering updates flux"))
+								.then(registration.getT1())
+								.doOnSuccess(s -> logger.trace("Registered updates flux"))
+								.doOnSuccess(s -> logger.trace("Sending ready-to-receive"))
+								.then(cluster.getEventBus().<byte[]>rxRequest(botAddress + ".ready-to-receive",
+										EMPTY,
+										deliveryOptionsWithTimeout
+								).as(MonoUtils::toMono))
+								.doOnSuccess(s -> logger.trace("Sent ready-to-receive, received reply"))
+								.doOnSuccess(s -> logger.trace("About to read updates flux"))
+								.thenMany(registration.getT2())
 						)
-						.doOnTerminate(() -> logger.trace("TakeUntilOther has been trigghered, the receive() flux will end"))
-				)
-				.takeUntil(a -> a.succeeded() && a.value().stream().anyMatch(item -> {
-					if (item.getConstructor() == UpdateAuthorizationState.CONSTRUCTOR) {
-						return ((UpdateAuthorizationState) item).authorizationState.getConstructor()
-								== AuthorizationStateClosed.CONSTRUCTOR;
-					}
-					return false;
-				}))
-				.flatMapSequential(updates -> {
-					if (updates.succeeded()) {
-						return Flux.fromIterable(updates.value());
-					} else {
-						return Mono.fromCallable(() -> TdResult.failed(updates.error()).orElseThrow());
-					}
-				})
-				.flatMapSequential(this::interceptUpdate)
-				// Redirect errors to crash sink
-				.doOnError(error -> crash.tryEmitError(error))
-				.onErrorResume(ex -> {
-					logger.trace("Absorbing the error, the error has been published using the crash sink", ex);
-					return Mono.empty();
-				})
+						.takeUntilOther(Flux
+								.merge(
+										crash.asMono()
+												.onErrorResume(ex -> {
+													logger.error("TDLib crashed", ex);
+													return Mono.empty();
+												}),
+										pingFail.asMono()
+												.then(Mono.fromCallable(() -> {
+													var ex = new ConnectException("Server did not respond to ping");
+													ex.setStackTrace(new StackTraceElement[0]);
+													throw ex;
+												}).onErrorResume(ex -> MonoUtils.emitError(crash, ex)))
+												.takeUntilOther(Mono
+														.firstWithSignal(crash.asMono(), authStateClosing.asMono())
+														.onErrorResume(e -> Mono.empty())
+												)
+								)
+								.doOnTerminate(() -> logger.trace("TakeUntilOther has been trigghered, the receive() flux will end"))
+						)
+						.takeUntil(a -> a.succeeded() && a.value().stream().anyMatch(item -> {
+							if (item.getConstructor() == UpdateAuthorizationState.CONSTRUCTOR) {
+								return ((UpdateAuthorizationState) item).authorizationState.getConstructor()
+										== AuthorizationStateClosed.CONSTRUCTOR;
+							}
+							return false;
+						}))
+						.flatMapSequential(updates -> {
+							if (updates.succeeded()) {
+								return Flux.fromIterable(updates.value());
+							} else {
+								return Mono.fromCallable(() -> TdResult.failed(updates.error()).orElseThrow());
+							}
+						})
+						.flatMapSequential(update -> interceptUpdate(updatesMessageConsumer, update))
+						// Redirect errors to crash sink
+						.doOnError(error -> crash.tryEmitError(error))
+						.onErrorResume(ex -> {
+							logger.trace("Absorbing the error, the error has been published using the crash sink", ex);
+							return Mono.empty();
+						})
 
-				.doOnTerminate(updatesStreamEnd::tryEmitEmpty);
+						.doOnTerminate(updatesStreamEnd::tryEmitEmpty)
+				);
 	}
 
-	private Mono<TdApi.Object> interceptUpdate(TdApi.Object update) {
+	private Mono<TdApi.Object> interceptUpdate(MessageConsumer<TdResultList> updatesMessageConsumer, Object update) {
 		logger.trace("Received update {}", update.getClass().getSimpleName());
 		switch (update.getConstructor()) {
 			case TdApi.UpdateAuthorizationState.CONSTRUCTOR:
@@ -291,8 +295,10 @@ public class AsyncTdMiddleEventBusClient implements AsyncTdMiddle {
 				switch (updateAuthorizationState.authorizationState.getConstructor()) {
 					case TdApi.AuthorizationStateClosing.CONSTRUCTOR:
 						authStateClosing.tryEmitEmpty();
+						break;
 					case TdApi.AuthorizationStateClosed.CONSTRUCTOR:
 						return Mono.fromRunnable(() -> logger.info("Received AuthorizationStateClosed from tdlib"))
+								.then(updatesMessageConsumer.rxUnregister().as(MonoUtils::toMono))
 								.then(cluster.getEventBus().<EndSessionMessage>rxRequest(this.botAddress + ".read-binlog", EMPTY).as(MonoUtils::toMono))
 								.flatMap(latestBinlogMsg -> Mono.fromCallable(() -> latestBinlogMsg.body()).subscribeOn(Schedulers.parallel()))
 								.doOnNext(latestBinlog -> logger.info("Received binlog from server. Size: " + BinlogUtils.humanReadableByteCountBin(latestBinlog.binlog().length())))
@@ -310,21 +316,25 @@ public class AsyncTdMiddleEventBusClient implements AsyncTdMiddle {
 		var req = new ExecuteObject(executeDirectly, request);
 		return Mono
 				.firstWithSignal(
-						MonoUtils.castVoid(crash.asMono()),
+						MonoUtils
+								.castVoid(crash
+										.asMono()
+										.doOnSuccess(s -> logger
+												.debug("Failed request {} because the TDLib session was already crashed", request))
+								),
 						Mono
 								.fromRunnable(() -> logger.trace("Executing request {}", request))
 								.then(cluster.getEventBus().<TdResultMessage>rxRequest(botAddress + ".execute", req, deliveryOptions).as(MonoUtils::toMono))
 								.onErrorMap(ex -> ResponseError.newResponseError(request, botAlias, ex))
-								.<TdResult<T>>flatMap(resp -> Mono
-										.<TdResult<T>>fromCallable(() -> {
-											if (resp.body() == null) {
-												throw ResponseError.newResponseError(request, botAlias, new TdError(500, "Response is empty"));
-											} else {
-												return resp.body().toTdResult();
-											}
-										}).subscribeOn(Schedulers.parallel())
-								)
-								.doOnSuccess(s -> logger.trace("Executed request"))
+								.<TdResult<T>>handle((resp, sink) -> {
+									if (resp.body() == null) {
+										sink.error(ResponseError.newResponseError(request, botAlias, new TdError(500, "Response is empty")));
+									} else {
+										sink.next(resp.body().toTdResult());
+									}
+								})
+								.doOnSuccess(s -> logger.trace("Executed request {}", request))
+								.doOnError(ex -> logger.debug("Failed request {}: {}", req, ex))
 		)
 				.switchIfEmpty(Mono.defer(() -> Mono.fromCallable(() -> {
 					throw ResponseError.newResponseError(request, botAlias, new TdError(500, "Client is closed or response is empty"));
