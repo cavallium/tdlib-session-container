@@ -29,11 +29,12 @@ import java.util.function.Supplier;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.reactivestreams.Subscription;
+import org.warp.commonutils.concurrency.future.CompletableFutureUtils;
 import org.warp.commonutils.log.Logger;
 import org.warp.commonutils.log.LoggerFactory;
-import org.warp.commonutils.concurrency.future.CompletableFutureUtils;
 import reactor.core.CoreSubscriber;
 import reactor.core.publisher.Flux;
+import reactor.core.publisher.FluxSink.OverflowStrategy;
 import reactor.core.publisher.Mono;
 import reactor.core.publisher.MonoSink;
 import reactor.core.publisher.Sinks;
@@ -47,8 +48,6 @@ import reactor.core.scheduler.Scheduler;
 import reactor.core.scheduler.Schedulers;
 import reactor.util.concurrent.Queues;
 import reactor.util.context.Context;
-import reactor.util.function.Tuple2;
-import reactor.util.function.Tuples;
 
 public class MonoUtils {
 
@@ -375,53 +374,44 @@ public class MonoUtils {
 				);
 	}
 
-	public static <T> Mono<Tuple2<Mono<Void>, Flux<T>>> fromMessageConsumer(MessageConsumer<T> messageConsumer) {
-		return fromReplyableMessageConsumer(messageConsumer)
-				.map(tuple -> tuple.mapT2(msgs -> msgs.flatMapSequential(msg -> Mono
-						.fromCallable(msg::body)
-						.subscribeOn(Schedulers.parallel())))
-				);
+	public static <T> Flux<T> fromMessageConsumer(Mono<Void> onRegistered, MessageConsumer<T> messageConsumer) {
+		return fromReplyableMessageConsumer(onRegistered, messageConsumer).map(Message::body);
 	}
 
-	public static <T> Mono<Tuple2<Mono<Void>, Flux<Tuple2<Message<?>, T>>>> fromReplyableResolvedMessageConsumer(MessageConsumer<T> messageConsumer) {
-		return fromReplyableMessageConsumer(messageConsumer)
-				.map(tuple -> tuple.mapT2(msgs -> msgs.flatMapSequential(msg -> Mono
-						.fromCallable(() -> Tuples.<Message<?>, T>of(msg, msg.body()))
-						.subscribeOn(Schedulers.parallel())))
-				);
-	}
-
-	public static <T> Mono<Tuple2<Mono<Void>, Flux<Message<T>>>> fromReplyableMessageConsumer(MessageConsumer<T> messageConsumer) {
-		return Mono.<Tuple2<Mono<Void>, Flux<Message<T>>>>fromCallable(() -> {
-			Many<Message<T>> messages = Sinks.many().unicast().onBackpressureError();
-			Empty<Void> registrationRequested = Sinks.empty();
-			Empty<Void> registrationCompletion = Sinks.empty();
-			messageConsumer.endHandler(e -> {
-				messages.tryEmitComplete();
-				registrationCompletion.tryEmitEmpty();
+	public static <T> Flux<Message<T>> fromReplyableMessageConsumer(Mono<Void> onRegistered,
+			MessageConsumer<T> messageConsumer) {
+		Mono<Void> endMono = Mono.create(sink -> {
+			AtomicBoolean alreadyRequested = new AtomicBoolean();
+			sink.onRequest(n -> {
+				if (n > 0 && alreadyRequested.compareAndSet(false, true)) {
+					messageConsumer.endHandler(e -> sink.success());
+				}
 			});
-			messageConsumer.<Message<T>>handler(messages::tryEmitNext);
+		});
 
-			Flux<Message<T>> dataFlux = Flux
-					.concatDelayError(
-							messages.asFlux(),
-							messageConsumer
-									.rxUnregister()
-									.as(MonoUtils::<Message<T>>toMono)
-									.doOnSuccess(s -> logger.trace("Unregistered message consumer"))
-					)
-					.doOnSubscribe(s -> registrationRequested.tryEmitEmpty());
+		Mono<MessageConsumer<T>> registrationCompletionMono = Mono
+				.fromRunnable(() -> logger.trace("Waiting for consumer registration completion..."))
+				.<Void>then(messageConsumer.rxCompletionHandler().as(MonoUtils::toMono))
+				.doOnSuccess(s -> logger.trace("Consumer registered"))
+				.then(onRegistered)
+				.thenReturn(messageConsumer);
 
-			Mono<Void> registrationCompletionMono = Mono.empty()
-					.doOnSubscribe(s -> registrationRequested.tryEmitEmpty())
-					.then(registrationRequested.asMono())
-					.doOnSuccess(s -> logger.trace("Subscribed to registration completion mono"))
-					.doOnSuccess(s -> logger.trace("Waiting for consumer registration completion..."))
-					.<Void>then(messageConsumer.rxCompletionHandler().as(MonoUtils::toMono))
-					.doOnSuccess(s -> logger.trace("Consumer registered"))
-					.share();
-			return Tuples.of(registrationCompletionMono, dataFlux);
-		}).subscribeOn(Schedulers.boundedElastic());
+		messageConsumer.handler(s -> {
+			throw new IllegalStateException("Subscriber still didn't request any value!");
+		});
+
+		Flux<Message<T>> dataFlux = Flux
+				.push(sink -> sink.onRequest(n -> messageConsumer.handler(sink::next)), OverflowStrategy.ERROR);
+
+		Mono<Void> disposeMono = messageConsumer
+				.rxUnregister()
+				.as(MonoUtils::<Message<T>>toMono)
+				.doOnSuccess(s -> logger.trace("Unregistered message consumer"))
+				.then();
+
+		return Flux
+				.usingWhen(registrationCompletionMono, msgCons -> dataFlux, msgCons -> disposeMono)
+				.takeUntilOther(endMono);
 	}
 
 	public static Scheduler newBoundedSingle(String name) {

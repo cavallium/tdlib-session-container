@@ -30,7 +30,6 @@ import reactor.core.publisher.Sinks;
 import reactor.core.publisher.Sinks.One;
 import reactor.core.scheduler.Schedulers;
 import reactor.tools.agent.ReactorDebugAgent;
-import reactor.util.function.Tuple2;
 
 public class TDLibRemoteClient implements AutoCloseable {
 
@@ -168,21 +167,23 @@ public class TDLibRemoteClient implements AutoCloseable {
 				})
 				.single()
 				.flatMap(clusterManager -> {
-					MessageConsumer<StartSessionMessage> startBotConsumer = clusterManager.getEventBus().consumer("bots.start-bot");
-					return MonoUtils
-							.fromReplyableResolvedMessageConsumer(startBotConsumer)
-							.flatMap(tuple -> this.listenForStartBotsCommand(clusterManager, tuple.getT1(), tuple.getT2()));
+					MessageConsumer<StartSessionMessage> startBotConsumer
+							= clusterManager.getEventBus().consumer("bots.start-bot");
+
+					return this.listenForStartBotsCommand(
+							clusterManager,
+							MonoUtils.fromReplyableMessageConsumer(Mono.empty(), startBotConsumer)
+					);
 				})
 				.then();
 	}
 
 	private Mono<Void> listenForStartBotsCommand(TdClusterManager clusterManager,
-			Mono<Void> completion,
-			Flux<Tuple2<Message<?>, StartSessionMessage>> messages) {
+			Flux<Message<StartSessionMessage>> messages) {
 		return MonoUtils
 				.fromBlockingEmpty(() -> messages
 						.flatMapSequential(msg -> {
-							StartSessionMessage req = msg.getT2();
+							StartSessionMessage req = msg.body();
 							DeploymentOptions deploymentOptions = clusterManager
 									.newDeploymentOpts()
 									.setConfig(new JsonObject()
@@ -201,9 +202,9 @@ public class TDLibRemoteClient implements AutoCloseable {
 									.chooseBinlog(clusterManager.getVertx().fileSystem(), blPath, req.binlog(), req.binlogDate())
 									.then(BinlogUtils.cleanSessionPath(clusterManager.getVertx().fileSystem(), blPath, sessPath, mediaPath))
 									.then(clusterManager.getVertx().rxDeployVerticle(verticle, deploymentOptions).as(MonoUtils::toMono))
-									.then(MonoUtils.fromBlockingEmpty(() -> msg.getT1().reply(new byte[0])))
+									.then(MonoUtils.fromBlockingEmpty(() -> msg.reply(new byte[0])))
 									.onErrorResume(ex -> {
-										msg.getT1().fail(500, "Failed to deploy bot verticle: " + ex.getMessage());
+										msg.fail(500, "Failed to deploy bot verticle: " + ex.getMessage());
 										logger.error("Failed to deploy bot verticle", ex);
 										return Mono.empty();
 									});
@@ -213,8 +214,7 @@ public class TDLibRemoteClient implements AutoCloseable {
 								v -> {},
 								ex -> logger.error("Bots starter activity crashed. From now on, no new bots can be started anymore", ex)
 						)
-				)
-				.then(completion);
+				);
 	}
 
 	public static Path getSessionDirectory(long botId) {

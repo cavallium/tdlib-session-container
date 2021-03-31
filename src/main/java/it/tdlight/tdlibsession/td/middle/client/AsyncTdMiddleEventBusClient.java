@@ -226,68 +226,64 @@ public class AsyncTdMiddleEventBusClient implements AsyncTdMiddle {
 				.then(updates.asMono())
 				.publishOn(Schedulers.parallel())
 				.timeout(Duration.ofSeconds(30))
-				.flatMapMany(updatesMessageConsumer -> MonoUtils
-						.fromMessageConsumer(updatesMessageConsumer)
-						.flatMapMany(registration -> Mono
-								.fromRunnable(() -> logger.trace("Registering updates flux"))
-								.then(registration.getT1())
-								.doOnSuccess(s -> logger.trace("Registered updates flux"))
-								.doOnSuccess(s -> logger.trace("Sending ready-to-receive"))
-								.then(cluster.getEventBus().<byte[]>rxRequest(botAddress + ".ready-to-receive",
-										EMPTY,
-										deliveryOptionsWithTimeout
-								).as(MonoUtils::toMono))
-								.doOnSuccess(s -> logger.trace("Sent ready-to-receive, received reply"))
-								.doOnSuccess(s -> logger.trace("About to read updates flux"))
-								.thenMany(registration.getT2())
+				.doOnSuccess(s -> logger.trace("Registering updates flux"))
+				.flatMapMany(updatesMessageConsumer -> MonoUtils.fromMessageConsumer(Mono
+						.empty()
+						.doOnSuccess(s -> logger.trace("Sending ready-to-receive"))
+						.then(cluster.getEventBus().<byte[]>rxRequest(botAddress + ".ready-to-receive",
+								EMPTY,
+								deliveryOptionsWithTimeout
+						).as(MonoUtils::toMono))
+						.doOnSuccess(s -> logger.trace("Sent ready-to-receive, received reply"))
+						.doOnSuccess(s -> logger.trace("About to read updates flux"))
+						.then(), updatesMessageConsumer)
+				)
+				.takeUntilOther(Flux
+						.merge(
+								crash.asMono()
+										.onErrorResume(ex -> {
+											logger.error("TDLib crashed", ex);
+											return Mono.empty();
+										}),
+								pingFail.asMono()
+										.then(Mono.fromCallable(() -> {
+											var ex = new ConnectException("Server did not respond to ping");
+											ex.setStackTrace(new StackTraceElement[0]);
+											throw ex;
+										}).onErrorResume(ex -> MonoUtils.emitError(crash, ex)))
+										.takeUntilOther(Mono
+												.firstWithSignal(crash.asMono(), authStateClosing.asMono())
+												.onErrorResume(e -> Mono.empty())
+										)
 						)
-						.takeUntilOther(Flux
-								.merge(
-										crash.asMono()
-												.onErrorResume(ex -> {
-													logger.error("TDLib crashed", ex);
-													return Mono.empty();
-												}),
-										pingFail.asMono()
-												.then(Mono.fromCallable(() -> {
-													var ex = new ConnectException("Server did not respond to ping");
-													ex.setStackTrace(new StackTraceElement[0]);
-													throw ex;
-												}).onErrorResume(ex -> MonoUtils.emitError(crash, ex)))
-												.takeUntilOther(Mono
-														.firstWithSignal(crash.asMono(), authStateClosing.asMono())
-														.onErrorResume(e -> Mono.empty())
-												)
-								)
-								.doOnTerminate(() -> logger.trace("TakeUntilOther has been trigghered, the receive() flux will end"))
-						)
-						.takeUntil(a -> a.succeeded() && a.value().stream().anyMatch(item -> {
-							if (item.getConstructor() == UpdateAuthorizationState.CONSTRUCTOR) {
-								return ((UpdateAuthorizationState) item).authorizationState.getConstructor()
-										== AuthorizationStateClosed.CONSTRUCTOR;
-							}
-							return false;
-						}))
-						.flatMapSequential(updates -> {
-							if (updates.succeeded()) {
-								return Flux.fromIterable(updates.value());
-							} else {
-								return Mono.fromCallable(() -> TdResult.failed(updates.error()).orElseThrow());
-							}
-						})
-						.flatMapSequential(update -> interceptUpdate(updatesMessageConsumer, update))
-						// Redirect errors to crash sink
-						.doOnError(error -> crash.tryEmitError(error))
-						.onErrorResume(ex -> {
-							logger.trace("Absorbing the error, the error has been published using the crash sink", ex);
-							return Mono.empty();
-						})
+						.doOnTerminate(() -> logger.trace("TakeUntilOther has been trigghered, the receive() flux will end"))
+				)
+				.takeUntil(a -> a.succeeded() && a.value().stream().anyMatch(item -> {
+					if (item.getConstructor() == UpdateAuthorizationState.CONSTRUCTOR) {
+						return ((UpdateAuthorizationState) item).authorizationState.getConstructor()
+								== AuthorizationStateClosed.CONSTRUCTOR;
+					}
+					return false;
+				}))
+				.flatMapSequential(updates -> {
+					if (updates.succeeded()) {
+						return Flux.fromIterable(updates.value());
+					} else {
+						return Mono.fromCallable(() -> TdResult.failed(updates.error()).orElseThrow());
+					}
+				})
+				.concatMap(update -> interceptUpdate(update))
+				// Redirect errors to crash sink
+				.doOnError(error -> crash.tryEmitError(error))
+				.onErrorResume(ex -> {
+					logger.trace("Absorbing the error, the error has been published using the crash sink", ex);
+					return Mono.empty();
+				})
 
-						.doOnTerminate(updatesStreamEnd::tryEmitEmpty)
-				);
+				.doOnTerminate(updatesStreamEnd::tryEmitEmpty);
 	}
 
-	private Mono<TdApi.Object> interceptUpdate(MessageConsumer<TdResultList> updatesMessageConsumer, Object update) {
+	private Mono<TdApi.Object> interceptUpdate(Object update) {
 		logger.trace("Received update {}", update.getClass().getSimpleName());
 		switch (update.getConstructor()) {
 			case TdApi.UpdateAuthorizationState.CONSTRUCTOR:
@@ -298,7 +294,6 @@ public class AsyncTdMiddleEventBusClient implements AsyncTdMiddle {
 						break;
 					case TdApi.AuthorizationStateClosed.CONSTRUCTOR:
 						return Mono.fromRunnable(() -> logger.info("Received AuthorizationStateClosed from tdlib"))
-								.then(updatesMessageConsumer.rxUnregister().as(MonoUtils::toMono))
 								.then(cluster.getEventBus().<EndSessionMessage>rxRequest(this.botAddress + ".read-binlog", EMPTY).as(MonoUtils::toMono))
 								.flatMap(latestBinlogMsg -> Mono.fromCallable(() -> latestBinlogMsg.body()).subscribeOn(Schedulers.parallel()))
 								.doOnNext(latestBinlog -> logger.info("Received binlog from server. Size: " + BinlogUtils.humanReadableByteCountBin(latestBinlog.binlog().length())))
