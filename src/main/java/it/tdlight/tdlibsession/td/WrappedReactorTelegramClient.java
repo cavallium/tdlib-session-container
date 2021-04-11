@@ -2,6 +2,7 @@ package it.tdlight.tdlibsession.td;
 
 import it.tdlight.common.ReactiveTelegramClient;
 import it.tdlight.jni.TdApi;
+import it.tdlight.jni.TdApi.Error;
 import it.tdlight.utils.MonoUtils;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
@@ -24,15 +25,15 @@ public class WrappedReactorTelegramClient implements ReactorTelegramClient {
 	public Flux<TdApi.Object> receive() {
 		return Flux
 				.from(reactiveTelegramClient)
-				.concatMap(item -> {
+				.handle((item, sink) -> {
 					if (item.isUpdate()) {
-						return Mono.just(item.getUpdate());
+						sink.next(item.getUpdate());
 					} else if (item.isHandleException()) {
-						return Mono.error(item.getHandleException());
+						sink.error(item.getHandleException());
 					} else if (item.isUpdateException()) {
-						return Mono.error(item.getUpdateException());
+						sink.error(item.getUpdateException());
 					} else {
-						return Mono.error(new IllegalStateException("This shouldn't happen. Received unknown ReactiveItem type"));
+						sink.error(new IllegalStateException("This shouldn't happen. Received unknown ReactiveItem type"));
 					}
 				});
 	}
@@ -45,8 +46,16 @@ public class WrappedReactorTelegramClient implements ReactorTelegramClient {
 	 * @return a publisher that will emit exactly one item, or an error
 	 */
 	@Override
-	public Mono<TdApi.Object> send(TdApi.Function query) {
-		return Mono.from(reactiveTelegramClient.send(query)).single();
+	public <T extends TdApi.Object> Mono<T> send(TdApi.Function query) {
+		return Flux.from(reactiveTelegramClient.send(query)).single().handle((item, sink) -> {
+			if (item.getConstructor() == Error.CONSTRUCTOR) {
+				var error = ((TdApi.Error) item);
+				sink.error(new TdError(error.code, error.message));
+			} else {
+				//noinspection unchecked
+				sink.next((T) item);
+			}
+		});
 	}
 
 	/**
@@ -57,7 +66,8 @@ public class WrappedReactorTelegramClient implements ReactorTelegramClient {
 	 * @throws NullPointerException if query is null.
 	 */
 	@Override
-	public TdApi.Object execute(TdApi.Function query) {
-		return reactiveTelegramClient.execute(query);
+	public <T extends TdApi.Object> T execute(TdApi.Function query) {
+		//noinspection unchecked
+		return (T) reactiveTelegramClient.execute(query);
 	}
 }

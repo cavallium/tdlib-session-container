@@ -14,7 +14,6 @@ import it.tdlight.jni.TdApi.Function;
 import it.tdlight.jni.TdApi.Message;
 import it.tdlight.jni.TdApi.MessageSenderUser;
 import it.tdlight.jni.TdApi.MessageText;
-import it.tdlight.jni.TdApi.Object;
 import it.tdlight.jni.TdApi.Ok;
 import it.tdlight.jni.TdApi.SetLogTagVerbosityLevel;
 import it.tdlight.jni.TdApi.SetLogVerbosityLevel;
@@ -110,23 +109,29 @@ public class TestClient implements ReactorTelegramClient {
 	}
 
 	@Override
-	public Mono<Object> send(Function query) {
-		return Mono.fromCallable(() -> {
+	public <T extends TdApi.Object> Mono<T> send(Function query) {
+		return Mono.<T>fromCallable(() -> {
 			TdApi.Object result = executeCommon(query);
 			if (result != null) {
-				return result;
+				if (result.getConstructor() != Error.CONSTRUCTOR) {
+					//noinspection unchecked
+					return (T) result;
+				} else {
+					Error error = (Error) result;
+					throw new TdError(error.code, error.message);
+				}
 			}
 			throw new TdError(500, "Unsupported");
 		});
 	}
 
 	@Override
-	public TdApi.Object execute(Function query) {
+	public <T extends TdApi.Object> T execute(Function query) {
 		TdApi.Object result = executeCommon(query);
 		if (result != null) {
-			return result;
+			return (T) result;
 		}
-		return new Error(500, "Unsupported");
+		throw new TdError(500, "Unsupported");
 	}
 
 	@Nullable
