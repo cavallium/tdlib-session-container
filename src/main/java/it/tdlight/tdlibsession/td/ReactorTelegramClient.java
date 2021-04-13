@@ -11,7 +11,7 @@ public interface ReactorTelegramClient {
 
 	Flux<Object> receive();
 
-	<T extends TdApi.Object> Mono<T> send(TdApi.Function query);
+	Mono<TdApi.Object> send(TdApi.Function query);
 
-	<T extends TdApi.Object> T execute(TdApi.Function query);
+	TdApi.Object execute(TdApi.Function query);
 }

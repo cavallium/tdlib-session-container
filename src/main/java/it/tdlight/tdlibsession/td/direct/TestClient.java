@@ -8,7 +8,6 @@ import it.tdlight.jni.TdApi.AuthorizationStateClosing;
 import it.tdlight.jni.TdApi.AuthorizationStateReady;
 import it.tdlight.jni.TdApi.Close;
 import it.tdlight.jni.TdApi.ConnectionStateReady;
-import it.tdlight.jni.TdApi.Error;
 import it.tdlight.jni.TdApi.FormattedText;
 import it.tdlight.jni.TdApi.Function;
 import it.tdlight.jni.TdApi.Message;
@@ -24,7 +23,6 @@ import it.tdlight.jni.TdApi.UpdateAuthorizationState;
 import it.tdlight.jni.TdApi.UpdateConnectionState;
 import it.tdlight.jni.TdApi.UpdateNewMessage;
 import it.tdlight.tdlibsession.td.ReactorTelegramClient;
-import it.tdlight.tdlibsession.td.TdError;
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
@@ -109,29 +107,23 @@ public class TestClient implements ReactorTelegramClient {
 	}
 
 	@Override
-	public <T extends TdApi.Object> Mono<T> send(Function query) {
-		return Mono.<T>fromCallable(() -> {
+	public Mono<TdApi.Object> send(Function query) {
+		return Mono.fromCallable(() -> {
 			TdApi.Object result = executeCommon(query);
 			if (result != null) {
-				if (result.getConstructor() != Error.CONSTRUCTOR) {
-					//noinspection unchecked
-					return (T) result;
-				} else {
-					Error error = (Error) result;
-					throw new TdError(error.code, error.message);
-				}
+				return result;
 			}
-			throw new TdError(500, "Unsupported");
+			return new TdApi.Error(500, "Unsupported");
 		});
 	}
 
 	@Override
-	public <T extends TdApi.Object> T execute(Function query) {
+	public TdApi.Object execute(Function query) {
 		TdApi.Object result = executeCommon(query);
 		if (result != null) {
-			return (T) result;
+			return result;
 		}
-		throw new TdError(500, "Unsupported");
+		return new TdApi.Error(500, "Unsupported");
 	}
 
 	@Nullable

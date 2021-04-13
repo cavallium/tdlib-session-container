@@ -46,14 +46,13 @@ public class WrappedReactorTelegramClient implements ReactorTelegramClient {
 	 * @return a publisher that will emit exactly one item, or an error
 	 */
 	@Override
-	public <T extends TdApi.Object> Mono<T> send(TdApi.Function query) {
+	public Mono<TdApi.Object> send(TdApi.Function query) {
 		return Flux.from(reactiveTelegramClient.send(query)).single().handle((item, sink) -> {
 			if (item.getConstructor() == Error.CONSTRUCTOR) {
 				var error = ((TdApi.Error) item);
 				sink.error(new TdError(error.code, error.message));
 			} else {
-				//noinspection unchecked
-				sink.next((T) item);
+				sink.next(item);
 			}
 		});
 	}
@@ -66,8 +65,7 @@ public class WrappedReactorTelegramClient implements ReactorTelegramClient {
 	 * @throws NullPointerException if query is null.
 	 */
 	@Override
-	public <T extends TdApi.Object> T execute(TdApi.Function query) {
-		//noinspection unchecked
-		return (T) reactiveTelegramClient.execute(query);
+	public TdApi.Object execute(TdApi.Function query) {
+		return reactiveTelegramClient.execute(query);
 	}
 }
