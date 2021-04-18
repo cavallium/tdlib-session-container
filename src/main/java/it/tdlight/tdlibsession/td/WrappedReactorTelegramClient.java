@@ -2,7 +2,6 @@ package it.tdlight.tdlibsession.td;
 
 import it.tdlight.common.ReactiveTelegramClient;
 import it.tdlight.jni.TdApi;
-import it.tdlight.jni.TdApi.Error;
 import it.tdlight.utils.MonoUtils;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
@@ -47,14 +46,7 @@ public class WrappedReactorTelegramClient implements ReactorTelegramClient {
 	 */
 	@Override
 	public Mono<TdApi.Object> send(TdApi.Function query) {
-		return Flux.from(reactiveTelegramClient.send(query)).single().handle((item, sink) -> {
-			if (item.getConstructor() == Error.CONSTRUCTOR) {
-				var error = ((TdApi.Error) item);
-				sink.error(new TdError(error.code, error.message));
-			} else {
-				sink.next(item);
-			}
-		});
+		return Mono.from(reactiveTelegramClient.send(query)).single();
 	}
 
 	/**

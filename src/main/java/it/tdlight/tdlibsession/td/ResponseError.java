@@ -44,6 +44,7 @@ public class ResponseError extends IOException {
 		this.code = 500;
 		this.message = cause.getMessage();
 		this.cause = cause;
+		this.initCause(cause);
 	}
 
 	public ResponseError(@NotNull String tag, @NotNull String botName, @NotNull Throwable cause) {
@@ -53,6 +54,7 @@ public class ResponseError extends IOException {
 		this.code = 500;
 		this.message = cause.getMessage();
 		this.cause = cause;
+		this.initCause(cause);
 	}
 
 	public static ResponseError newResponseError(@NotNull Function function, @NotNull String botName, @NotNull TdApi.Error cause) {
