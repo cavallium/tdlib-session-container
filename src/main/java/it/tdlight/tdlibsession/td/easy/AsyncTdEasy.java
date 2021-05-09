@@ -73,7 +73,6 @@ public class AsyncTdEasy {
 		this.logName = logName;
 		this.logger = LoggerFactory.getLogger("AsyncTdEasy " + logName);
 
-		// todo: use Duration.ZERO instead of 10ms interval
 		this.incomingUpdates = td.receive()
 				.flatMapSequential(this::preprocessUpdates)
 				.flatMapSequential(update -> Mono.from(this.getState()).single().map(state -> new AsyncTdUpdateObj(state, update)))
@@ -304,13 +303,6 @@ public class AsyncTdEasy {
 	}
 
 	/**
-	 * Set if skip updates or not
-	 */
-	public Mono<Void> setSkipUpdates(boolean skipUpdates) { //todo: do this
-		return null;
-	}
-
-	/**
 	 * Closes the client gracefully by sending {@link TdApi.Close}.
 	 */
 	public Mono<Void> close() {
@@ -347,22 +339,6 @@ public class AsyncTdEasy {
 					logger.info("AsyncTdEasy closed successfully");
 				})
 				.then();
-	}
-
-	/**
-	 *
-	 * @param timeout Timeout in seconds when reading data
-	 */
-	public void setReadTimeout(int timeout) {
-		//todo: do this
-	}
-
-	/**
-	 *
-	 * @param timeout Timeout in seconds when listening methods or connecting
-	 */
-	public void setMethodTimeout(int timeout) {
-		//todo: do this
 	}
 
 	private Mono<Update> catchErrors(Object obj) {

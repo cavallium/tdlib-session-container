@@ -244,14 +244,17 @@ public class MonoUtils {
 		}));
 	}
 
+	@NotNull
 	public static <T> Mono<T> toMono(Single<T> single) {
 		return Mono.from(single.toFlowable());
 	}
 
+	@NotNull
 	public static <T> Mono<T> toMono(Maybe<T> single) {
 		return Mono.from(single.toFlowable());
 	}
 
+	@NotNull
 	public static <T> Mono<T> toMono(Completable completable) {
 		return Mono.from(completable.toFlowable());
 	}
