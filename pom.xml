@@ -171,6 +171,11 @@
           <artifactId>moshi</artifactId>
           <version>1.12.0</version>
         </dependency>
+        <dependency>
+          <groupId>dev.zacsweers.moshix</groupId>
+          <artifactId>moshi-records-reflect</artifactId>
+          <version>0.11.0</version>
+        </dependency>
     </dependencies>
     <build>
         <resources>
