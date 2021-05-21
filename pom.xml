@@ -107,12 +107,12 @@
         <dependency>
             <groupId>io.projectreactor</groupId>
             <artifactId>reactor-core</artifactId>
-            <version>3.4.5</version>
+            <version>3.4.6</version>
         </dependency>
         <dependency>
             <groupId>io.projectreactor</groupId>
             <artifactId>reactor-tools</artifactId>
-            <version>3.4.5</version>
+            <version>3.4.6</version>
         </dependency>
         <dependency>
             <groupId>com.akaita.java</groupId>
