@@ -198,7 +198,7 @@ public class AsyncTdMiddleEventBusServer extends AbstractVerticle {
 						readyToReceiveConsumer.endHandler(h -> sink.complete());
 					})
 					.take(1)
-					.limitRequest(1)
+					.take(1, true)
 					.single()
 					.doOnNext(s -> logger.trace("Received ready-to-receive request from client"))
 					.flatMap(msg -> this.pipeFlux
