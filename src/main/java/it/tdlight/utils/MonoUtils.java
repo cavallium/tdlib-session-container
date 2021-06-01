@@ -20,6 +20,7 @@ import it.tdlight.tdlibsession.td.TdError;
 import it.tdlight.tdlibsession.td.TdResult;
 import java.time.Duration;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Queue;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CompletableFuture;
@@ -428,6 +429,10 @@ public class MonoUtils {
 				Integer.MAX_VALUE,
 				daemon
 		);
+	}
+
+	public static <R> Mono<Optional<R>> toOptional(Mono<R> mono) {
+		return mono.map(Optional::of).defaultIfEmpty(Optional.empty());
 	}
 
 	public static class SinkRWStream<T> implements io.vertx.core.streams.WriteStream<T>, io.vertx.core.streams.ReadStream<T> {
