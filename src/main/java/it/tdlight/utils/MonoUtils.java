@@ -700,7 +700,9 @@ public class MonoUtils {
 
 				@Override
 				public void onNext(T t) {
-					handler.handle(t);
+					if (handler != null) {
+						handler.handle(t);
+					}
 					if (!fetchMode.get()) {
 						readCoreSubscription.request(1);
 					}
@@ -713,7 +715,9 @@ public class MonoUtils {
 
 				@Override
 				public void onComplete() {
-					readEndHandler.handle(null);
+					if (readEndHandler != null) {
+						readEndHandler.handle(null);
+					}
 				}
 			});
 			return this;
