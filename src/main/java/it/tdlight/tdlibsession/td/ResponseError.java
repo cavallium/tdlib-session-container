@@ -122,6 +122,10 @@ public class ResponseError extends IOException {
 		return code;
 	}
 
+	public String getTag() {
+		return tag;
+	}
+
 	@NotNull
 	public String getErrorMessage() {
 		return message;
@@ -133,7 +137,8 @@ public class ResponseError extends IOException {
 				.replace("\n", " ")
 				.replace("\t", "")
 				.replace("  ", "")
-				.replace(" = ", "=");
+				.replace(" = ", "=")
+				.trim();
 	}
 
 	@Override
