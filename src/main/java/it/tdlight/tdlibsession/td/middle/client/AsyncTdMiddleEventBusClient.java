@@ -171,7 +171,7 @@ public class AsyncTdMiddleEventBusClient implements AsyncTdMiddle {
 									.<byte[]>rxRequest(botAddress + ".ping", EMPTY, pingDeliveryOptions)
 									.as(MonoUtils::toMono);
 						})
-						.flatMap(msg -> Mono.fromCallable(() -> msg.body()).subscribeOn(Schedulers.boundedElastic()))
+						.flatMap(msg -> Mono.fromCallable(msg::body).subscribeOn(Schedulers.boundedElastic()))
 						.repeatWhen(l -> l.delayElements(Duration.ofSeconds(10)).takeWhile(x -> true))
 						.takeUntilOther(Mono.firstWithSignal(this.updatesStreamEnd.asMono().doOnTerminate(() -> {
 							logger.trace("About to kill pinger because updates stream ended");
@@ -295,7 +295,7 @@ public class AsyncTdMiddleEventBusClient implements AsyncTdMiddle {
 					case TdApi.AuthorizationStateClosed.CONSTRUCTOR:
 						return Mono.fromRunnable(() -> logger.info("Received AuthorizationStateClosed from tdlib"))
 								.then(cluster.getEventBus().<EndSessionMessage>rxRequest(this.botAddress + ".read-binlog", EMPTY).as(MonoUtils::toMono))
-								.flatMap(latestBinlogMsg -> Mono.fromCallable(() -> latestBinlogMsg.body()).subscribeOn(Schedulers.parallel()))
+								.flatMap(latestBinlogMsg -> Mono.fromCallable(latestBinlogMsg::body).subscribeOn(Schedulers.parallel()))
 								.doOnNext(latestBinlog -> logger.info("Received binlog from server. Size: " + BinlogUtils.humanReadableByteCountBin(latestBinlog.binlog().length())))
 								.flatMap(latestBinlog -> this.saveBinlog(latestBinlog.binlog()))
 								.doOnSuccess(s -> logger.info("Overwritten binlog from server"))
