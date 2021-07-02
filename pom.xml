@@ -148,7 +148,7 @@
         <dependency>
             <groupId>it.tdlight</groupId>
             <artifactId>tdlight-java</artifactId>
-            <version>[4.171.126,)</version>
+            <version>[4.171.128,)</version>
         </dependency>
         <dependency>
             <groupId>it.cavallium</groupId>
