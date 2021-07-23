@@ -40,9 +40,11 @@ public class TdClusterManager {
 	private final ClusterManager mgr;
 	private final VertxOptions vertxOptions;
 	private final Vertx vertx;
+	private final boolean isMaster;
 
 	@SuppressWarnings({"unchecked", "rawtypes"})
-	public TdClusterManager(ClusterManager mgr, VertxOptions vertxOptions, Vertx vertx) {
+	public TdClusterManager(ClusterManager mgr, VertxOptions vertxOptions, Vertx vertx, boolean isMaster) {
+		this.isMaster = isMaster;
 		this.mgr = mgr;
 		this.vertxOptions = vertxOptions;
 		this.vertx = vertx;
@@ -78,7 +80,7 @@ public class TdClusterManager {
 			}
 			return of(cfg,
 					vertxOptions,
-					keyStoreOptions, trustStoreOptions, masterHostname, netInterface, port, nodesAddresses);
+					keyStoreOptions, trustStoreOptions, masterHostname, netInterface, port, nodesAddresses, true);
 		} else {
 			return Mono.error(new AlreadyBoundException());
 		}
@@ -96,7 +98,7 @@ public class TdClusterManager {
 				} else {
 					cfg = null;
 				}
-				return of(cfg, vertxOptions, keyStoreOptions, trustStoreOptions, masterHostname, netInterfaceF, port, nodesAddresses);
+				return of(cfg, vertxOptions, keyStoreOptions, trustStoreOptions, masterHostname, netInterfaceF, port, nodesAddresses, false);
 			} else {
 				return Mono.error(new AlreadyBoundException());
 			}
@@ -110,7 +112,8 @@ public class TdClusterManager {
 			String masterHostname,
 			String netInterface,
 			int port,
-			Set<String> nodesAddresses) {
+			Set<String> nodesAddresses,
+			boolean isMaster) {
 		ClusterManager mgr;
 		if (cfg != null) {
 			cfg.getNetworkConfig().setPortCount(1);
@@ -191,7 +194,7 @@ public class TdClusterManager {
 					}
 				})
 				.flatMap(vertx -> Mono
-						.fromCallable(() -> new TdClusterManager(mgr, vertxOptions, vertx))
+						.fromCallable(() -> new TdClusterManager(mgr, vertxOptions, vertx, isMaster))
 						.subscribeOn(Schedulers.boundedElastic())
 				);
 	}
@@ -275,5 +278,13 @@ public class TdClusterManager {
 
 	public SharedData getSharedData() {
 		return vertx.sharedData();
+	}
+
+	public Mono<Void> close() {
+		return Mono.from(vertx.rxClose().toFlowable()).then(Mono.fromRunnable(() -> {
+			if (isMaster) {
+				definedMasterCluster.set(false);
+			}
+		}));
 	}
 }
