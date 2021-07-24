@@ -57,6 +57,11 @@
                 <type>pom</type>
                 <scope>import</scope>
             </dependency>
+          <dependency>
+            <groupId>it.unimi.dsi</groupId>
+            <artifactId>fastutil</artifactId>
+            <version>8.5.2</version>
+          </dependency>
         </dependencies>
     </dependencyManagement>
     <dependencies>
@@ -164,7 +169,6 @@
         <dependency>
             <groupId>it.unimi.dsi</groupId>
             <artifactId>fastutil-core</artifactId>
-            <version>8.5.4</version>
         </dependency>
         <dependency>
           <groupId>com.squareup.moshi</groupId>
