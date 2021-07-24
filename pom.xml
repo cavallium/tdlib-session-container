@@ -148,7 +148,7 @@
         <dependency>
             <groupId>it.tdlight</groupId>
             <artifactId>tdlight-java</artifactId>
-            <version>[4.171.134,)</version>
+            <version>[4.171.136,)</version>
         </dependency>
         <dependency>
             <groupId>it.cavallium</groupId>
@@ -163,7 +163,7 @@
 
         <dependency>
             <groupId>it.unimi.dsi</groupId>
-            <artifactId>fastutil</artifactId>
+            <artifactId>fastutil-core</artifactId>
             <version>8.5.4</version>
         </dependency>
         <dependency>
