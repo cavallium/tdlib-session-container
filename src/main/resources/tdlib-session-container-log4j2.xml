@@ -7,7 +7,7 @@
      <http://logging.apache.org/log4j/2.x/manual/appenders.html>.
 -->
 
-<Configuration status="DEBUG">
+<Configuration>
   <Appenders>
 
     <!-- DEFAULT APPENDERS -->
