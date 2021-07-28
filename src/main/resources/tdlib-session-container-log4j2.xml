@@ -28,9 +28,9 @@
   </Appenders>
   <Loggers>
     <Logger name="com.hazelcast.internal.diagnostics.HealthMonitor" level="WARN"/>
-    <Logger name="it.cavallium.dbengine.database.disk.LLLocalDictionary" level="FINE"/>
-    <Logger name="it.cavallium.dbengine.database.disk.LLLocalKeyValueDatabase" level="FINE"/>
-    <Logger name="it.cavallium.dbengine.database.disk.LLLocalLuceneIndex" level="FINE"/>
+    <Logger name="it.cavallium.dbengine.database.disk.LLLocalDictionary" level="TRACE"/>
+    <Logger name="it.cavallium.dbengine.database.disk.LLLocalKeyValueDatabase" level="TRACE"/>
+    <Logger name="it.cavallium.dbengine.database.disk.LLLocalLuceneIndex" level="TRACE"/>
     <Logger name="com.hazelcast" level="INFO"/>
     <Root level="DEBUG">
       <filters>
