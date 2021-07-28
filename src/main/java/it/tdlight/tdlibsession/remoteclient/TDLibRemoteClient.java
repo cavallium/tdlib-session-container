@@ -7,10 +7,12 @@ import io.vertx.core.net.JksOptions;
 import io.vertx.reactivex.core.eventbus.Message;
 import io.vertx.reactivex.core.eventbus.MessageConsumer;
 import it.tdlight.common.Init;
+import it.tdlight.common.Log;
 import it.tdlight.common.utils.CantLoadLibrary;
 import it.tdlight.tdlibsession.td.middle.StartSessionMessage;
 import it.tdlight.tdlibsession.td.middle.TdClusterManager;
 import it.tdlight.tdlibsession.td.middle.server.AsyncTdMiddleEventBusServer;
+import it.tdlight.tdnative.NativeLog;
 import it.tdlight.utils.BinlogUtils;
 import it.tdlight.utils.MonoUtils;
 import java.net.URISyntaxException;
@@ -74,6 +76,8 @@ public class TDLibRemoteClient implements AutoCloseable {
 
 		try {
 			Init.start();
+			//noinspection deprecation
+			Log.setVerbosityLevel(2);
 		} catch (CantLoadLibrary ex) {
 			throw new RuntimeException(ex);
 		}
