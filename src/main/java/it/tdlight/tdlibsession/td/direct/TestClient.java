@@ -10,6 +10,7 @@ import it.tdlight.jni.TdApi.Close;
 import it.tdlight.jni.TdApi.ConnectionStateReady;
 import it.tdlight.jni.TdApi.FormattedText;
 import it.tdlight.jni.TdApi.Function;
+import it.tdlight.jni.TdApi.GetMe;
 import it.tdlight.jni.TdApi.Message;
 import it.tdlight.jni.TdApi.MessageSenderUser;
 import it.tdlight.jni.TdApi.MessageText;
@@ -22,6 +23,7 @@ import it.tdlight.jni.TdApi.TextEntity;
 import it.tdlight.jni.TdApi.UpdateAuthorizationState;
 import it.tdlight.jni.TdApi.UpdateConnectionState;
 import it.tdlight.jni.TdApi.UpdateNewMessage;
+import it.tdlight.jni.TdApi.User;
 import it.tdlight.tdlibsession.td.ReactorTelegramClient;
 import java.util.ArrayList;
 import java.util.Iterator;
@@ -74,14 +76,17 @@ public class TestClient implements ReactorTelegramClient {
 		return Flux.fromIterable(features).flatMap(featureName -> {
 			switch (featureName) {
 				case "status-update":
-					return Flux.<TdApi.Object>just(
-							new UpdateAuthorizationState(new AuthorizationStateReady()),
-							new UpdateConnectionState(new ConnectionStateReady())
-					).mergeWith(closedSink
-							.asMono()
-							.thenMany(Flux.just(new UpdateAuthorizationState(new AuthorizationStateClosing()),
-									new UpdateAuthorizationState(new AuthorizationStateClosed())
-							)));
+					return Flux
+							.<TdApi.Object>just(
+									new UpdateAuthorizationState(new AuthorizationStateReady()),
+									new UpdateConnectionState(new ConnectionStateReady())
+							)
+							.mergeWith(closedSink
+									.asMono()
+									.thenMany(Flux.just(new UpdateAuthorizationState(new AuthorizationStateClosing()),
+											new UpdateAuthorizationState(new AuthorizationStateClosed())
+									))
+							);
 				case "infinite-messages":
 					var randomSenders = features.contains("random-senders");
 					var randomChats = features.contains("random-chats");
@@ -134,6 +139,13 @@ public class TestClient implements ReactorTelegramClient {
 			case SetTdlibParameters.CONSTRUCTOR:
 			case SetOption.CONSTRUCTOR:
 				return new Ok();
+			case GetMe.CONSTRUCTOR:
+				var user = new User();
+				user.id = 420;
+				user.firstName = "Test";
+				user.lastName = "Test";
+				user.phoneNumber = "+77";
+				return user;
 			case Close.CONSTRUCTOR:
 				closedSink.tryEmitEmpty();
 				return new Ok();
