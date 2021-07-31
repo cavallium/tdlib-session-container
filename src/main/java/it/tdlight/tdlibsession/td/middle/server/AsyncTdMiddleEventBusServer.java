@@ -340,7 +340,7 @@ public class AsyncTdMiddleEventBusServer extends AbstractVerticle {
 					}
 				}))
 				.limitRate(Math.max(1, tdOptions.getEventsSize()))
-				.transform(normal -> new BufferTimeOutPublisher<>(normal, Math.max(1, tdOptions.getEventsSize()), local ? Duration.ofMillis(1) : Duration.ofMillis(100)))
+				.transform(normal -> new BufferTimeOutPublisher<>(normal, Math.max(1, tdOptions.getEventsSize()), local ? Duration.ofMillis(1) : Duration.ofMillis(100), false))
 				//.bufferTimeout(Math.max(1, tdOptions.getEventsSize()), local ? Duration.ofMillis(1) : Duration.ofMillis(100))
 				//.map(List::of)
 				.limitRate(Math.max(1, tdOptions.getEventsSize()))

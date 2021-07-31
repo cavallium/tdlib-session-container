@@ -16,6 +16,7 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.ReentrantLock;
+import reactor.core.CoreSubscriber;
 
 @SuppressWarnings("ReactiveStreamsPublisherImplementation")
 public class BufferTimeOutPublisher<T> implements Publisher<List<T>> {
@@ -25,23 +26,26 @@ public class BufferTimeOutPublisher<T> implements Publisher<List<T>> {
 	private final Publisher<T> source;
 	private final int size;
 	private final long duration;
+	private final boolean discardOnError;
 
-	public BufferTimeOutPublisher(Publisher<T> source, int size, Duration duration) {
+	public BufferTimeOutPublisher(Publisher<T> source, int size, Duration duration, boolean discardOnError) {
 		this.source = source;
 		this.size = size;
 		this.duration = duration.toMillis();
+		this.discardOnError = discardOnError;
 	}
 
 	@Override
 	public void subscribe(Subscriber<? super List<T>> subscriber) {
-		subscriber.onSubscribe(new BufferTimeOutSubscription<T>(source, subscriber, size, duration));
+		subscriber.onSubscribe(new BufferTimeOutSubscription<T>(source, subscriber, size, duration, discardOnError));
 	}
 
-	protected static class BufferTimeOutSubscription<T> implements Subscription, Subscriber<T> {
+	protected static class BufferTimeOutSubscription<T> implements Subscription, CoreSubscriber<T> {
 
 		private final Subscriber<? super List<T>> subscriber;
 		private final int size;
 		private final long duration;
+		private final boolean discardOnError;
 		private Subscription subscription;
 
 		private final ReentrantLock lock = new ReentrantLock();
@@ -59,10 +63,12 @@ public class BufferTimeOutPublisher<T> implements Publisher<List<T>> {
 		public BufferTimeOutSubscription(Publisher<T> source,
 				Subscriber<? super List<T>> subscriber,
 				int size,
-				long duration) {
+				long duration,
+				boolean discardOnError) {
 			this.subscriber = subscriber;
 			this.size = size;
 			this.duration = duration;
+			this.discardOnError = discardOnError;
 			this.buffer = new ArrayList<>(size);
 			source.subscribe(this);
 		}
@@ -144,8 +150,19 @@ public class BufferTimeOutPublisher<T> implements Publisher<List<T>> {
 
 		@Override
 		public void onError(Throwable t) {
-			scheduledFuture.cancel(false);
-			subscriber.onError(t);
+			if (discardOnError) {
+				scheduledFuture.cancel(false);
+				subscriber.onError(t);
+			} else {
+				lock.lock();
+				try {
+					checkSend();
+					scheduledFuture.cancel(false);
+					subscriber.onError(t);
+				} finally {
+					lock.unlock();
+				}
+			}
 		}
 
 		@Override
