@@ -1,9 +1,15 @@
 package it.tdlight.tdlibsession.td;
 
+import it.tdlight.common.ReactiveItem;
 import it.tdlight.common.ReactiveTelegramClient;
 import it.tdlight.jni.TdApi;
 import it.tdlight.utils.MonoUtils;
+import org.jetbrains.annotations.NotNull;
+import org.reactivestreams.Subscriber;
+import org.reactivestreams.Subscription;
+import reactor.core.CoreSubscriber;
 import reactor.core.publisher.Flux;
+import reactor.core.publisher.FluxSink.OverflowStrategy;
 import reactor.core.publisher.Mono;
 
 public class WrappedReactorTelegramClient implements ReactorTelegramClient {
@@ -23,7 +29,28 @@ public class WrappedReactorTelegramClient implements ReactorTelegramClient {
 	@Override
 	public Flux<TdApi.Object> receive() {
 		return Flux
-				.from(reactiveTelegramClient)
+				.<ReactiveItem>create(sink -> reactiveTelegramClient.subscribe(new CoreSubscriber<>() {
+					@Override
+					public void onSubscribe(@NotNull Subscription s) {
+						sink.onCancel(s::cancel);
+						sink.onRequest(s::request);
+					}
+
+					@Override
+					public void onNext(ReactiveItem reactiveItem) {
+						sink.next(reactiveItem);
+					}
+
+					@Override
+					public void onError(Throwable t) {
+						sink.error(t);
+					}
+
+					@Override
+					public void onComplete() {
+						sink.complete();
+					}
+				}), OverflowStrategy.BUFFER)
 				.handle((item, sink) -> {
 					if (item.isUpdate()) {
 						sink.next(item.getUpdate());
