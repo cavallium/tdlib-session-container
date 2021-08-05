@@ -33,6 +33,7 @@ import org.jetbrains.annotations.Nullable;
 import org.reactivestreams.Publisher;
 import org.reactivestreams.Subscription;
 import org.warp.commonutils.concurrency.future.CompletableFutureUtils;
+import org.warp.commonutils.functional.IOConsumer;
 import org.warp.commonutils.log.Logger;
 import org.warp.commonutils.log.LoggerFactory;
 import reactor.core.CoreSubscriber;
@@ -287,4 +288,15 @@ public class MonoUtils {
 				.defaultIfEmpty(false);
 	}
 
+	@FunctionalInterface
+	public interface VoidCallable {
+		void call() throws Exception;
+	}
+
+	public static Mono<?> fromVoidCallable(VoidCallable callable) {
+		return Mono.fromCallable(() -> {
+			callable.call();
+			return null;
+		});
+	}
 }
