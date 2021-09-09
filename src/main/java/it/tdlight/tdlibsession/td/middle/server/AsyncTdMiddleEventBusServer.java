@@ -107,7 +107,6 @@ public class AsyncTdMiddleEventBusServer extends AbstractVerticle {
 							}
 							return onSuccessfulStartRequest(td, botAddress, botAlias, botId, local);
 						})
-						.flatMap(voidMono -> voidMono.hide().subscribeOn(Schedulers.boundedElastic()))
 						.doOnSuccess(s -> logger.trace("Stated verticle"))
 				);
 	}

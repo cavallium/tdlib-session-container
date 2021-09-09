@@ -120,6 +120,6 @@ public class AsyncTdDirectImpl implements AsyncTdDirect {
 					// Try to emit false, so that if it has not been closed from tdlib, now it is explicitly false.
 					closedFromTd.tryEmitValue(false);
 				})
-				.subscribeOn(Schedulers.parallel());
+				.subscribeOn(Schedulers.boundedElastic());
 	}
 }

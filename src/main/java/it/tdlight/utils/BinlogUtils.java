@@ -38,8 +38,7 @@ public class BinlogUtils {
 				)
 				// Open file
 				.map(x -> new BinlogAsyncFile(vertxFilesystem, path))
-				.single()
-				.publishOn(Schedulers.boundedElastic());
+				.single();
 	}
 
 	public static Mono<Void> saveBinlog(BinlogAsyncFile binlog, Buffer data) {
@@ -66,8 +65,7 @@ public class BinlogUtils {
 						.then(retrieveBinlog(vertxFilesystem, binlogPath))
 				)
 				.single()
-				.then()
-				.publishOn(Schedulers.boundedElastic());
+				.then();
 	}
 
 	public static Mono<Void> cleanSessionPath(FileSystem vertxFilesystem,
@@ -87,8 +85,7 @@ public class BinlogUtils {
 						.flatMap(file -> vertxFilesystem.rxDeleteRecursive(file, true).as(MonoUtils::toMono))
 						.onErrorResume(ex -> Mono.empty())
 						.then()
-				)
-				.publishOn(Schedulers.boundedElastic());
+				);
 	}
 
 	public static String humanReadableByteCountBin(long bytes) {
@@ -126,7 +123,6 @@ public class BinlogUtils {
 					var opts = new DeliveryOptions().setLocalOnly(local).setSendTimeout(Duration.ofSeconds(10).toMillis());
 					tuple.getT1().reply(new EndSessionMessage(botId, tuple.getT2()), opts);
 				})
-				.then()
-				.publishOn(Schedulers.boundedElastic());
+				.then();
 	}
 }
