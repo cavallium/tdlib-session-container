@@ -105,10 +105,28 @@ public class AsyncTdMiddleEventBusServer extends AbstractVerticle {
 							if (this.td.tryEmitValue(td).isFailure()) {
 								throw new IllegalStateException("Failed to set td instance");
 							}
-							return onSuccessfulStartRequest(td, botAddress, botAlias, botId, local);
+							return new OnSuccessfulStartRequestInfo(td, botAddress, botAlias, botId, local);
 						})
+						.flatMap(r -> onSuccessfulStartRequest(r.td, r.botAddress, r.botAlias, r.botId, r.local))
 						.doOnSuccess(s -> logger.trace("Stated verticle"))
 				);
+	}
+
+	private static class OnSuccessfulStartRequestInfo {
+
+		public final AsyncTdDirectImpl td;
+		public final String botAddress;
+		public final String botAlias;
+		public final int botId;
+		public final boolean local;
+
+		public OnSuccessfulStartRequestInfo(AsyncTdDirectImpl td, String botAddress, String botAlias, int botId, boolean local) {
+			this.td = td;
+			this.botAddress = botAddress;
+			this.botAlias = botAlias;
+			this.botId = botId;
+			this.local = local;
+		}
 	}
 
 	private Mono<Void> onSuccessfulStartRequest(AsyncTdDirectImpl td, String botAddress, String botAlias, int botId, boolean local) {
