@@ -281,7 +281,7 @@ public class TdEasySettings {
 			return this;
 		}
 
-		public FatalErrorHandler getFatalErrorHandler() {
+		public @Nullable FatalErrorHandler getFatalErrorHandler() {
 			return fatalErrorHandler;
 		}
 

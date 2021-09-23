@@ -5,6 +5,7 @@ package it.tdlight.utils;
  */
 
 import java.time.Duration;
+import org.jetbrains.annotations.NotNull;
 import org.reactivestreams.Publisher;
 import org.reactivestreams.Subscriber;
 import org.reactivestreams.Subscription;
@@ -99,7 +100,7 @@ public class BufferTimeOutPublisher<T> implements Publisher<List<T>> {
 
 		// upstream
 		@Override
-		public void onSubscribe(Subscription s) {
+		public void onSubscribe(@NotNull Subscription s) {
 			this.subscription = s;
 			scheduledFuture = EXECUTOR.scheduleAtFixedRate(this::timeout, 0, this.duration, TimeUnit.MILLISECONDS);
 		}

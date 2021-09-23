@@ -18,6 +18,7 @@ import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.atomic.AtomicReferenceFieldUpdater;
+import org.jetbrains.annotations.NotNull;
 import org.reactivestreams.Subscription;
 import org.warp.commonutils.log.Logger;
 import org.warp.commonutils.log.LoggerFactory;
@@ -52,7 +53,7 @@ public abstract class BatchSubscriber<T> implements CoreSubscriber<T> {
 	}
 
 	@Override
-	public void onSubscribe(Subscription s) {
+	public void onSubscribe(@NotNull Subscription s) {
 		setOnce(S, this, s);
 	}
 
