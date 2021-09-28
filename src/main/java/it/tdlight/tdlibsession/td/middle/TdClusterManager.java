@@ -20,6 +20,7 @@ import io.vertx.reactivex.core.eventbus.MessageConsumer;
 import io.vertx.reactivex.core.shareddata.SharedData;
 import io.vertx.spi.cluster.hazelcast.HazelcastClusterManager;
 import it.tdlight.common.ConstructorDetector;
+import it.tdlight.jni.TdApi;
 import it.tdlight.utils.MonoUtils;
 import java.nio.channels.AlreadyBoundException;
 import java.util.ArrayList;
@@ -58,16 +59,21 @@ public class TdClusterManager {
 					.registerDefaultCodec(TdResultMessage.class, new TdResultMessageCodec())
 					.registerDefaultCodec(StartSessionMessage.class, new StartSessionMessageCodec())
 					.registerDefaultCodec(EndSessionMessage.class, new EndSessionMessageCodec());
-			var constructors = ConstructorDetector.getTDConstructorsUnsafe();
-			if (constructors != null) {
-				for (Class<?> value : constructors.values()) {
-					vertx.eventBus().getDelegate().registerDefaultCodec(value, new TdMessageCodec(value));
+			for (Class<?> declaredClass : TdApi.class.getDeclaredClasses()) {
+				if (declaredClass.isAssignableFrom(declaredClass)) {
+					vertx.eventBus().getDelegate().registerDefaultCodec(declaredClass, new TdMessageCodec(declaredClass));
 				}
 			}
 		}
 	}
 
-	public static Mono<TdClusterManager> ofMaster(@Nullable JksOptions keyStoreOptions, @Nullable JksOptions trustStoreOptions, boolean onlyLocal, String masterHostname, String netInterface, int port, Set<String> nodesAddresses) {
+	public static Mono<TdClusterManager> ofMaster(@Nullable JksOptions keyStoreOptions,
+			@Nullable JksOptions trustStoreOptions,
+			boolean onlyLocal,
+			String masterHostname,
+			String netInterface,
+			int port,
+			Set<String> nodesAddresses) {
 		if (definedMasterCluster.compareAndSet(false, true)) {
 			var vertxOptions = new VertxOptions();
 			netInterface = onlyLocal ? "127.0.0.1" : netInterface;
@@ -86,7 +92,13 @@ public class TdClusterManager {
 		}
 	}
 
-	public static Mono<TdClusterManager> ofNodes(@Nullable JksOptions keyStoreOptions, @Nullable JksOptions trustStoreOptions, boolean onlyLocal, String masterHostname, String netInterface, int port, Set<String> nodesAddresses) {
+	public static Mono<TdClusterManager> ofNodes(@Nullable JksOptions keyStoreOptions,
+			@Nullable JksOptions trustStoreOptions,
+			boolean onlyLocal,
+			String masterHostname,
+			String netInterface,
+			int port,
+			Set<String> nodesAddresses) {
 		return Mono.defer(() -> {
 			if (definedNodesCluster.compareAndSet(false, true)) {
 				var vertxOptions = new VertxOptions();
@@ -98,7 +110,8 @@ public class TdClusterManager {
 				} else {
 					cfg = null;
 				}
-				return of(cfg, vertxOptions, keyStoreOptions, trustStoreOptions, masterHostname, netInterfaceF, port, nodesAddresses, false);
+				return of(cfg, vertxOptions, keyStoreOptions, trustStoreOptions, masterHostname, netInterfaceF, port,
+						nodesAddresses, false);
 			} else {
 				return Mono.error(new AlreadyBoundException());
 			}
