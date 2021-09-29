@@ -29,6 +29,7 @@ import it.tdlight.utils.BufferTimeOutPublisher;
 import it.tdlight.utils.MonoUtils;
 import java.net.ConnectException;
 import java.time.Duration;
+import java.util.List;
 import org.warp.commonutils.log.Logger;
 import org.warp.commonutils.log.LoggerFactory;
 import reactor.core.publisher.Flux;
@@ -363,10 +364,10 @@ public class AsyncTdMiddleEventBusServer extends AbstractVerticle {
 					}
 				}))
 				.limitRate(Math.max(1, tdOptions.getEventsSize()))
-				.transform(normal -> new BufferTimeOutPublisher<>(normal,Math.max(1, tdOptions.getEventsSize()),
-						local ? Duration.ofMillis(1) : Duration.ofMillis(100), false))
+				//.transform(normal -> new BufferTimeOutPublisher<>(normal,Math.max(1, tdOptions.getEventsSize()),
+				//		local ? Duration.ofMillis(1) : Duration.ofMillis(100), false))
 				//.bufferTimeout(Math.max(1, tdOptions.getEventsSize()), local ? Duration.ofMillis(1) : Duration.ofMillis(100))
-				//.map(List::of)
+				.map(List::of)
 				.limitRate(Math.max(1, tdOptions.getEventsSize()))
 				.map(TdResultList::new);
 
