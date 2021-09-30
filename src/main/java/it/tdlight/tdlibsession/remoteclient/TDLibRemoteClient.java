@@ -20,6 +20,7 @@ import java.nio.file.FileAlreadyExistsException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.apache.logging.log4j.LogManager;
@@ -44,10 +45,6 @@ public class TDLibRemoteClient implements AutoCloseable {
 	private final int port;
 	private final Set<String> membersAddresses;
 	private final One<TdClusterManager> clusterManager = Sinks.one();
-	/**
-	 * Statistic about active deployments count
-	 */
-	private final AtomicInteger statsActiveDeployments = new AtomicInteger();
 
 	public static boolean runningFromIntelliJ() {
 		return System.getProperty("java.class.path").contains("idea_rt.jar")
@@ -68,6 +65,7 @@ public class TDLibRemoteClient implements AutoCloseable {
 		this.membersAddresses = membersAddresses;
 
 		if (enableAsyncStacktraces && !runningFromIntelliJ()) {
+			//noinspection ReactorAutomaticDebugger
 			ReactorDebugAgent.init();
 		}
 		if (enableAsyncStacktraces && enableFullAsyncStacktraces) {
@@ -106,7 +104,10 @@ public class TDLibRemoteClient implements AutoCloseable {
 		boolean enableFullAsyncStacktraces = Boolean.parseBoolean(args[8]);
 
 		var loggerContext = (org.apache.logging.log4j.core.LoggerContext) LogManager.getContext(false);
-		loggerContext.setConfigLocation(TDLibRemoteClient.class.getResource("/tdlib-session-container-log4j2.xml").toURI());
+		loggerContext.setConfigLocation(Objects
+				.requireNonNull(TDLibRemoteClient.class.getResource("/tdlib-session-container-log4j2.xml"),
+						"tdlib-session-container-log4j2.xml doesn't exist")
+				.toURI());
 
 		var securityInfo = new SecurityInfo(keyStorePath, keyStorePasswordPath, trustStorePath, trustStorePasswordPath);
 
@@ -124,7 +125,7 @@ public class TDLibRemoteClient implements AutoCloseable {
 				.block();
 
 		// Close vert.x on shutdown
-		var vertx = client.clusterManager.asMono().block().getVertx();
+		var vertx = client.clusterManager.asMono().blockOptional().orElseThrow().getVertx();
 		Runtime.getRuntime().addShutdownHook(new Thread(() -> MonoUtils.toMono(vertx.rxClose()).blockOptional()));
 	}
 

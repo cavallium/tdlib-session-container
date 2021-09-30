@@ -26,11 +26,14 @@ import it.tdlight.utils.MonoUtils;
 import java.net.ConnectException;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.util.concurrent.locks.LockSupport;
+import org.warp.commonutils.locks.LockUtils;
 import org.warp.commonutils.log.Logger;
 import org.warp.commonutils.log.LoggerFactory;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.core.publisher.Sinks;
+import reactor.core.publisher.Sinks.EmitResult;
 import reactor.core.publisher.Sinks.Empty;
 import reactor.core.publisher.Sinks.One;
 import reactor.core.scheduler.Schedulers;
@@ -130,7 +133,14 @@ public class AsyncTdMiddleEventBusClient implements AsyncTdMiddle {
 		this.local = local;
 		this.logger = LoggerFactory.getLogger(this.botId + " " + botAlias);
 		return MonoUtils
-				.emitValue(this.binlog, binlog)
+				.fromBlockingEmpty(() -> {
+					EmitResult result;
+					while ((result = this.binlog.tryEmitValue(binlog)) == EmitResult.FAIL_NON_SERIALIZED) {
+						// 10ms
+						LockSupport.parkNanos(10000000);
+					}
+					result.orThrow();
+				})
 				.then(binlog.getLastModifiedTime())
 				.zipWith(binlog.readFully().map(Buffer::getDelegate))
 				.single()
@@ -173,11 +183,15 @@ public class AsyncTdMiddleEventBusClient implements AsyncTdMiddle {
 						})
 						.flatMap(msg -> Mono.fromCallable(msg::body).subscribeOn(Schedulers.boundedElastic()))
 						.repeatWhen(l -> l.delayElements(Duration.ofSeconds(10)).takeWhile(x -> true))
-						.takeUntilOther(Mono.firstWithSignal(this.updatesStreamEnd.asMono().doOnTerminate(() -> {
-							logger.trace("About to kill pinger because updates stream ended");
-						}), this.crash.asMono().onErrorResume(ex -> Mono.empty()).doOnTerminate(() -> {
-							logger.trace("About to kill pinger because it has seen a crash signal");
-						})))
+						.takeUntilOther(Mono.firstWithSignal(
+								this.updatesStreamEnd
+										.asMono()
+										.doOnTerminate(() -> logger.trace("About to kill pinger because updates stream ended")),
+								this.crash
+										.asMono()
+										.onErrorResume(ex -> Mono.empty())
+										.doOnTerminate(() -> logger.trace("About to kill pinger because it has seen a crash signal"))
+						))
 						.doOnNext(s -> logger.trace("PING"))
 						.then()
 						.onErrorResume(ex -> {
@@ -185,7 +199,12 @@ public class AsyncTdMiddleEventBusClient implements AsyncTdMiddle {
 							return Mono.empty();
 						})
 						.doOnNext(s -> logger.debug("END PING"))
-						.then(MonoUtils.emitEmpty(this.pingFail))
+						.then(MonoUtils.fromBlockingEmpty(() -> {
+							while (this.pingFail.tryEmitEmpty() == EmitResult.FAIL_NON_SERIALIZED) {
+								// 10ms
+								LockSupport.parkNanos(10000000);
+							}
+						}))
 						.subscribeOn(Schedulers.parallel())
 						.subscribe();
 			}
@@ -207,7 +226,14 @@ public class AsyncTdMiddleEventBusClient implements AsyncTdMiddle {
 					// Return when the registration of all the consumers has been done across the cluster
 					return Mono
 							.fromRunnable(() -> logger.trace("Emitting updates flux to sink"))
-							.then(MonoUtils.emitValue(updates, updateConsumer))
+							.then(MonoUtils.fromBlockingEmpty(() -> {
+								EmitResult result;
+								while ((result = this.updates.tryEmitValue(updateConsumer)) == EmitResult.FAIL_NON_SERIALIZED) {
+									// 10ms
+									LockSupport.parkNanos(10000000);
+								}
+								result.orThrow();
+							}))
 							.doOnSuccess(s -> logger.trace("Emitted updates flux to sink"))
 							.doOnSuccess(s -> logger.trace("Waiting to register update consumer across the cluster"))
 							.doOnSuccess(s -> logger.trace("Registered update consumer across the cluster"));
@@ -250,7 +276,14 @@ public class AsyncTdMiddleEventBusClient implements AsyncTdMiddle {
 											var ex = new ConnectException("Server did not respond to ping");
 											ex.setStackTrace(new StackTraceElement[0]);
 											throw ex;
-										}).onErrorResume(ex -> MonoUtils.emitError(crash, ex)))
+										})).onErrorResume(ex -> MonoUtils.fromBlockingSingle(() -> {
+											EmitResult result;
+											while ((result = this.crash.tryEmitError(ex)) == EmitResult.FAIL_NON_SERIALIZED) {
+												// 10ms
+												LockSupport.parkNanos(10000000);
+											}
+											return result;
+										}))
 										.takeUntilOther(Mono
 												.firstWithSignal(crash.asMono(), authStateClosing.asMono())
 												.onErrorResume(e -> Mono.empty())
@@ -285,23 +318,21 @@ public class AsyncTdMiddleEventBusClient implements AsyncTdMiddle {
 
 	private Mono<TdApi.Object> interceptUpdate(Object update) {
 		logger.trace("Received update {}", update.getClass().getSimpleName());
-		switch (update.getConstructor()) {
-			case TdApi.UpdateAuthorizationState.CONSTRUCTOR:
-				var updateAuthorizationState = (TdApi.UpdateAuthorizationState) update;
-				switch (updateAuthorizationState.authorizationState.getConstructor()) {
-					case TdApi.AuthorizationStateClosing.CONSTRUCTOR:
-						authStateClosing.tryEmitEmpty();
-						break;
-					case TdApi.AuthorizationStateClosed.CONSTRUCTOR:
-						return Mono.fromRunnable(() -> logger.info("Received AuthorizationStateClosed from tdlib"))
-								.then(cluster.getEventBus().<EndSessionMessage>rxRequest(this.botAddress + ".read-binlog", EMPTY).as(MonoUtils::toMono))
-								.flatMap(latestBinlogMsg -> Mono.fromCallable(latestBinlogMsg::body).subscribeOn(Schedulers.parallel()))
-								.doOnNext(latestBinlog -> logger.info("Received binlog from server. Size: " + BinlogUtils.humanReadableByteCountBin(latestBinlog.binlog().length())))
-								.flatMap(latestBinlog -> this.saveBinlog(latestBinlog.binlog()))
-								.doOnSuccess(s -> logger.info("Overwritten binlog from server"))
-								.thenReturn(update);
-				}
-				break;
+		if (update.getConstructor() == TdApi.UpdateAuthorizationState.CONSTRUCTOR) {
+			var updateAuthorizationState = (TdApi.UpdateAuthorizationState) update;
+			switch (updateAuthorizationState.authorizationState.getConstructor()) {
+				case TdApi.AuthorizationStateClosing.CONSTRUCTOR:
+					authStateClosing.tryEmitEmpty();
+					break;
+				case TdApi.AuthorizationStateClosed.CONSTRUCTOR:
+					return Mono.fromRunnable(() -> logger.info("Received AuthorizationStateClosed from tdlib"))
+							.then(cluster.getEventBus().<EndSessionMessage>rxRequest(this.botAddress + ".read-binlog", EMPTY).as(MonoUtils::toMono))
+							.flatMap(latestBinlogMsg -> Mono.fromCallable(latestBinlogMsg::body).subscribeOn(Schedulers.parallel()))
+							.doOnNext(latestBinlog -> logger.info("Received binlog from server. Size: " + BinlogUtils.humanReadableByteCountBin(latestBinlog.binlog().length())))
+							.flatMap(latestBinlog -> this.saveBinlog(latestBinlog.binlog()))
+							.doOnSuccess(s -> logger.info("Overwritten binlog from server"))
+							.thenReturn(update);
+			}
 		}
 		return Mono.just(update);
 	}

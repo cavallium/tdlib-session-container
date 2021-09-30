@@ -161,65 +161,6 @@ public class MonoUtils {
 		return Completable.fromPublisher(s);
 	}
 
-	public static Mono<Void> fromEmitResult(EmitResult emitResult) {
-		return Mono.fromCallable(() -> {
-			emitResult.orThrow();
-			return null;
-		});
-	}
-
-	public static Future<Void> fromEmitResultFuture(EmitResult emitResult) {
-		if (emitResult.isSuccess()) {
-			return Future.succeededFuture();
-		} else {
-			return Future.failedFuture(new EmissionException(emitResult));
-		}
-	}
-
-	public static <T> Mono<Void> emitValue(One<T> sink, T value) {
-		return Mono.defer(() -> fromEmitResult(sink.tryEmitValue(value)));
-	}
-
-	public static <T> Mono<Void> emitNext(Many<T> sink, T value) {
-		return Mono.defer(() -> fromEmitResult(sink.tryEmitNext(value)));
-	}
-
-	public static <T> Mono<Void> emitComplete(Many<T> sink) {
-		return Mono.defer(() -> fromEmitResult(sink.tryEmitComplete()));
-	}
-
-	public static <T> Mono<Void> emitEmpty(Empty<T> sink) {
-		return Mono.defer(() -> fromEmitResult(sink.tryEmitEmpty()));
-	}
-
-	public static <T> Mono<Void> emitEmpty(One<T> sink) {
-		return Mono.defer(() -> fromEmitResult(sink.tryEmitEmpty()));
-	}
-
-	public static <T> Mono<Void> emitError(Empty<T> sink, Throwable value) {
-		return Mono.defer(() -> fromEmitResult(sink.tryEmitError(value)));
-	}
-
-	public static <T> Future<Void> emitValueFuture(One<T> sink, T value) {
-		return fromEmitResultFuture(sink.tryEmitValue(value));
-	}
-
-	public static <T> Future<Void> emitNextFuture(Many<T> sink, T value) {
-		return fromEmitResultFuture(sink.tryEmitNext(value));
-	}
-
-	public static <T> Future<Void> emitCompleteFuture(Many<T> sink) {
-		return fromEmitResultFuture(sink.tryEmitComplete());
-	}
-
-	public static <T> Future<Void> emitErrorFuture(Empty<T> sink, Throwable value) {
-		return fromEmitResultFuture(sink.tryEmitError(value));
-	}
-
-	public static <T> Future<Void> emitEmptyFuture(Empty<T> sink) {
-		return fromEmitResultFuture(sink.tryEmitEmpty());
-	}
-
 	@SuppressWarnings({"unchecked", "rawtypes"})
 	public static <T> Mono<T> castVoid(Mono<Void> mono) {
 		return (Mono) mono;

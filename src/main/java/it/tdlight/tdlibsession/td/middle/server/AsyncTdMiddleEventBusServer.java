@@ -25,17 +25,16 @@ import it.tdlight.tdlibsession.td.middle.TdResultList;
 import it.tdlight.tdlibsession.td.middle.TdResultListMessageCodec;
 import it.tdlight.tdlibsession.td.middle.TdResultMessage;
 import it.tdlight.utils.BinlogUtils;
-import it.tdlight.utils.BufferTimeOutPublisher;
 import it.tdlight.utils.MonoUtils;
 import java.net.ConnectException;
 import java.time.Duration;
 import java.util.List;
+import java.util.Objects;
+import java.util.concurrent.atomic.AtomicReference;
 import org.warp.commonutils.log.Logger;
 import org.warp.commonutils.log.LoggerFactory;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
-import reactor.core.publisher.Sinks;
-import reactor.core.publisher.Sinks.One;
 import reactor.core.scheduler.Schedulers;
 import reactor.util.function.Tuples;
 
@@ -51,18 +50,17 @@ public class AsyncTdMiddleEventBusServer extends AbstractVerticle {
 	private final TelegramClientFactory clientFactory;
 
 	// Variables configured by the user at startup
-	private final One<Integer> botId = Sinks.one();
-	private final One<String> botAddress = Sinks.one();
-	private final One<String> botAlias = Sinks.one();
-	private final One<Boolean> local = Sinks.one();
+	private final AtomicReference<Integer> botId = new AtomicReference<>();
+	private final AtomicReference<String> botAddress = new AtomicReference<>();
+	private final AtomicReference<String> botAlias = new AtomicReference<>();
 
 	// Variables configured at startup
-	private final One<AsyncTdDirectImpl> td = Sinks.one();
-	private final One<MessageConsumer<ExecuteObject>> executeConsumer = Sinks.one();
-	private final One<MessageConsumer<byte[]>> readBinlogConsumer = Sinks.one();
-	private final One<MessageConsumer<byte[]>> readyToReceiveConsumer = Sinks.one();
-	private final One<MessageConsumer<byte[]>> pingConsumer = Sinks.one();
-	private final One<Flux<Void>> pipeFlux = Sinks.one();
+	private final AtomicReference<AsyncTdDirectImpl> td = new AtomicReference<>();
+	private final AtomicReference<MessageConsumer<ExecuteObject>> executeConsumer = new AtomicReference<>();
+	private final AtomicReference<MessageConsumer<byte[]>> readBinlogConsumer = new AtomicReference<>();
+	private final AtomicReference<MessageConsumer<byte[]>> readyToReceiveConsumer = new AtomicReference<>();
+	private final AtomicReference<MessageConsumer<byte[]>> pingConsumer = new AtomicReference<>();
+	private final AtomicReference<Flux<Void>> pipeFlux = new AtomicReference<>();
 
 	public AsyncTdMiddleEventBusServer() {
 		this.tdOptions = new AsyncTdDirectOptions(WAIT_DURATION, 100);
@@ -79,20 +77,14 @@ public class AsyncTdMiddleEventBusServer extends AbstractVerticle {
 							if (botId == null || botId <= 0) {
 								throw new IllegalArgumentException("botId is not set!");
 							}
-							if (this.botId.tryEmitValue(botId).isFailure()) {
-								throw new IllegalStateException("Failed to set botId");
-							}
+							this.botId.set(botId);
 							var botAddress = "bots.bot." + botId;
-							if (this.botAddress.tryEmitValue(botAddress).isFailure()) {
-								throw new IllegalStateException("Failed to set botAddress");
-							}
+							this.botAddress.set(botAddress);
 							var botAlias = config().getString("botAlias");
 							if (botAlias == null || botAlias.isEmpty()) {
 								throw new IllegalArgumentException("botAlias is not set!");
 							}
-							if (this.botAlias.tryEmitValue(botAlias).isFailure()) {
-								throw new IllegalStateException("Failed to set botAlias");
-							}
+							this.botAlias.set(botAlias);
 							var local = config().getBoolean("local");
 							if (local == null) {
 								throw new IllegalArgumentException("local is not set!");
@@ -103,9 +95,7 @@ public class AsyncTdMiddleEventBusServer extends AbstractVerticle {
 							}
 
 							var td = new AsyncTdDirectImpl(clientFactory, implementationDetails, botAlias);
-							if (this.td.tryEmitValue(td).isFailure()) {
-								throw new IllegalStateException("Failed to set td instance");
-							}
+							this.td.set(td);
 							return new OnSuccessfulStartRequestInfo(td, botAddress, botAlias, botId, local);
 						})
 						.flatMap(r -> onSuccessfulStartRequest(r.td, r.botAddress, r.botAlias, r.botId, r.local))
@@ -135,25 +125,18 @@ public class AsyncTdMiddleEventBusServer extends AbstractVerticle {
 			boolean local) {
 		return td
 				.initialize()
-				.then(this.pipe(td, botAddress, botAlias, botId, local))
-				.then(this.listen(td, botAddress, botAlias, botId, local))
-				.doOnSuccess(s -> {
-					logger.info("Deploy and start of bot \"" + botAlias + "\": ✅ Succeeded");
-				})
-				.doOnError(ex -> {
-					logger.error("Deploy and start of bot \"" + botAlias + "\": ❌ Failed", ex);
-				});
+				.then(this.pipe(td, botAddress, local))
+				.then(this.listen(td, botAddress, botId, local))
+				.doOnSuccess(s -> logger.info("Deploy and start of bot \"" + botAlias + "\": ✅ Succeeded"))
+				.doOnError(ex -> logger.error("Deploy and start of bot \"" + botAlias + "\": ❌ Failed", ex));
 	}
 
-	private Mono<Void> listen(AsyncTdDirectImpl td, String botAddress, String botAlias, int botId, boolean local) {
+	private Mono<Void> listen(AsyncTdDirectImpl td, String botAddress, int botId, boolean local) {
 		return Mono.<Void>create(registrationSink -> {
 			logger.trace("Preparing listeners");
 
 			MessageConsumer<ExecuteObject> executeConsumer = vertx.eventBus().consumer(botAddress + ".execute");
-			if (this.executeConsumer.tryEmitValue(executeConsumer).isFailure()) {
-				registrationSink.error(new IllegalStateException("Failed to set executeConsumer"));
-				return;
-			}
+			this.executeConsumer.set(executeConsumer);
 			Flux
 					.<Message<ExecuteObject>>create(sink -> {
 						executeConsumer.handler(sink::next);
@@ -170,9 +153,7 @@ public class AsyncTdMiddleEventBusServer extends AbstractVerticle {
 								.single()
 								.timeout(Duration.ofSeconds(60 + 30))
 								.doOnSuccess(s -> logger.trace("Executed successfully. Request was {}", request))
-								.onErrorResume(ex -> Mono.fromRunnable(() -> {
-									msg.fail(500, ex.getLocalizedMessage());
-								}))
+								.onErrorResume(ex -> Mono.fromRunnable(() -> msg.fail(500, ex.getLocalizedMessage())))
 								.flatMap(response -> Mono.fromCallable(() -> {
 									var replyOpts = new DeliveryOptions().setLocalOnly(local);
 									var replyValue = new TdResultMessage(response.result(), response.cause());
@@ -197,10 +178,7 @@ public class AsyncTdMiddleEventBusServer extends AbstractVerticle {
 					);
 
 			MessageConsumer<byte[]> readBinlogConsumer = vertx.eventBus().consumer(botAddress + ".read-binlog");
-			if (this.readBinlogConsumer.tryEmitValue(readBinlogConsumer).isFailure()) {
-				registrationSink.error(new IllegalStateException("Failed to set readBinlogConsumer"));
-				return;
-			}
+			this.readBinlogConsumer.set(readBinlogConsumer);
 			BinlogUtils
 					.readBinlogConsumer(vertx, readBinlogConsumer, botId, local)
 					.subscribeOn(Schedulers.parallel())
@@ -208,13 +186,10 @@ public class AsyncTdMiddleEventBusServer extends AbstractVerticle {
 
 			MessageConsumer<byte[]> readyToReceiveConsumer = vertx.eventBus().consumer(botAddress
 					+ ".ready-to-receive");
-			if (this.readyToReceiveConsumer.tryEmitValue(readyToReceiveConsumer).isFailure()) {
-				registrationSink.error(new IllegalStateException("Failed to set readyToReceiveConsumer"));
-				return;
-			}
+			this.readyToReceiveConsumer.set(readyToReceiveConsumer);
 
 			// Pipe the data
-			var pipeSubscription = Flux
+			Flux
 					.<Message<byte[]>>create(sink -> {
 						readyToReceiveConsumer.handler(sink::next);
 						readyToReceiveConsumer.endHandler(h -> sink.complete());
@@ -222,10 +197,7 @@ public class AsyncTdMiddleEventBusServer extends AbstractVerticle {
 					.take(1, true)
 					.single()
 					.doOnNext(s -> logger.trace("Received ready-to-receive request from client"))
-					.flatMap(msg -> this.pipeFlux
-							.asMono()
-							.timeout(Duration.ofSeconds(5))
-							.map(pipeFlux -> Tuples.of(msg, pipeFlux)))
+					.map(msg -> Tuples.of(msg, Objects.requireNonNull(pipeFlux.get(), "PipeFlux is empty")))
 					.doOnError(ex -> logger.error("Error when processing a ready-to-receive request", ex))
 					.doOnNext(s -> logger.trace("Replying to ready-to-receive request"))
 					.flatMapMany(tuple -> {
@@ -238,9 +210,7 @@ public class AsyncTdMiddleEventBusServer extends AbstractVerticle {
 						logger.trace("Start piping data");
 
 						// Start piping the data
-						return tuple.getT2().doOnSubscribe(s -> {
-							logger.trace("Subscribed to updates pipe");
-						});
+						return tuple.getT2().doOnSubscribe(s -> logger.trace("Subscribed to updates pipe"));
 					})
 					.then()
 					.doOnSuccess(s -> logger.trace("Finished handling ready-to-receive requests (updates pipe ended)"))
@@ -249,10 +219,7 @@ public class AsyncTdMiddleEventBusServer extends AbstractVerticle {
 					.subscribe(v -> {});
 
 			MessageConsumer<byte[]> pingConsumer = vertx.eventBus().consumer(botAddress + ".ping");
-			if (this.pingConsumer.tryEmitValue(pingConsumer).isFailure()) {
-				registrationSink.error(new IllegalStateException("Failed to set pingConsumer"));
-				return;
-			}
+			this.pingConsumer.set(pingConsumer);
 			Flux
 					.<Message<byte[]>>create(sink -> {
 						pingConsumer.handler(sink::next);
@@ -288,61 +255,52 @@ public class AsyncTdMiddleEventBusServer extends AbstractVerticle {
 	 * Override some requests
 	 */
 	private Function overrideRequest(Function request, int botId) {
-		switch (request.getConstructor()) {
-			case SetTdlibParameters.CONSTRUCTOR:
-				// Fix session directory locations
-				var setTdlibParamsObj = (SetTdlibParameters) request;
-				setTdlibParamsObj.parameters.databaseDirectory = TDLibRemoteClient.getSessionDirectory(botId).toString();
-				setTdlibParamsObj.parameters.filesDirectory = TDLibRemoteClient.getMediaDirectory(botId).toString();
-				return request;
-			default:
-				return request;
+		if (request.getConstructor() == SetTdlibParameters.CONSTRUCTOR) {
+			// Fix session directory locations
+			var setTdlibParamsObj = (SetTdlibParameters) request;
+			setTdlibParamsObj.parameters.databaseDirectory = TDLibRemoteClient.getSessionDirectory(botId).toString();
+			setTdlibParamsObj.parameters.filesDirectory = TDLibRemoteClient.getMediaDirectory(botId).toString();
 		}
+		return request;
 	}
 
 	@Override
 	public Completable rxStop() {
-		return MonoUtils.toCompletable(botAlias
-				.asMono()
-				.timeout(Duration.ofSeconds(1), Mono.just("???"))
-				.flatMap(botAlias -> Mono
-						.fromRunnable(() -> logger.info("Undeploy of bot \"" + botAlias + "\": stopping"))
-						.then(executeConsumer
-								.asMono()
-								.timeout(Duration.ofSeconds(5), Mono.empty())
-								.flatMap(ec -> ec.rxUnregister().as(MonoUtils::toMono))
-								.doOnSuccess(s -> logger.trace("Unregistered execute consumer"))
-						)
-						.then(readBinlogConsumer
-								.asMono()
-								.timeout(Duration.ofSeconds(10), Mono.empty())
-								.flatMap(ec -> Mono.fromCallable(() -> {
-									Mono
-											// ReadBinLog will live for another 30 minutes.
-											// Since every consumer of ReadBinLog is identical, this should not pose a problem.
-											.delay(Duration.ofMinutes(30))
-											.then(ec.rxUnregister().as(MonoUtils::toMono))
-											.subscribe();
-									return null;
-								}).subscribeOn(Schedulers.boundedElastic()))
-						)
-						.then(readyToReceiveConsumer
-								.asMono()
-								.timeout(Duration.ofSeconds(5), Mono.empty())
-								.flatMap(ec -> ec.rxUnregister().as(MonoUtils::toMono)))
-						.then(pingConsumer
-								.asMono()
-								.timeout(Duration.ofSeconds(5), Mono.empty())
-								.flatMap(ec -> ec.rxUnregister().as(MonoUtils::toMono)))
-						.doOnError(ex -> logger.error("Undeploy of bot \"" + botAlias + "\": stop failed", ex))
-						.doOnTerminate(() -> logger.info("Undeploy of bot \"" + botAlias + "\": stopped"))
+		return MonoUtils.toCompletable(Mono
+				.fromRunnable(() -> logger.info("Undeploy of bot \"" + botAlias.get() + "\": stopping"))
+				.then(Mono
+						.fromCallable(executeConsumer::get)
+						.flatMap(executeConsumer -> executeConsumer.rxUnregister().as(MonoUtils::toMono))
+						.doOnSuccess(s -> logger.trace("Unregistered execute consumer"))
 				)
+				.then(MonoUtils.fromBlockingEmpty(() -> {
+					var readBinlogConsumer = this.readBinlogConsumer.get();
+					if (readBinlogConsumer != null) {
+						Mono
+								// ReadBinLog will live for another 10 minutes.
+								// Since every consumer of ReadBinLog is identical, this should not pose a problem.
+								.delay(Duration.ofMinutes(10))
+								.then(readBinlogConsumer.rxUnregister().as(MonoUtils::toMono))
+								.subscribe();
+					}
+				}))
+				.then(Mono
+						.fromCallable(readyToReceiveConsumer::get)
+						.flatMap(ec -> ec.rxUnregister().as(MonoUtils::toMono))
+				)
+				.then(Mono
+						.fromCallable(pingConsumer::get)
+						.flatMap(ec -> ec.rxUnregister().as(MonoUtils::toMono))
+				)
+				.doOnError(ex -> logger.error("Undeploy of bot \"" + botAlias.get() + "\": stop failed", ex))
+				.doOnTerminate(() -> logger.info("Undeploy of bot \"" + botAlias.get() + "\": stopped"))
 		);
 	}
 
-	private Mono<Void> pipe(AsyncTdDirectImpl td, String botAddress, String botAlias, int botId, boolean local) {
+	private Mono<Void> pipe(AsyncTdDirectImpl td, String botAddress, boolean local) {
 		logger.trace("Preparing to pipe requests");
-		Flux<TdResultList> updatesFlux = td.receive(tdOptions)
+		Flux<TdResultList> updatesFlux = td
+				.receive(tdOptions)
 				.takeUntil(item -> {
 					if (item instanceof Update) {
 						var tdUpdate = (Update) item;
@@ -437,7 +395,9 @@ public class AsyncTdMiddleEventBusServer extends AbstractVerticle {
 							.then(rxStop().as(MonoUtils::toMono));
 				});
 
-		return MonoUtils.emitValue(this.pipeFlux, pipeFlux)
-				.doOnSuccess(s -> logger.trace("Prepared piping requests successfully"));
+		return MonoUtils.fromBlockingEmpty(() -> {
+			this.pipeFlux.set(pipeFlux);
+			logger.trace("Prepared piping requests successfully");
+		});
 	}
 }
