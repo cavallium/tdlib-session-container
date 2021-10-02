@@ -145,11 +145,12 @@ public class AsyncTdMiddleEventBusServer extends AbstractVerticle {
 					.flatMap(msg -> {
 						var body = msg.body();
 						var request = overrideRequest(body.getRequest(), botId);
+						var timeout = body.getTimeout();
 						if (logger.isTraceEnabled()) {
 							logger.trace("Received execute request {}", request);
 						}
 						return td
-								.execute(request, Duration.ofSeconds(60 + 30), body.isExecuteDirectly())
+								.execute(request, timeout, body.isExecuteDirectly())
 								.single()
 								.doOnSuccess(s -> logger.trace("Executed successfully. Request was {}", request))
 								.onErrorResume(ex -> Mono.fromRunnable(() -> msg.fail(500, ex.getLocalizedMessage())))

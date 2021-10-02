@@ -5,6 +5,7 @@ import io.vertx.core.eventbus.MessageCodec;
 import it.tdlight.jni.TdApi;
 import it.tdlight.jni.TdApi.Function;
 import it.tdlight.utils.BufferUtils;
+import java.time.Duration;
 
 public class TdExecuteObjectMessageCodec implements MessageCodec<ExecuteObject, ExecuteObject> {
 
@@ -17,14 +18,17 @@ public class TdExecuteObjectMessageCodec implements MessageCodec<ExecuteObject, 
 		BufferUtils.encode(buffer, os -> {
 			os.writeBoolean(t.isExecuteDirectly());
 			t.getRequest().serialize(os);
+			os.writeLong(t.getTimeout().toMillis());
 		});
 	}
 
 	@Override
 	public ExecuteObject decodeFromWire(int pos, Buffer buffer) {
-		return BufferUtils.decode(pos, buffer, is -> {
-			return new ExecuteObject(is.readBoolean(), (Function) TdApi.Deserializer.deserialize(is));
-		});
+		return BufferUtils.decode(pos, buffer, is -> new ExecuteObject(
+				is.readBoolean(),
+				(Function) TdApi.Deserializer.deserialize(is),
+				Duration.ofMillis(is.readLong())
+		));
 	}
 
 	@Override

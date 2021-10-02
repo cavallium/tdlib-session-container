@@ -3,6 +3,7 @@ package it.tdlight.tdlibsession.td.middle;
 import io.vertx.core.buffer.Buffer;
 import it.tdlight.jni.TdApi;
 import it.tdlight.jni.TdApi.Function;
+import java.time.Duration;
 import java.util.Objects;
 import java.util.StringJoiner;
 
@@ -12,13 +13,16 @@ public class ExecuteObject {
 
 	private boolean executeDirectly;
 	private TdApi.Function request;
+	private Duration timeout;
 	private int pos;
 	private Buffer buffer;
 
-	public ExecuteObject(boolean executeDirectly, Function request) {
+	public ExecuteObject(boolean executeDirectly, Function request, Duration timeout) {
+		if (request == null) throw new NullPointerException();
+
 		this.executeDirectly = executeDirectly;
 		this.request = request;
-		if (request == null) throw new NullPointerException();
+		this.timeout = timeout;
 	}
 
 	public ExecuteObject(int pos, Buffer buffer) {
@@ -32,6 +36,7 @@ public class ExecuteObject {
 			this.executeDirectly = data.executeDirectly;
 			this.request = data.request;
 			this.buffer = null;
+			this.timeout = data.timeout;
 		}
 	}
 
@@ -43,6 +48,11 @@ public class ExecuteObject {
 	public TdApi.Function getRequest() {
 		tryDecode();
 		return request;
+	}
+
+	public Duration getTimeout() {
+		tryDecode();
+		return timeout;
 	}
 
 	@Override
@@ -76,6 +86,7 @@ public class ExecuteObject {
 		return new StringJoiner(", ", ExecuteObject.class.getSimpleName() + "[", "]")
 				.add("executeDirectly=" + executeDirectly)
 				.add("request=" + request)
+				.add("timeout=" + timeout)
 				.toString();
 	}
 }
