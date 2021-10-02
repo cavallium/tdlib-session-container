@@ -12,6 +12,8 @@ import it.tdlight.tdlibsession.td.TdError;
 import it.tdlight.tdlibsession.td.TdResult;
 import it.tdlight.utils.MonoUtils;
 import java.time.Duration;
+import java.util.Objects;
+import java.util.concurrent.atomic.AtomicReference;
 import org.warp.commonutils.log.Logger;
 import org.warp.commonutils.log.LoggerFactory;
 import reactor.core.publisher.Flux;
@@ -28,7 +30,7 @@ public class AsyncTdDirectImpl implements AsyncTdDirect {
 	private final JsonObject implementationDetails;
 	private final String botAlias;
 
-	private final One<ReactorTelegramClient> td = Sinks.one();
+	private final AtomicReference<ReactorTelegramClient> td = new AtomicReference<>(null);
 
 	public AsyncTdDirectImpl(TelegramClientFactory telegramClientFactory,
 			JsonObject implementationDetails,
@@ -41,43 +43,38 @@ public class AsyncTdDirectImpl implements AsyncTdDirect {
 	@Override
 	public <T extends TdApi.Object> Mono<TdResult<T>> execute(Function request, Duration timeout, boolean synchronous) {
 		if (synchronous) {
-			return Mono
-					.firstWithSignal(td.asMono(), Mono.empty())
-					.single()
-					.timeout(Duration.ofSeconds(5))
-					.flatMap(td -> MonoUtils.fromBlockingSingle(() -> {
+			return MonoUtils.fromBlockingSingle(() -> {
+						var td = this.td.get();
 						logger.trace("Sending execute to TDLib {}", request);
+						Objects.requireNonNull(td, "td is null");
 						TdResult<T> result = TdResult.of(td.execute(request));
 						logger.trace("Received execute response from TDLib. Request was {}", request);
 						return result;
-					}))
-					.single();
-		} else {
-			return Mono
-					.firstWithSignal(td.asMono(), Mono.empty())
-					.single()
-					.timeout(Duration.ofSeconds(5))
-					.<TdResult<T>>flatMap(td -> {
-						if (td != null) {
-							return Mono
-									.fromRunnable(() -> logger.trace("Sending request to TDLib {}", request))
-									.then(td.send(request, timeout))
-									.single()
-									.<TdResult<T>>map(TdResult::of)
-									.doOnSuccess(s -> logger.trace("Sent request to TDLib {}", request));
-						} else {
-							return Mono.fromCallable(() -> {
-								if (request.getConstructor() == Close.CONSTRUCTOR) {
-									logger.trace("Sending close success to request {}", request);
-									return TdResult.of(new Ok());
-								} else {
-									logger.trace("Sending close error to request {} ", request);
-									throw new IllegalStateException("TDLib client is destroyed");
-								}
-							});
-						}
 					})
 					.single();
+		} else {
+			return Mono.defer(() -> {
+				var td = this.td.get();
+
+				if (td != null) {
+					return Mono
+							.fromRunnable(() -> logger.trace("Sending request to TDLib {}", request))
+							.then(td.send(request, timeout))
+							.single()
+							.<TdResult<T>>map(TdResult::of)
+							.doOnSuccess(s -> logger.trace("Sent request to TDLib {}", request));
+				} else {
+					return Mono.fromCallable(() -> {
+						if (request.getConstructor() == Close.CONSTRUCTOR) {
+							logger.trace("Sending close success to request {}", request);
+							return TdResult.of(new Ok());
+						} else {
+							logger.trace("Sending close error to request {} ", request);
+							throw new IllegalStateException("TDLib client is destroyed");
+						}
+					});
+				}
+			});
 		}
 	}
 
@@ -87,12 +84,7 @@ public class AsyncTdDirectImpl implements AsyncTdDirect {
 				.fromRunnable(() -> logger.trace("Initializing"))
 				.then(telegramClientFactory.create(implementationDetails))
 				.flatMap(reactorTelegramClient -> reactorTelegramClient.initialize().thenReturn(reactorTelegramClient))
-				.flatMap(client -> {
-					if (td.tryEmitValue(client).isFailure()) {
-						return Mono.error(new TdError(500, "Failed to emit td client"));
-					}
-					return Mono.just(client);
-				})
+				.doOnNext(td::set)
 				.doOnNext(client -> client.execute(new TdApi.SetLogVerbosityLevel(1)))
 				.doOnSuccess(s -> logger.trace("Initialized"))
 				.then();
@@ -103,9 +95,8 @@ public class AsyncTdDirectImpl implements AsyncTdDirect {
 		// If closed it will be either true or false
 		final One<Boolean> closedFromTd = Sinks.one();
 		return Mono
-				.firstWithSignal(td.asMono(), Mono.empty())
+				.fromCallable(td::get)
 				.single()
-				.timeout(Duration.ofSeconds(5))
 				.flatMapMany(ReactorTelegramClient::receive)
 				.doOnNext(update -> {
 					// Close the emitter if receive closed state

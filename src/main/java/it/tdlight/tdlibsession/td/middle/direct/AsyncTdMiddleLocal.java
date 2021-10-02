@@ -14,6 +14,7 @@ import it.tdlight.tdlibsession.td.middle.server.AsyncTdMiddleEventBusServer;
 import it.tdlight.utils.MonoUtils;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.util.concurrent.atomic.AtomicReference;
 import org.warp.commonutils.error.InitializationException;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
@@ -29,7 +30,8 @@ public class AsyncTdMiddleLocal implements AsyncTdMiddle {
 	private final Vertx vertx;
 
 	private final AsyncTdMiddleEventBusServer srv;
-	private final One<AsyncTdMiddle> cli = Sinks.one();
+	private final AtomicReference<AsyncTdMiddle> cli = new AtomicReference<>(null);
+	private final AtomicReference<Throwable> startError = new AtomicReference<>(null);
 	private final JsonObject implementationDetails;
 
 
@@ -64,23 +66,35 @@ public class AsyncTdMiddleLocal implements AsyncTdMiddle {
 						.start(botId, botAlias, true, implementationDetails, tuple.getT2())
 						.thenReturn(tuple.getT1()))
 				.onErrorMap(InitializationException::new)
-				.doOnNext(this.cli::tryEmitValue)
-				.doOnError(this.cli::tryEmitError)
+				.doOnNext(this.cli::set)
+				.doOnError(this.startError::set)
 				.thenReturn(this);
 	}
 
 	@Override
 	public Mono<Void> initialize() {
-		return cli.asMono().single().flatMap(AsyncTdMiddle::initialize);
+		var startError = this.startError.get();
+		if (startError != null) {
+			return Mono.error(startError);
+		}
+		return Mono.fromCallable(cli::get).single().flatMap(AsyncTdMiddle::initialize);
 	}
 
 	@Override
 	public Flux<TdApi.Object> receive() {
-		return cli.asMono().single().flatMapMany(AsyncTdMiddle::receive);
+		var startError = this.startError.get();
+		if (startError != null) {
+			return Flux.error(startError);
+		}
+		return Mono.fromCallable(cli::get).single().flatMapMany(AsyncTdMiddle::receive);
 	}
 
 	@Override
 	public <T extends Object> Mono<TdResult<T>> execute(Function request, Duration timeout, boolean executeDirectly) {
-		return cli.asMono().single().flatMap(c -> c.execute(request, timeout, executeDirectly));
+		var startError = this.startError.get();
+		if (startError != null) {
+			return Mono.error(startError);
+		}
+		return Mono.fromCallable(cli::get).single().flatMap(c -> c.execute(request, timeout, executeDirectly));
 	}
 }
