@@ -39,7 +39,7 @@ public class AsyncTdDirectImpl implements AsyncTdDirect {
 	}
 
 	@Override
-	public <T extends TdApi.Object> Mono<TdResult<T>> execute(Function request, boolean synchronous) {
+	public <T extends TdApi.Object> Mono<TdResult<T>> execute(Function request, Duration timeout, boolean synchronous) {
 		if (synchronous) {
 			return Mono
 					.firstWithSignal(td.asMono(), Mono.empty())
@@ -61,7 +61,7 @@ public class AsyncTdDirectImpl implements AsyncTdDirect {
 						if (td != null) {
 							return Mono
 									.fromRunnable(() -> logger.trace("Sending request to TDLib {}", request))
-									.then(td.send(request))
+									.then(td.send(request, timeout))
 									.single()
 									.<TdResult<T>>map(TdResult::of)
 									.doOnSuccess(s -> logger.trace("Sent request to TDLib {}", request));

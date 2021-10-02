@@ -13,6 +13,7 @@ import it.tdlight.tdlibsession.td.middle.client.AsyncTdMiddleEventBusClient;
 import it.tdlight.tdlibsession.td.middle.server.AsyncTdMiddleEventBusServer;
 import it.tdlight.utils.MonoUtils;
 import java.nio.file.Path;
+import java.time.Duration;
 import org.warp.commonutils.error.InitializationException;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
@@ -79,7 +80,7 @@ public class AsyncTdMiddleLocal implements AsyncTdMiddle {
 	}
 
 	@Override
-	public <T extends Object> Mono<TdResult<T>> execute(Function request, boolean executeDirectly) {
-		return cli.asMono().single().flatMap(c -> c.execute(request, executeDirectly));
+	public <T extends Object> Mono<TdResult<T>> execute(Function request, Duration timeout, boolean executeDirectly) {
+		return cli.asMono().single().flatMap(c -> c.execute(request, timeout, executeDirectly));
 	}
 }

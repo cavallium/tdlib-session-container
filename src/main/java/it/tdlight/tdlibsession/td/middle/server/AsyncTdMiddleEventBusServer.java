@@ -149,9 +149,8 @@ public class AsyncTdMiddleEventBusServer extends AbstractVerticle {
 							logger.trace("Received execute request {}", request);
 						}
 						return td
-								.execute(request, body.isExecuteDirectly())
+								.execute(request, Duration.ofSeconds(60 + 30), body.isExecuteDirectly())
 								.single()
-								.timeout(Duration.ofSeconds(60 + 30))
 								.doOnSuccess(s -> logger.trace("Executed successfully. Request was {}", request))
 								.onErrorResume(ex -> Mono.fromRunnable(() -> msg.fail(500, ex.getLocalizedMessage())))
 								.flatMap(response -> Mono.fromCallable(() -> {
@@ -389,7 +388,8 @@ public class AsyncTdMiddleEventBusServer extends AbstractVerticle {
 					if (printDefaultException) {
 						logger.warn("Undeploying after a fatal error in a served flux", ex);
 					}
-					return td.execute(new TdApi.Close(), false)
+					return td
+							.execute(new TdApi.Close(), Duration.ofDays(1), false)
 							.doOnError(ex2 -> logger.error("Unexpected error", ex2))
 							.doOnSuccess(s -> logger.debug("Emergency Close() signal has been sent successfully"))
 							.then(rxStop().as(MonoUtils::toMono));

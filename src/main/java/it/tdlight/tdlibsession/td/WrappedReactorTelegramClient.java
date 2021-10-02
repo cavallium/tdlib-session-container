@@ -4,6 +4,7 @@ import it.tdlight.common.ReactiveItem;
 import it.tdlight.common.ReactiveTelegramClient;
 import it.tdlight.jni.TdApi;
 import it.tdlight.utils.MonoUtils;
+import java.time.Duration;
 import org.jetbrains.annotations.NotNull;
 import org.reactivestreams.Subscriber;
 import org.reactivestreams.Subscription;
@@ -67,13 +68,14 @@ public class WrappedReactorTelegramClient implements ReactorTelegramClient {
 	/**
 	 * Sends a request to the TDLib.
 	 *
-	 * @param query            Object representing a query to the TDLib.
-	 * @throws NullPointerException if query is null.
+	 * @param query   Object representing a query to the TDLib.
+	 * @param timeout Response timeout.
 	 * @return a publisher that will emit exactly one item, or an error
+	 * @throws NullPointerException if query is null.
 	 */
 	@Override
-	public Mono<TdApi.Object> send(TdApi.Function query) {
-		return Mono.from(reactiveTelegramClient.send(query)).single();
+	public Mono<TdApi.Object> send(TdApi.Function query, Duration timeout) {
+		return Mono.from(reactiveTelegramClient.send(query, timeout)).single();
 	}
 
 	/**

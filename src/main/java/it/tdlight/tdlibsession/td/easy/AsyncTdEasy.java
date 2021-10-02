@@ -39,6 +39,7 @@ import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.Comparator;
 import java.util.Objects;
 import java.util.Set;
@@ -57,6 +58,7 @@ import reactor.core.scheduler.Schedulers;
 public class AsyncTdEasy {
 
 	private final Logger logger;
+	private static final Duration DEFAULT_TIMEOUT = Duration.ofMinutes(1);
 
 	private final Many<AuthorizationState> authState = Sinks.many().replay().latest();
 	private final Many<Boolean> requestedDefinitiveExit = Sinks.many().replay().latestOrDefault(false);
@@ -181,14 +183,17 @@ public class AsyncTdEasy {
 
 	/**
 	 * Sends request to TDLib.
+	 * @param timeout Timeout duration.
 	 * @return The response or {@link TdApi.Error}.
 	 */
-	public <T extends Object> Mono<TdResult<T>> send(TdApi.Function request) {
-		return td.<T>execute(request, false);
+	public <T extends Object> Mono<TdResult<T>> send(TdApi.Function request, Duration timeout) {
+		return td.execute(request, timeout, false);
 	}
 
-	private <T extends TdApi.Object> Mono<TdResult<T>> sendDirectly(TdApi.Function obj, boolean synchronous) {
-		return td.<T>execute(obj, synchronous);
+	private <T extends TdApi.Object> Mono<TdResult<T>> sendDirectly(TdApi.Function obj,
+			Duration timeout,
+			boolean synchronous) {
+		return td.execute(obj, timeout, synchronous);
 	}
 
 	/**
@@ -196,7 +201,7 @@ public class AsyncTdEasy {
 	 * @param i level
 	 */
 	public Mono<Void> setVerbosityLevel(int i) {
-		return thenOrFatalError(sendDirectly(new TdApi.SetLogVerbosityLevel(i), true));
+		return thenOrFatalError(sendDirectly(new TdApi.SetLogVerbosityLevel(i), DEFAULT_TIMEOUT, true));
 	}
 
 	/**
@@ -204,7 +209,10 @@ public class AsyncTdEasy {
 	 * @param name option name
 	 */
 	public Mono<Void> clearOption(String name) {
-		return thenOrFatalError(sendDirectly(new TdApi.SetOption(name, new TdApi.OptionValueEmpty()), false));
+		return thenOrFatalError(sendDirectly(new TdApi.SetOption(name, new TdApi.OptionValueEmpty()),
+				DEFAULT_TIMEOUT,
+				false
+		));
 	}
 
 	/**
@@ -213,7 +221,10 @@ public class AsyncTdEasy {
 	 * @param value option value
 	 */
 	public Mono<Void> setOptionString(String name, String value) {
-		return thenOrFatalError(sendDirectly(new TdApi.SetOption(name, new TdApi.OptionValueString(value)), false));
+		return thenOrFatalError(sendDirectly(new TdApi.SetOption(name, new TdApi.OptionValueString(value)),
+				DEFAULT_TIMEOUT,
+				false
+		));
 	}
 
 	/**
@@ -222,7 +233,10 @@ public class AsyncTdEasy {
 	 * @param value option value
 	 */
 	public Mono<Void> setOptionInteger(String name, long value) {
-		return thenOrFatalError(sendDirectly(new TdApi.SetOption(name, new TdApi.OptionValueInteger(value)), false));
+		return thenOrFatalError(sendDirectly(new TdApi.SetOption(name, new TdApi.OptionValueInteger(value)),
+				DEFAULT_TIMEOUT,
+				false
+		));
 	}
 
 	/**
@@ -231,7 +245,10 @@ public class AsyncTdEasy {
 	 * @param value option value
 	 */
 	public Mono<Void> setOptionBoolean(String name, boolean value) {
-		return thenOrFatalError(sendDirectly(new TdApi.SetOption(name, new TdApi.OptionValueBoolean(value)), false));
+		return thenOrFatalError(sendDirectly(new TdApi.SetOption(name, new TdApi.OptionValueBoolean(value)),
+				DEFAULT_TIMEOUT,
+				false
+		));
 	}
 
 	/**
@@ -240,7 +257,10 @@ public class AsyncTdEasy {
 	 * @return The value or nothing
 	 */
 	public Mono<String> getOptionString(String name) {
-		return this.<TdApi.OptionValue>sendDirectly(new TdApi.GetOption(name), false).<OptionValue>flatMap(MonoUtils::orElseThrow).flatMap((TdApi.OptionValue value) -> {
+		return this
+				.<TdApi.OptionValue>sendDirectly(new TdApi.GetOption(name), DEFAULT_TIMEOUT, false)
+				.flatMap(MonoUtils::orElseThrow)
+				.flatMap((TdApi.OptionValue value) -> {
 			switch (value.getConstructor()) {
 				case OptionValueString.CONSTRUCTOR:
 					return Mono.just(((OptionValueString) value).value);
@@ -259,17 +279,20 @@ public class AsyncTdEasy {
 	 * @return The value or nothing
 	 */
 	public Mono<Long> getOptionInteger(String name) {
-		return this.<TdApi.OptionValue>sendDirectly(new TdApi.GetOption(name), false).<TdApi.OptionValue>flatMap(MonoUtils::orElseThrow).flatMap((TdApi.OptionValue value) -> {
-			switch (value.getConstructor()) {
-				case OptionValueInteger.CONSTRUCTOR:
-					return Mono.just(((OptionValueInteger) value).value);
-				case OptionValueEmpty.CONSTRUCTOR:
-					return Mono.empty();
-				default:
-					return Mono.error(new UnsupportedOperationException("The option " + name + " is of type "
-							+ value.getClass().getSimpleName()));
-			}
-		});
+		return this
+				.<TdApi.OptionValue>sendDirectly(new TdApi.GetOption(name), DEFAULT_TIMEOUT, false)
+				.flatMap(MonoUtils::orElseThrow)
+				.flatMap((TdApi.OptionValue value) -> {
+					switch (value.getConstructor()) {
+						case OptionValueInteger.CONSTRUCTOR:
+							return Mono.just(((OptionValueInteger) value).value);
+						case OptionValueEmpty.CONSTRUCTOR:
+							return Mono.empty();
+						default:
+							return Mono.error(new UnsupportedOperationException(
+									"The option " + name + " is of type " + value.getClass().getSimpleName()));
+					}
+				});
 	}
 
 	/**
@@ -278,17 +301,20 @@ public class AsyncTdEasy {
 	 * @return The value or nothing
 	 */
 	public Mono<Boolean> getOptionBoolean(String name) {
-		return this.<TdApi.OptionValue>sendDirectly(new TdApi.GetOption(name), false).<TdApi.OptionValue>flatMap(MonoUtils::orElseThrow).flatMap((TdApi.OptionValue value) -> {
-			switch (value.getConstructor()) {
-				case OptionValueBoolean.CONSTRUCTOR:
-					return Mono.just(((OptionValueBoolean) value).value);
-				case OptionValueEmpty.CONSTRUCTOR:
-					return Mono.empty();
-				default:
-					return Mono.error(new UnsupportedOperationException("The option " + name + " is of type "
-							+ value.getClass().getSimpleName()));
-			}
-		});
+		return this
+				.<TdApi.OptionValue>sendDirectly(new TdApi.GetOption(name), DEFAULT_TIMEOUT, false)
+				.flatMap(MonoUtils::orElseThrow)
+				.flatMap((TdApi.OptionValue value) -> {
+					switch (value.getConstructor()) {
+						case OptionValueBoolean.CONSTRUCTOR:
+							return Mono.just(((OptionValueBoolean) value).value);
+						case OptionValueEmpty.CONSTRUCTOR:
+							return Mono.empty();
+						default:
+							return Mono.error(new UnsupportedOperationException(
+									"The option " + name + " is of type " + value.getClass().getSimpleName()));
+					}
+				});
 	}
 
 	/**
@@ -296,10 +322,11 @@ public class AsyncTdEasy {
 	 * be called from any thread.
 	 *
 	 * @param request Request to the TDLib.
+	 * @param timeout Timeout.
 	 * @return The request response.
 	 */
-	public <T extends Object> Mono<TdResult<T>> execute(TdApi.Function request) {
-		return td.<T>execute(request, true);
+	public <T extends Object> Mono<TdResult<T>> execute(TdApi.Function request, Duration timeout) {
+		return td.execute(request, timeout, true);
 	}
 
 	/**
@@ -322,7 +349,7 @@ public class AsyncTdEasy {
 					logger.debug("Setting requestedDefinitiveExit: true");
 					requestedDefinitiveExit.tryEmitNext(true);
 				})
-				.then(td.execute(new TdApi.Close(), false).doOnSubscribe(s -> {
+				.then(td.execute(new TdApi.Close(), DEFAULT_TIMEOUT, false).doOnSubscribe(s -> {
 					logger.debug("Sending TdApi.Close");
 				}))
 				.doOnNext(closeResponse -> logger.debug("TdApi.Close response is: \"{}\"",
@@ -342,7 +369,7 @@ public class AsyncTdEasy {
 	}
 
 	private Mono<Update> catchErrors(Object obj) {
-		return Mono.<Update>fromCallable(() -> {
+		return Mono.fromCallable(() -> {
 			if (obj.getConstructor() == Error.CONSTRUCTOR) {
 				var error = (Error) obj;
 
@@ -419,27 +446,27 @@ public class AsyncTdEasy {
 								parameters.enableStorageOptimizer = settings.enableStorageOptimizer;
 								parameters.ignoreFileNames = settings.ignoreFileNames;
 								return new SetTdlibParameters(parameters);
-							}).flatMap((SetTdlibParameters obj1) -> sendDirectly(obj1, false)));
+							}).flatMap((SetTdlibParameters obj1) -> sendDirectly(obj1, DEFAULT_TIMEOUT, false)));
 						case AuthorizationStateWaitEncryptionKey.CONSTRUCTOR:
-							return thenOrFatalError(sendDirectly(new CheckDatabaseEncryptionKey(), false))
+							return thenOrFatalError(sendDirectly(new CheckDatabaseEncryptionKey(), DEFAULT_TIMEOUT, false))
 									.onErrorResume((error) -> {
 										logger.error("Error while checking TDLib encryption key", error);
-										return sendDirectly(new TdApi.Close(), false).then();
+										return sendDirectly(new TdApi.Close(), DEFAULT_TIMEOUT, false).then();
 									});
 						case AuthorizationStateWaitPhoneNumber.CONSTRUCTOR:
 							return thenOrFatalError(Mono.from(this.settings.asFlux()).flatMap(settings -> {
 								if (settings.isPhoneNumberSet()) {
 									return sendDirectly(new SetAuthenticationPhoneNumber(String.valueOf(settings.getPhoneNumber()),
 											new PhoneNumberAuthenticationSettings(false, false, false)
-									), false);
+									), DEFAULT_TIMEOUT, false);
 								} else if (settings.isBotTokenSet()) {
-									return sendDirectly(new CheckAuthenticationBotToken(settings.getBotToken()), false);
+									return sendDirectly(new CheckAuthenticationBotToken(settings.getBotToken()), DEFAULT_TIMEOUT, false);
 								} else {
 									return Mono.error(new IllegalArgumentException("A bot is neither an user or a bot"));
 								}
 							})).onErrorResume((error) -> {
 								logger.error("Error while waiting for phone number", error);
-								return sendDirectly(new TdApi.Close(), false).then();
+								return sendDirectly(new TdApi.Close(), DEFAULT_TIMEOUT, false).then();
 							});
 						case AuthorizationStateWaitRegistration.CONSTRUCTOR:
 							var authorizationStateWaitRegistration = (AuthorizationStateWaitRegistration) obj;
@@ -471,7 +498,7 @@ public class AsyncTdEasy {
 														.defaultIfEmpty("")
 														.doOnNext(lastName -> registerUser.lastName = lastName)
 												)
-												.then(sendDirectly(registerUser, false)));
+												.then(sendDirectly(registerUser, DEFAULT_TIMEOUT, false)));
 									});
 						case TdApi.AuthorizationStateWaitOtherDeviceConfirmation.CONSTRUCTOR:
 							var authorizationStateWaitOtherDeviceConfirmation = (AuthorizationStateWaitOtherDeviceConfirmation) obj;
@@ -495,7 +522,7 @@ public class AsyncTdEasy {
 														authorizationStateWaitCode.codeInfo.timeout,
 														authorizationStateWaitCode.codeInfo.type
 												)
-										).flatMap(code -> sendDirectly(new CheckAuthenticationCode(code), false)));
+										).flatMap(code -> sendDirectly(new CheckAuthenticationCode(code), DEFAULT_TIMEOUT, false)));
 									});
 						case AuthorizationStateWaitPassword.CONSTRUCTOR:
 							var authorizationStateWaitPassword = (AuthorizationStateWaitPassword) obj;
@@ -505,7 +532,7 @@ public class AsyncTdEasy {
 									.flatMap(handler -> {
 										return MonoUtils.thenOrLogRepeatError(() -> handler.onParameterRequest(Parameter.ASK_PASSWORD,
 												new ParameterInfoPasswordHint(authorizationStateWaitPassword.passwordHint)
-										).flatMap(password -> sendDirectly(new CheckAuthenticationPassword(password), false)));
+										).flatMap(password -> sendDirectly(new CheckAuthenticationPassword(password), DEFAULT_TIMEOUT, false)));
 									});
 						case AuthorizationStateReady.CONSTRUCTOR: {
 							this.authState.tryEmitNext(new AuthorizationStateReady());

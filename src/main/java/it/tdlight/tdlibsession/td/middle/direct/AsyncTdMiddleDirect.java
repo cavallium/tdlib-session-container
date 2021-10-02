@@ -16,6 +16,7 @@ import it.tdlight.tdlibsession.td.direct.TelegramClientFactory;
 import it.tdlight.tdlibsession.td.middle.AsyncTdMiddle;
 import it.tdlight.tdlibsession.td.middle.TdClusterManager;
 import it.tdlight.utils.MonoUtils;
+import java.time.Duration;
 import org.warp.commonutils.log.Logger;
 import org.warp.commonutils.log.LoggerFactory;
 import reactor.core.publisher.Flux;
@@ -101,9 +102,11 @@ public class AsyncTdMiddleDirect extends AbstractVerticle implements AsyncTdMidd
 	}
 
 	@Override
-	public <T extends Object> Mono<TdResult<T>> execute(Function requestFunction, boolean executeDirectly) {
+	public <T extends Object> Mono<TdResult<T>> execute(Function requestFunction,
+			Duration timeout,
+			boolean executeDirectly) {
 		return td
-				.<T>execute(requestFunction, executeDirectly)
+				.<T>execute(requestFunction, timeout, executeDirectly)
 				.onErrorMap(error -> ResponseError.newResponseError(requestFunction, botAlias, error));
 	}
 }

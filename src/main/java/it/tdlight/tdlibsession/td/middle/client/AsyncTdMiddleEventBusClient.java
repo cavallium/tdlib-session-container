@@ -343,8 +343,9 @@ public class AsyncTdMiddleEventBusClient implements AsyncTdMiddle {
 	}
 
 	@Override
-	public <T extends TdApi.Object> Mono<TdResult<T>> execute(Function request, boolean executeDirectly) {
-		var req = new ExecuteObject(executeDirectly, request);
+	public <T extends TdApi.Object> Mono<TdResult<T>> execute(Function request, Duration timeout, boolean executeSync) {
+		var req = new ExecuteObject(executeSync, request);
+		var deliveryOptions = new DeliveryOptions(this.deliveryOptions).setSendTimeout(timeout.toMillis());
 
 		var crashMono = crash.asMono()
 				.doOnSuccess(s -> logger.debug("Failed request {} because the TDLib session was already crashed", request))

@@ -25,6 +25,7 @@ import it.tdlight.jni.TdApi.UpdateConnectionState;
 import it.tdlight.jni.TdApi.UpdateNewMessage;
 import it.tdlight.jni.TdApi.User;
 import it.tdlight.tdlibsession.td.ReactorTelegramClient;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
@@ -112,7 +113,7 @@ public class TestClient implements ReactorTelegramClient {
 	}
 
 	@Override
-	public Mono<TdApi.Object> send(Function query) {
+	public Mono<TdApi.Object> send(Function query, Duration timeout) {
 		return Mono.fromCallable(() -> {
 			TdApi.Object result = executeCommon(query);
 			if (result != null) {
