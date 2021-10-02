@@ -16,7 +16,6 @@ import io.vertx.reactivex.core.streams.ReadStream;
 import io.vertx.reactivex.core.streams.WriteStream;
 import it.tdlight.jni.TdApi;
 import it.tdlight.jni.TdApi.Chat;
-import it.tdlight.jni.TdApi.Object;
 import it.tdlight.tdlibsession.td.TdError;
 import it.tdlight.tdlibsession.td.TdResult;
 import java.time.Duration;
@@ -86,11 +85,11 @@ public class MonoUtils {
 		}
 	}
 
-	public static <R extends TdApi.Object> Mono<R> orElseThrow(TdResult<R> value) {
+	public static <T extends TdApi.Object> void orElseThrow(TdResult<T> value, SynchronousSink<T> sink) {
 		if (value.succeeded()) {
-			return Mono.just(value.result());
+			sink.next(value.result());
 		} else {
-			return Mono.error(new TdError(value.cause().code, value.cause().message));
+			sink.error(new TdError(value.cause().code, value.cause().message));
 		}
 	}
 

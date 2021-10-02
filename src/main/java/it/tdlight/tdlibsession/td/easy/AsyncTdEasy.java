@@ -259,8 +259,8 @@ public class AsyncTdEasy {
 	public Mono<String> getOptionString(String name) {
 		return this
 				.<TdApi.OptionValue>sendDirectly(new TdApi.GetOption(name), DEFAULT_TIMEOUT, false)
-				.flatMap(MonoUtils::orElseThrow)
-				.flatMap((TdApi.OptionValue value) -> {
+				.<TdApi.OptionValue>handle(MonoUtils::orElseThrow)
+				.flatMap(value -> {
 			switch (value.getConstructor()) {
 				case OptionValueString.CONSTRUCTOR:
 					return Mono.just(((OptionValueString) value).value);
@@ -281,8 +281,8 @@ public class AsyncTdEasy {
 	public Mono<Long> getOptionInteger(String name) {
 		return this
 				.<TdApi.OptionValue>sendDirectly(new TdApi.GetOption(name), DEFAULT_TIMEOUT, false)
-				.flatMap(MonoUtils::orElseThrow)
-				.flatMap((TdApi.OptionValue value) -> {
+				.<TdApi.OptionValue>handle(MonoUtils::orElseThrow)
+				.flatMap(value -> {
 					switch (value.getConstructor()) {
 						case OptionValueInteger.CONSTRUCTOR:
 							return Mono.just(((OptionValueInteger) value).value);
@@ -303,8 +303,8 @@ public class AsyncTdEasy {
 	public Mono<Boolean> getOptionBoolean(String name) {
 		return this
 				.<TdApi.OptionValue>sendDirectly(new TdApi.GetOption(name), DEFAULT_TIMEOUT, false)
-				.flatMap(MonoUtils::orElseThrow)
-				.flatMap((TdApi.OptionValue value) -> {
+				.<TdApi.OptionValue>handle(MonoUtils::orElseThrow)
+				.flatMap(value -> {
 					switch (value.getConstructor()) {
 						case OptionValueBoolean.CONSTRUCTOR:
 							return Mono.just(((OptionValueBoolean) value).value);
