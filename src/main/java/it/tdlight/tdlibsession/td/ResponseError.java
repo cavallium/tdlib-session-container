@@ -18,7 +18,7 @@ public class ResponseError extends IOException {
 	@NotNull
 	private final String message;
 
-	private ResponseError(@NotNull Function function, @NotNull String botName, @NotNull TdApi.Error tdError, @Nullable Throwable cause) {
+	private ResponseError(@NotNull Function<?> function, @NotNull String botName, @NotNull TdApi.Error tdError, @Nullable Throwable cause) {
 		super("Bot '" + botName + "' failed the request '" + functionToInlineString(function) + "': " + tdError.code + " " + tdError.message, cause);
 		this.botName = botName;
 		this.tag = functionToInlineString(function);
@@ -34,7 +34,7 @@ public class ResponseError extends IOException {
 		this.message = tdError.message;
 	}
 
-	private ResponseError(@NotNull Function function, @NotNull String botName, @Nullable Throwable cause) {
+	private ResponseError(@NotNull Function<?> function, @NotNull String botName, @Nullable Throwable cause) {
 		super("Bot '" + botName + "' failed the request '" + functionToInlineString(function) + "': " + (cause == null ? null : cause.getMessage()), cause);
 		this.botName = botName;
 		this.tag = functionToInlineString(function);
@@ -50,7 +50,7 @@ public class ResponseError extends IOException {
 		this.message = (cause == null ? "" : (cause.getMessage() == null ? "" : cause.getMessage()));
 	}
 
-	public static ResponseError newResponseError(@NotNull Function function,
+	public static ResponseError newResponseError(@NotNull Function<?> function,
 			@NotNull String botName,
 			@NotNull TdApi.Error tdError,
 			@Nullable Throwable cause) {
@@ -71,7 +71,7 @@ public class ResponseError extends IOException {
 		return new ResponseError(tag, botName, tdError, cause);
 	}
 
-	public static ResponseError newResponseError(@NotNull Function function,
+	public static ResponseError newResponseError(@NotNull Function<?> function,
 			@NotNull String botName,
 			@Nullable Throwable cause) {
 		return new ResponseError(function, botName, cause);
@@ -84,7 +84,7 @@ public class ResponseError extends IOException {
 	}
 
 	@Nullable
-	public static <T> T get(@NotNull Function function, @NotNull String botName, CompletableFuture<T> action) throws ResponseError {
+	public static <T> T get(@NotNull Function<?> function, @NotNull String botName, CompletableFuture<T> action) throws ResponseError {
 		try {
 			return action.get();
 		} catch (InterruptedException e) {
@@ -131,7 +131,7 @@ public class ResponseError extends IOException {
 		return message;
 	}
 
-	private static String functionToInlineString(Function function) {
+	private static String functionToInlineString(Function<?> function) {
 		return function
 				.toString()
 				.replace("\n", " ")

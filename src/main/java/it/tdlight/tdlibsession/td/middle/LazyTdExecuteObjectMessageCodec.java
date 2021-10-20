@@ -2,10 +2,12 @@ package it.tdlight.tdlibsession.td.middle;
 
 import io.vertx.core.buffer.Buffer;
 import io.vertx.core.eventbus.MessageCodec;
+import it.tdlight.jni.TdApi;
 
-public class LazyTdExecuteObjectMessageCodec implements MessageCodec<ExecuteObject, ExecuteObject> {
+public class LazyTdExecuteObjectMessageCodec<T extends TdApi.Object>
+		implements MessageCodec<ExecuteObject<T>, ExecuteObject<T>> {
 
-	private static final TdExecuteObjectMessageCodec realCodec = new TdExecuteObjectMessageCodec();
+	private static final TdExecuteObjectMessageCodec<?> realCodec = new TdExecuteObjectMessageCodec<>();
 
 	public LazyTdExecuteObjectMessageCodec() {
 		super();
@@ -17,12 +19,12 @@ public class LazyTdExecuteObjectMessageCodec implements MessageCodec<ExecuteObje
 	}
 
 	@Override
-	public ExecuteObject decodeFromWire(int pos, Buffer buffer) {
-		return new ExecuteObject(pos, buffer);
+	public ExecuteObject<T> decodeFromWire(int pos, Buffer buffer) {
+		return new ExecuteObject<>(pos, buffer);
 	}
 
 	@Override
-	public ExecuteObject transform(ExecuteObject t) {
+	public ExecuteObject<T> transform(ExecuteObject t) {
 		// If a message is sent *locally* across the event bus.
 		// This sends message just as is
 		return t;

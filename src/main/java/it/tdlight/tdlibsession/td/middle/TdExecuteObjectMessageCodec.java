@@ -7,7 +7,8 @@ import it.tdlight.jni.TdApi.Function;
 import it.tdlight.utils.BufferUtils;
 import java.time.Duration;
 
-public class TdExecuteObjectMessageCodec implements MessageCodec<ExecuteObject, ExecuteObject> {
+public class TdExecuteObjectMessageCodec<T extends TdApi.Object>
+		implements MessageCodec<ExecuteObject<T>, ExecuteObject<T>> {
 
 	public TdExecuteObjectMessageCodec() {
 		super();
@@ -22,17 +23,18 @@ public class TdExecuteObjectMessageCodec implements MessageCodec<ExecuteObject, 
 		});
 	}
 
+	@SuppressWarnings("unchecked")
 	@Override
-	public ExecuteObject decodeFromWire(int pos, Buffer buffer) {
-		return BufferUtils.decode(pos, buffer, is -> new ExecuteObject(
+	public ExecuteObject<T> decodeFromWire(int pos, Buffer buffer) {
+		return BufferUtils.decode(pos, buffer, is -> new ExecuteObject<T>(
 				is.readBoolean(),
-				(Function) TdApi.Deserializer.deserialize(is),
+				(Function<T>) TdApi.Deserializer.deserialize(is),
 				Duration.ofMillis(is.readLong())
 		));
 	}
 
 	@Override
-	public ExecuteObject transform(ExecuteObject t) {
+	public ExecuteObject<T> transform(ExecuteObject<T> t) {
 		// If a message is sent *locally* across the event bus.
 		// This sends message just as is
 		return t;

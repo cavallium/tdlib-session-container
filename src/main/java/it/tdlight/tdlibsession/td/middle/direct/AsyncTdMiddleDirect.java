@@ -102,7 +102,7 @@ public class AsyncTdMiddleDirect extends AbstractVerticle implements AsyncTdMidd
 	}
 
 	@Override
-	public <T extends Object> Mono<TdResult<T>> execute(Function requestFunction,
+	public <T extends Object> Mono<TdResult<T>> execute(Function<T> requestFunction,
 			Duration timeout,
 			boolean executeDirectly) {
 		return td

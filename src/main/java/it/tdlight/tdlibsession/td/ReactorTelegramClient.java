@@ -12,7 +12,7 @@ public interface ReactorTelegramClient {
 
 	Flux<Object> receive();
 
-	Mono<TdApi.Object> send(TdApi.Function query, Duration timeout);
+	<T extends TdApi.Object> Mono<TdApi.Object> send(TdApi.Function<T> query, Duration timeout);
 
-	TdApi.Object execute(TdApi.Function query);
+	<T extends TdApi.Object> TdApi.Object execute(TdApi.Function<T> query);
 }

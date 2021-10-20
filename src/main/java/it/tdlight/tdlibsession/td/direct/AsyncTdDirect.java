@@ -27,6 +27,6 @@ public interface AsyncTdDirect {
 	 * @param synchronous Execute synchronously.
 	 * @return The request response or {@link it.tdlight.jni.TdApi.Error}.
 	 */
-	<T extends TdApi.Object> Mono<TdResult<T>> execute(Function request, Duration timeout, boolean synchronous);
+	<T extends TdApi.Object> Mono<TdResult<T>> execute(Function<T> request, Duration timeout, boolean synchronous);
 
 }

@@ -90,7 +90,7 @@ public class AsyncTdMiddleLocal implements AsyncTdMiddle {
 	}
 
 	@Override
-	public <T extends Object> Mono<TdResult<T>> execute(Function request, Duration timeout, boolean executeDirectly) {
+	public <T extends Object> Mono<TdResult<T>> execute(Function<T> request, Duration timeout, boolean executeDirectly) {
 		var startError = this.startError.get();
 		if (startError != null) {
 			return Mono.error(startError);

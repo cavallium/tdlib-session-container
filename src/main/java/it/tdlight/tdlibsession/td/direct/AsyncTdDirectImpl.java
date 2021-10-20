@@ -41,7 +41,7 @@ public class AsyncTdDirectImpl implements AsyncTdDirect {
 	}
 
 	@Override
-	public <T extends TdApi.Object> Mono<TdResult<T>> execute(Function request, Duration timeout, boolean synchronous) {
+	public <T extends TdApi.Object> Mono<TdResult<T>> execute(Function<T> request, Duration timeout, boolean synchronous) {
 		if (synchronous) {
 			return MonoUtils.fromBlockingSingle(() -> {
 						var td = this.td.get();

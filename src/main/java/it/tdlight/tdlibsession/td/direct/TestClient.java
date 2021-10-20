@@ -113,7 +113,7 @@ public class TestClient implements ReactorTelegramClient {
 	}
 
 	@Override
-	public Mono<TdApi.Object> send(Function query, Duration timeout) {
+	public <T extends TdApi.Object> Mono<TdApi.Object> send(Function<T> query, Duration timeout) {
 		return Mono.fromCallable(() -> {
 			TdApi.Object result = executeCommon(query);
 			if (result != null) {
@@ -124,7 +124,7 @@ public class TestClient implements ReactorTelegramClient {
 	}
 
 	@Override
-	public TdApi.Object execute(Function query) {
+	public <T extends TdApi.Object> TdApi.Object execute(Function<T> query) {
 		TdApi.Object result = executeCommon(query);
 		if (result != null) {
 			return result;
@@ -133,7 +133,7 @@ public class TestClient implements ReactorTelegramClient {
 	}
 
 	@Nullable
-	public TdApi.Object executeCommon(Function query) {
+	public <T extends TdApi.Object> TdApi.Object executeCommon(Function<T> query) {
 		switch (query.getConstructor()) {
 			case SetLogVerbosityLevel.CONSTRUCTOR:
 			case SetLogTagVerbosityLevel.CONSTRUCTOR:

@@ -74,7 +74,7 @@ public class WrappedReactorTelegramClient implements ReactorTelegramClient {
 	 * @throws NullPointerException if query is null.
 	 */
 	@Override
-	public Mono<TdApi.Object> send(TdApi.Function query, Duration timeout) {
+	public <T extends TdApi.Object> Mono<TdApi.Object> send(TdApi.Function<T> query, Duration timeout) {
 		return Mono.from(reactiveTelegramClient.send(query, timeout)).single();
 	}
 
@@ -86,7 +86,7 @@ public class WrappedReactorTelegramClient implements ReactorTelegramClient {
 	 * @throws NullPointerException if query is null.
 	 */
 	@Override
-	public TdApi.Object execute(TdApi.Function query) {
+	public <T extends TdApi.Object> TdApi.Object execute(TdApi.Function<T> query) {
 		return reactiveTelegramClient.execute(query);
 	}
 }

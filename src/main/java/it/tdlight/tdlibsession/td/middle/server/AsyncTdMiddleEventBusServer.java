@@ -56,7 +56,7 @@ public class AsyncTdMiddleEventBusServer extends AbstractVerticle {
 
 	// Variables configured at startup
 	private final AtomicReference<AsyncTdDirectImpl> td = new AtomicReference<>();
-	private final AtomicReference<MessageConsumer<ExecuteObject>> executeConsumer = new AtomicReference<>();
+	private final AtomicReference<MessageConsumer<ExecuteObject<?>>> executeConsumer = new AtomicReference<>();
 	private final AtomicReference<MessageConsumer<byte[]>> readBinlogConsumer = new AtomicReference<>();
 	private final AtomicReference<MessageConsumer<byte[]>> readyToReceiveConsumer = new AtomicReference<>();
 	private final AtomicReference<MessageConsumer<byte[]>> pingConsumer = new AtomicReference<>();
@@ -135,10 +135,10 @@ public class AsyncTdMiddleEventBusServer extends AbstractVerticle {
 		return Mono.<Void>create(registrationSink -> {
 			logger.trace("Preparing listeners");
 
-			MessageConsumer<ExecuteObject> executeConsumer = vertx.eventBus().consumer(botAddress + ".execute");
+			MessageConsumer<ExecuteObject<?>> executeConsumer = vertx.eventBus().consumer(botAddress + ".execute");
 			this.executeConsumer.set(executeConsumer);
 			Flux
-					.<Message<ExecuteObject>>create(sink -> {
+					.<Message<ExecuteObject<?>>>create(sink -> {
 						executeConsumer.handler(sink::next);
 						executeConsumer.endHandler(h -> sink.complete());
 					})
@@ -254,7 +254,7 @@ public class AsyncTdMiddleEventBusServer extends AbstractVerticle {
 	/**
 	 * Override some requests
 	 */
-	private Function overrideRequest(Function request, int botId) {
+	private <T extends TdApi.Object> Function<T> overrideRequest(Function<T> request, int botId) {
 		if (request.getConstructor() == SetTdlibParameters.CONSTRUCTOR) {
 			// Fix session directory locations
 			var setTdlibParamsObj = (SetTdlibParameters) request;

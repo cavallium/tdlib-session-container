@@ -343,8 +343,9 @@ public class AsyncTdMiddleEventBusClient implements AsyncTdMiddle {
 	}
 
 	@Override
-	public <T extends TdApi.Object> Mono<TdResult<T>> execute(Function request, Duration timeout, boolean executeSync) {
-		var req = new ExecuteObject(executeSync, request, timeout);
+	public <T extends TdApi.Object> Mono<TdResult<T>> execute(Function<T> request, Duration timeout,
+			boolean executeSync) {
+		var req = new ExecuteObject<>(executeSync, request, timeout);
 		var deliveryOptions = new DeliveryOptions(this.deliveryOptions)
 				// Timeout + 5s (5 seconds extra are used to wait the graceful server-side timeout response)
 				.setSendTimeout(timeout.toMillis() + 5000);

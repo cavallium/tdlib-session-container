@@ -24,5 +24,5 @@ public interface AsyncTdMiddle {
 	 * @param timeout Timeout.
 	 * @param executeSync Execute the function synchronously.
 	 */
-	<T extends TdApi.Object> Mono<TdResult<T>> execute(TdApi.Function request, Duration timeout, boolean executeSync);
+	<T extends TdApi.Object> Mono<TdResult<T>> execute(TdApi.Function<T> request, Duration timeout, boolean executeSync);
 }

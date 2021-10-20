@@ -7,17 +7,17 @@ import java.time.Duration;
 import java.util.Objects;
 import java.util.StringJoiner;
 
-public class ExecuteObject {
+public class ExecuteObject<T extends TdApi.Object> {
 
-	private static final TdExecuteObjectMessageCodec realCodec = new TdExecuteObjectMessageCodec();
+	private static final TdExecuteObjectMessageCodec<?> realCodec = new TdExecuteObjectMessageCodec<>();
 
 	private boolean executeDirectly;
-	private TdApi.Function request;
+	private TdApi.Function<T> request;
 	private Duration timeout;
 	private int pos;
 	private Buffer buffer;
 
-	public ExecuteObject(boolean executeDirectly, Function request, Duration timeout) {
+	public ExecuteObject(boolean executeDirectly, Function<T> request, Duration timeout) {
 		if (request == null) throw new NullPointerException();
 
 		this.executeDirectly = executeDirectly;
@@ -32,7 +32,8 @@ public class ExecuteObject {
 
 	private void tryDecode() {
 		if (request == null) {
-			var data = realCodec.decodeFromWire(pos, buffer);
+			@SuppressWarnings("unchecked")
+			ExecuteObject<T> data = (ExecuteObject<T>) realCodec.decodeFromWire(pos, buffer);
 			this.executeDirectly = data.executeDirectly;
 			this.request = data.request;
 			this.buffer = null;
@@ -45,7 +46,7 @@ public class ExecuteObject {
 		return executeDirectly;
 	}
 
-	public TdApi.Function getRequest() {
+	public TdApi.Function<T> getRequest() {
 		tryDecode();
 		return request;
 	}
@@ -65,7 +66,7 @@ public class ExecuteObject {
 			return false;
 		}
 
-		ExecuteObject that = (ExecuteObject) o;
+		ExecuteObject<?> that = (ExecuteObject<?>) o;
 
 		if (executeDirectly != that.executeDirectly) {
 			return false;

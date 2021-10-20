@@ -186,11 +186,11 @@ public class AsyncTdEasy {
 	 * @param timeout Timeout duration.
 	 * @return The response or {@link TdApi.Error}.
 	 */
-	public <T extends Object> Mono<TdResult<T>> send(TdApi.Function request, Duration timeout) {
+	public <T extends Object> Mono<TdResult<T>> send(TdApi.Function<T> request, Duration timeout) {
 		return td.execute(request, timeout, false);
 	}
 
-	private <T extends TdApi.Object> Mono<TdResult<T>> sendDirectly(Function obj, boolean synchronous) {
+	private <T extends TdApi.Object> Mono<TdResult<T>> sendDirectly(Function<T> obj, boolean synchronous) {
 		return td.execute(obj, AsyncTdEasy.DEFAULT_TIMEOUT, synchronous);
 	}
 
@@ -315,7 +315,7 @@ public class AsyncTdEasy {
 	 * @param timeout Timeout.
 	 * @return The request response.
 	 */
-	public <T extends Object> Mono<TdResult<T>> execute(TdApi.Function request, Duration timeout) {
+	public <T extends Object> Mono<TdResult<T>> execute(TdApi.Function<T> request, Duration timeout) {
 		return td.execute(request, timeout, true);
 	}
 
