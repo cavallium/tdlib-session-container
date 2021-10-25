@@ -92,8 +92,6 @@ public class AsyncTdDirectImpl implements AsyncTdDirect {
 
 	@Override
 	public Flux<TdApi.Object> receive(AsyncTdDirectOptions options) {
-		// If closed it will be either true or false
-		final One<Boolean> closedFromTd = Sinks.one();
 		return Mono
 				.fromCallable(td::get)
 				.single()
@@ -104,12 +102,7 @@ public class AsyncTdDirectImpl implements AsyncTdDirect {
 							&& ((UpdateAuthorizationState) update).authorizationState.getConstructor()
 							== AuthorizationStateClosed.CONSTRUCTOR) {
 						logger.debug("Received closed status from tdlib");
-						closedFromTd.tryEmitValue(true);
 					}
-				})
-				.doOnCancel(() -> {
-					// Try to emit false, so that if it has not been closed from tdlib, now it is explicitly false.
-					closedFromTd.tryEmitValue(false);
 				})
 				.subscribeOn(Schedulers.boundedElastic());
 	}

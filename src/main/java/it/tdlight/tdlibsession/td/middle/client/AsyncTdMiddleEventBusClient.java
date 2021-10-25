@@ -53,17 +53,17 @@ public class AsyncTdMiddleEventBusClient implements AsyncTdMiddle {
 
 	private final One<BinlogAsyncFile> binlog = Sinks.one();
 
-	private final One<MessageConsumer<TdResultList>> updates = Sinks.one();
+	private final AtomicReference<MessageConsumer<TdResultList>> updates = new AtomicReference<>();
 	// This will only result in a successful completion, never completes in other ways
-	private final Empty<Void> updatesStreamEnd = Sinks.one();
+	private final Empty<Void> updatesStreamEnd = Sinks.empty();
 	// This will only result in a crash, never completes in other ways
-	private final Empty<Void> crash = Sinks.one();
+	private final Empty<Void> crash = Sinks.empty();
 	// This will only result in a successful completion, never completes in other ways
-	private final Empty<Void> pingFail = Sinks.one();
+	private final Empty<Void> pingFail = Sinks.empty();
 	// This will only result in a successful completion, never completes in other ways.
 	// It will be called when UpdateAuthorizationStateClosing is intercepted.
 	// If it's completed stop checking if the ping works or not
-	private final Empty<Void> authStateClosing = Sinks.one();
+	private final Empty<Void> authStateClosing = Sinks.empty();
 
 	private long botId;
 	private String botAddress;
@@ -229,12 +229,10 @@ public class AsyncTdMiddleEventBusClient implements AsyncTdMiddle {
 					return Mono
 							.fromRunnable(() -> logger.trace("Emitting updates flux to sink"))
 							.then(MonoUtils.fromBlockingEmpty(() -> {
-								EmitResult result;
-								while ((result = this.updates.tryEmitValue(updateConsumer)) == EmitResult.FAIL_NON_SERIALIZED) {
-									// 10ms
-									LockSupport.parkNanos(10000000);
+								var previous = this.updates.getAndSet(updateConsumer);
+								if (previous != null) {
+									logger.error("Already subscribed a consumer to the updates");
 								}
-								result.orThrow();
 							}))
 							.doOnSuccess(s -> logger.trace("Emitted updates flux to sink"))
 							.doOnSuccess(s -> logger.trace("Waiting to register update consumer across the cluster"))
@@ -251,9 +249,7 @@ public class AsyncTdMiddleEventBusClient implements AsyncTdMiddle {
 
 		return Mono
 				.fromRunnable(() -> logger.trace("Called receive() from parent"))
-				.then(updates.asMono())
-				.publishOn(Schedulers.parallel())
-				.timeout(Duration.ofSeconds(30))
+				.then(Mono.fromCallable(() -> updates.get()))
 				.doOnSuccess(s -> logger.trace("Registering updates flux"))
 				.flatMapMany(updatesMessageConsumer -> MonoUtils.fromMessageConsumer(Mono
 						.empty()

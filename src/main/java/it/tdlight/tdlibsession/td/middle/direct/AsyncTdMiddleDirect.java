@@ -17,8 +17,10 @@ import it.tdlight.tdlibsession.td.middle.AsyncTdMiddle;
 import it.tdlight.tdlibsession.td.middle.TdClusterManager;
 import it.tdlight.utils.MonoUtils;
 import java.time.Duration;
+import java.util.concurrent.atomic.AtomicReference;
 import org.warp.commonutils.log.Logger;
 import org.warp.commonutils.log.LoggerFactory;
+import reactor.core.Disposable;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.core.publisher.Sinks;
@@ -80,14 +82,12 @@ public class AsyncTdMiddleDirect extends AbstractVerticle implements AsyncTdMidd
 
 	@Override
 	public Completable rxStop() {
-		closeRequest.tryEmitEmpty();
-		return Completable.complete();
+		return Completable.fromRunnable(closeRequest::tryEmitEmpty);
 	}
 
 	@Override
 	public Mono<Void> initialize() {
-		return td
-				.initialize();
+		return td.initialize();
 	}
 
 	@Override

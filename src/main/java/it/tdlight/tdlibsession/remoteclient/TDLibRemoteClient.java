@@ -23,6 +23,7 @@ import java.nio.file.Paths;
 import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import org.apache.logging.log4j.LogManager;
 import org.jetbrains.annotations.Nullable;
 import org.warp.commonutils.log.Logger;
@@ -44,7 +45,7 @@ public class TDLibRemoteClient implements AutoCloseable {
 	private final String netInterface;
 	private final int port;
 	private final Set<String> membersAddresses;
-	private final One<TdClusterManager> clusterManager = Sinks.one();
+	private final AtomicReference<TdClusterManager> clusterManager = new AtomicReference<>();
 
 	public static boolean runningFromIntelliJ() {
 		return System.getProperty("java.class.path").contains("idea_rt.jar")
@@ -125,8 +126,13 @@ public class TDLibRemoteClient implements AutoCloseable {
 				.block();
 
 		// Close vert.x on shutdown
-		var vertx = client.clusterManager.asMono().blockOptional().orElseThrow().getVertx();
-		Runtime.getRuntime().addShutdownHook(new Thread(() -> MonoUtils.toMono(vertx.rxClose()).blockOptional()));
+		var vertxMono = Mono.fromCallable(() -> client.clusterManager.get().getVertx());
+		Runtime
+				.getRuntime()
+				.addShutdownHook(new Thread(() -> vertxMono
+						.flatMap(vertx -> MonoUtils.toMono(vertx.rxClose()))
+						.blockOptional())
+				);
 	}
 
 	public Mono<Void> start() {
@@ -163,14 +169,9 @@ public class TDLibRemoteClient implements AutoCloseable {
 						port,
 						membersAddresses
 				))
-				.doOnNext(clusterManager::tryEmitValue)
-				.doOnError(clusterManager::tryEmitError)
-				.doOnSuccess(s -> {
-					if (s == null) {
-						clusterManager.tryEmitEmpty();
-					}
-				})
+				.doOnSuccess(clusterManager::set)
 				.single()
+				.doOnError(ex -> logger.error("Failed to set cluster manager", ex))
 				.flatMap(clusterManager -> {
 					MessageConsumer<StartSessionMessage> startBotConsumer
 							= clusterManager.getEventBus().consumer("bots.start-bot");
@@ -236,10 +237,6 @@ public class TDLibRemoteClient implements AutoCloseable {
 
 	@Override
 	public void close() {
-		this.clusterManager
-				.asMono()
-				.blockOptional()
-				.map(TdClusterManager::getVertx)
-				.ifPresent(v -> v.rxClose().blockingAwait());
+		this.clusterManager.get().getVertx().rxClose().blockingAwait();
 	}
 }
