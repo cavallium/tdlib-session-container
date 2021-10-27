@@ -71,7 +71,7 @@
     </dependencies>
   </dependencyManagement>
   <dependencies>
-    <dependency>
+		<dependency>
       <groupId>io.vertx</groupId>
       <artifactId>vertx-hazelcast</artifactId>
       <version>${vertx.version}</version>
@@ -118,13 +118,18 @@
     <dependency>
       <groupId>io.projectreactor</groupId>
       <artifactId>reactor-core</artifactId>
-      <version>3.4.10</version>
+      <version>3.4.11</version>
     </dependency>
     <dependency>
       <groupId>io.projectreactor</groupId>
       <artifactId>reactor-tools</artifactId>
-      <version>3.4.10</version>
+      <version>3.4.11</version>
     </dependency>
+		<dependency>
+			<groupId>io.projectreactor.addons</groupId>
+			<artifactId>reactor-adapter</artifactId>
+			<version>3.4.5</version>
+		</dependency>
     <dependency>
       <groupId>com.akaita.java</groupId>
       <artifactId>rxjava2-debug</artifactId>
