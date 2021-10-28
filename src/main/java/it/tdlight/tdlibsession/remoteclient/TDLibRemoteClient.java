@@ -47,11 +47,6 @@ public class TDLibRemoteClient implements AutoCloseable {
 	private final Set<String> membersAddresses;
 	private final AtomicReference<TdClusterManager> clusterManager = new AtomicReference<>();
 
-	public static boolean runningFromIntelliJ() {
-		return System.getProperty("java.class.path").contains("idea_rt.jar")
-				|| System.getProperty("idea.test.cyclic.buffer.size") != null;
-	}
-
 	public TDLibRemoteClient(@Nullable SecurityInfo securityInfo,
 			String masterHostname,
 			String netInterface,
@@ -65,10 +60,6 @@ public class TDLibRemoteClient implements AutoCloseable {
 		this.port = port;
 		this.membersAddresses = membersAddresses;
 
-		if (enableAsyncStacktraces && !runningFromIntelliJ()) {
-			//noinspection ReactorAutomaticDebugger
-			ReactorDebugAgent.init();
-		}
 		if (enableAsyncStacktraces && enableFullAsyncStacktraces) {
 			RxJava2Debug.enableRxJava2AssemblyTracking(new String[]{"it.tdlight.utils", "it.tdlight.tdlibsession"});
 		}
