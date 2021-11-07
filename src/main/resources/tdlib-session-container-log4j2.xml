@@ -32,7 +32,7 @@
     <Logger name="it.cavallium.dbengine.database.disk.LLLocalKeyValueDatabase" level="TRACE"/>
     <Logger name="it.cavallium.dbengine.database.disk.LLLocalLuceneIndex" level="TRACE"/>
     <Logger name="com.hazelcast" level="INFO"/>
-    <Root level="DEBUG">
+    <Root level="INFO">
       <filters>
         <MarkerFilter marker="NETWORK_PACKETS" onMatch="DENY"
           onMismatch="NEUTRAL"/>
