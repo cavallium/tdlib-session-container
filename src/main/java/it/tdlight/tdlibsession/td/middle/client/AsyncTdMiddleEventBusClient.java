@@ -66,10 +66,6 @@ public class AsyncTdMiddleEventBusClient implements AsyncTdMiddle {
 	private final AtomicReference<Throwable> crash = new AtomicReference<>();
 	// This will only result in a successful completion, never completes in other ways
 	private final Empty<Void> pingFail = Sinks.empty();
-	// This will only result in a successful completion, never completes in other ways.
-	// It will be called when UpdateAuthorizationStateClosing is intercepted.
-	// If it's completed stop checking if the ping works or not
-	private final Empty<Void> authStateClosing = Sinks.empty();
 
 	private long botId;
 	private String botAddress;
@@ -306,21 +302,25 @@ public class AsyncTdMiddleEventBusClient implements AsyncTdMiddle {
 		logger.trace("Received update {}", update.getClass().getSimpleName());
 		if (update.getConstructor() == TdApi.UpdateAuthorizationState.CONSTRUCTOR) {
 			var updateAuthorizationState = (TdApi.UpdateAuthorizationState) update;
-			switch (updateAuthorizationState.authorizationState.getConstructor()) {
-				case TdApi.AuthorizationStateClosing.CONSTRUCTOR:
-					authStateClosing.tryEmitEmpty();
-					break;
-				case TdApi.AuthorizationStateClosed.CONSTRUCTOR:
-					logger.info("Received AuthorizationStateClosed from tdlib");
-					return cluster.getEventBus()
-							.<EndSessionMessage>rxRequest(this.botAddress + ".read-binlog", EMPTY)
-							.to(RxJava2Adapter::singleToMono)
-							.mapNotNull(Message::body)
-							.doOnNext(latestBinlog -> logger.info("Received binlog from server. Size: {}",
-									BinlogUtils.humanReadableByteCountBin(latestBinlog.binlog().length())))
-							.flatMap(latestBinlog -> this.saveBinlog(latestBinlog.binlog()))
-							.doOnSuccess(s -> logger.info("Overwritten binlog from server"))
-							.thenReturn(update);
+			if (updateAuthorizationState.authorizationState.getConstructor() == AuthorizationStateClosed.CONSTRUCTOR) {
+				logger.info("Received AuthorizationStateClosed from tdlib");
+
+				var pinger = this.pinger.get();
+				if (pinger != null) {
+					pinger.dispose();
+				}
+
+				return cluster.getEventBus()
+						.<EndSessionMessage>rxRequest(this.botAddress + ".read-binlog", EMPTY)
+						.to(RxJava2Adapter::singleToMono)
+						.mapNotNull(Message::body)
+						.doOnNext(latestBinlog -> logger.info("Received binlog from server. Size: {}",
+								BinlogUtils.humanReadableByteCountBin(latestBinlog.binlog().length())
+						))
+						.flatMap(latestBinlog -> this.saveBinlog(latestBinlog.binlog()))
+						.doOnSuccess(s -> logger.info("Overwritten binlog from server"))
+						.doFirst(() -> logger.info("Asking binlog to server"))
+						.thenReturn(update);
 			}
 		}
 		return Mono.just(update);

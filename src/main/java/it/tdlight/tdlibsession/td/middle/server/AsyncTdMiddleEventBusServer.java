@@ -37,6 +37,7 @@ import java.net.ConnectException;
 import java.time.Duration;
 import java.util.List;
 import java.util.Objects;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 import org.warp.commonutils.log.Logger;
 import org.warp.commonutils.log.LoggerFactory;
@@ -82,6 +83,9 @@ public class AsyncTdMiddleEventBusServer extends AbstractVerticle {
 		return Mono
 				.fromCallable(() -> {
 					logger.trace("Stating verticle");
+
+					System.setProperty("it.tdlight.enableShutdownHooks", "false");
+
 					var botId = config().getInteger("botId");
 					if (botId == null || botId <= 0) {
 						throw new IllegalArgumentException("botId is not set!");
@@ -271,10 +275,12 @@ public class AsyncTdMiddleEventBusServer extends AbstractVerticle {
 					if (pingConsumer != null) {
 						pingConsumer.dispose();
 					}
-					var readBinlogConsumer = this.readBinlogConsumer.get();
-					if (readBinlogConsumer != null) {
-						readBinlogConsumer.dispose();
-					}
+					var readBinlogConsumer = this.readBinlogConsumer.getAndSet(null);
+					Schedulers.boundedElastic().schedule(() -> {
+						if (readBinlogConsumer != null) {
+							readBinlogConsumer.dispose();
+						}
+					}, 10, TimeUnit.MINUTES);
 					var readyToReceiveConsumer = this.readyToReceiveConsumer.get();
 					if (readyToReceiveConsumer != null) {
 						readyToReceiveConsumer.dispose();

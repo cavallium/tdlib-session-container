@@ -9,6 +9,7 @@ import io.vertx.core.AsyncResult;
 import io.vertx.core.Future;
 import io.vertx.core.Handler;
 import io.vertx.core.Promise;
+import io.vertx.reactivex.RxHelper;
 import io.vertx.reactivex.core.eventbus.Message;
 import io.vertx.reactivex.core.eventbus.MessageConsumer;
 import io.vertx.reactivex.core.streams.Pipe;
@@ -27,6 +28,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
+import org.apache.commons.lang3.NotImplementedException;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.reactivestreams.Publisher;
@@ -59,7 +61,7 @@ public class MonoUtils {
 
 	public static <T> Mono<T> notImplemented() {
 		return Mono.fromCallable(() -> {
-			throw new UnsupportedOperationException("Method not implemented");
+			throw new NotImplementedException();
 		});
 	}
 
@@ -76,14 +78,6 @@ public class MonoUtils {
 
 	public static <T> Mono<T> fromBlockingSingle(Callable<T> callable) {
 		return fromBlockingMaybe(callable).single();
-	}
-
-	public static <R extends TdApi.Object> void orElseThrowFuture(TdResult<R> value, SynchronousSink<CompletableFuture<R>> sink) {
-		if (value.succeeded()) {
-			sink.next(CompletableFuture.completedFuture(value.result()));
-		} else {
-			sink.next(CompletableFuture.failedFuture(new TdError(value.cause().code, value.cause().message)));
-		}
 	}
 
 	public static <T extends TdApi.Object> void orElseThrow(TdResult<T> value, SynchronousSink<T> sink) {
@@ -104,66 +98,28 @@ public class MonoUtils {
 		});
 	}
 
-	public static <T extends TdApi.Object> Mono<Void> thenOrLogSkipError(Mono<TdResult<T>> optionalMono) {
-		return optionalMono.handle((optional, sink) -> {
-			if (optional.failed()) {
-				logger.error("Received TDLib error: {}", optional.cause());
-			}
-			sink.complete();
-		});
-	}
-
-	public static <T extends TdApi.Object> Mono<T> orElseLogSkipError(TdResult<T> optional) {
-		if (optional.failed()) {
-			logger.error("Received TDLib error: {}", optional.cause());
-			return Mono.empty();
-		}
-		return Mono.just(optional.result());
-	}
-
-	public static <T extends TdApi.Object> Mono<Void> thenOrLogRepeatError(Supplier<? extends Mono<TdResult<T>>> optionalMono) {
-		return Mono.defer(() -> optionalMono.get().handle((TdResult<T> optional, SynchronousSink<Void> sink) -> {
-			if (optional.succeeded()) {
-				sink.complete();
-			} else {
-				logger.error("Received TDLib error: {}", optional.cause());
-				sink.error(new TdError(optional.cause().code, optional.cause().message));
-			}
-		})).retry();
-	}
-
+	@Deprecated
 	public static <T> Mono<T> toMono(Future<T> future) {
-		return Mono.create(sink -> future.onComplete(result -> {
-			if (result.succeeded()) {
-				sink.success(result.result());
-			} else {
-				sink.error(result.cause());
-			}
-		}));
+		return Mono.fromCompletionStage(future.toCompletionStage());
 	}
 
+	@Deprecated
 	@NotNull
 	public static <T> Mono<T> toMono(Single<T> single) {
-		return Mono.from(single.toFlowable());
+		return RxJava2Adapter.singleToMono(single);
 	}
 
+	@Deprecated
 	@NotNull
-	public static <T> Mono<T> toMono(Maybe<T> single) {
-		return Mono.from(single.toFlowable());
+	public static <T> Mono<T> toMono(Maybe<T> maybe) {
+		return RxJava2Adapter.maybeToMono(maybe);
 	}
 
+	@Deprecated
 	@NotNull
 	public static <T> Mono<T> toMono(Completable completable) {
-		return Mono.from(completable.toFlowable());
-	}
-
-	public static <T> Completable toCompletable(Mono<T> s) {
-		return Completable.fromPublisher(s);
-	}
-
-	@SuppressWarnings({"unchecked", "rawtypes"})
-	public static <T> Mono<T> castVoid(Mono<Void> mono) {
-		return (Mono) mono;
+		//noinspection unchecked
+		return (Mono<T>) RxJava2Adapter.completableToMono(completable);
 	}
 
 	public static <T> Flux<T> fromMessageConsumer(Mono<Void> onRegistered, MessageConsumer<T> messageConsumer) {
@@ -177,7 +133,9 @@ public class MonoUtils {
 				.doFirst(() -> logger.trace("Waiting for consumer registration completion..."))
 				.doOnSuccess(s -> logger.trace("Consumer registered"))
 				.then(onRegistered);
-		return messageConsumer.toFlowable().to(RxJava2Adapter::flowableToFlux).mergeWith(registration.then(Mono.empty()));
+		var messages = messageConsumer.toFlowable().to(RxJava2Adapter::flowableToFlux);
+
+		return messages.mergeWith(registration.then(Mono.empty()));
 	}
 
 	public static Scheduler newBoundedSingle(String name) {
@@ -201,17 +159,5 @@ public class MonoUtils {
 		return mono
 				.map(res -> true)
 				.defaultIfEmpty(false);
-	}
-
-	@FunctionalInterface
-	public interface VoidCallable {
-		void call() throws Exception;
-	}
-
-	public static Mono<?> fromVoidCallable(VoidCallable callable) {
-		return Mono.fromCallable(() -> {
-			callable.call();
-			return null;
-		});
 	}
 }
