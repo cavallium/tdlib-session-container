@@ -1,6 +1,8 @@
 package it.tdlight.tdlibsession.td.middle.client;
 
 import io.vertx.core.eventbus.DeliveryOptions;
+import io.vertx.core.eventbus.ReplyException;
+import io.vertx.core.eventbus.ReplyFailure;
 import io.vertx.core.json.JsonObject;
 import io.vertx.reactivex.core.Vertx;
 import io.vertx.reactivex.core.buffer.Buffer;
@@ -32,6 +34,8 @@ import java.util.concurrent.locks.LockSupport;
 import org.warp.commonutils.locks.LockUtils;
 import org.warp.commonutils.log.Logger;
 import org.warp.commonutils.log.LoggerFactory;
+import reactor.adapter.rxjava.RxJava2Adapter;
+import reactor.core.Disposable;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.core.publisher.Sinks;
@@ -51,13 +55,15 @@ public class AsyncTdMiddleEventBusClient implements AsyncTdMiddle {
 	private final DeliveryOptions deliveryOptionsWithTimeout;
 	private final DeliveryOptions pingDeliveryOptions;
 
-	private final One<BinlogAsyncFile> binlog = Sinks.one();
+	private final AtomicReference<BinlogAsyncFile> binlog = new AtomicReference<>();
+
+	private final AtomicReference<Disposable> pinger = new AtomicReference<>();
 
 	private final AtomicReference<MessageConsumer<TdResultList>> updates = new AtomicReference<>();
 	// This will only result in a successful completion, never completes in other ways
 	private final Empty<Void> updatesStreamEnd = Sinks.empty();
 	// This will only result in a crash, never completes in other ways
-	private final Empty<Void> crash = Sinks.empty();
+	private final AtomicReference<Throwable> crash = new AtomicReference<>();
 	// This will only result in a successful completion, never completes in other ways
 	private final Empty<Void> pingFail = Sinks.empty();
 	// This will only result in a successful completion, never completes in other ways.
@@ -121,7 +127,7 @@ public class AsyncTdMiddleEventBusClient implements AsyncTdMiddle {
 	}
 
 	private Mono<Void> saveBinlog(Buffer data) {
-		return this.binlog.asMono().flatMap(binlog -> BinlogUtils.saveBinlog(binlog, data));
+		return Mono.fromSupplier(this.binlog::get).flatMap(binlog -> BinlogUtils.saveBinlog(binlog, data));
 	}
 
 	public Mono<Void> start(long botId,
@@ -134,15 +140,9 @@ public class AsyncTdMiddleEventBusClient implements AsyncTdMiddle {
 		this.botAddress = "bots.bot." + this.botId;
 		this.local = local;
 		this.logger = LoggerFactory.getLogger(this.botId + " " + botAlias);
-		return MonoUtils
-				.fromBlockingEmpty(() -> {
-					EmitResult result;
-					while ((result = this.binlog.tryEmitValue(binlog)) == EmitResult.FAIL_NON_SERIALIZED) {
-						// 10ms
-						LockSupport.parkNanos(10000000);
-					}
-					result.orThrow();
-				})
+
+		return Mono
+				.fromRunnable(() -> this.binlog.set(binlog))
 				.then(binlog.getLastModifiedTime())
 				.zipWith(binlog.readFully().map(Buffer::getDelegate))
 				.single()
@@ -156,69 +156,76 @@ public class AsyncTdMiddleEventBusClient implements AsyncTdMiddle {
 							binlogLastModifiedTime,
 							implementationDetails
 					);
-					return setupUpdatesListener()
-							.then(Mono.defer(() -> {
-								if (local) {
-									return Mono.empty();
-								}
-								logger.trace("Requesting bots.start-bot");
-								return cluster.getEventBus()
-										.<byte[]>rxRequest("bots.start-bot", msg).as(MonoUtils::toMono)
-										.doOnSuccess(s -> logger.trace("bots.start-bot returned successfully"))
-										.subscribeOn(Schedulers.boundedElastic());
-							}))
-							.then(setupPing());
+
+					Mono<Void> startBotRequest;
+
+					if (local) {
+						startBotRequest = Mono.empty();
+					} else {
+						startBotRequest = cluster
+								.getEventBus()
+								.<byte[]>rxRequest("bots.start-bot", msg)
+								.to(RxJava2Adapter::singleToMono)
+								.doOnSuccess(s -> logger.trace("bots.start-bot returned successfully"))
+								.doFirst(() -> logger.trace("Requesting bots.start-bot"))
+								.onErrorMap(ex -> {
+									if (ex instanceof ReplyException) {
+										if (((ReplyException) ex).failureType() == ReplyFailure.NO_HANDLERS) {
+											return new NoClustersAvailableException("Can't start bot "
+													+ botId + " " + botAlias);
+										}
+									}
+									return ex;
+								})
+								.then()
+								.subscribeOn(Schedulers.boundedElastic());
+					}
+
+					return setupUpdatesListener().then(startBotRequest).then(setupPing());
 				});
 	}
 
 	private Mono<Void> setupPing() {
-		return Mono.<Void>fromCallable(() -> {
-			logger.trace("Setting up ping");
-			// Disable ping on local servers
-			if (!local) {
-				Mono
-						.defer(() -> {
-							logger.trace("Requesting ping...");
-							return cluster.getEventBus()
-									.<byte[]>rxRequest(botAddress + ".ping", EMPTY, pingDeliveryOptions)
-									.as(MonoUtils::toMono);
-						})
-						.flatMap(msg -> Mono.fromCallable(msg::body).subscribeOn(Schedulers.boundedElastic()))
-						.repeatWhen(l -> l.delayElements(Duration.ofSeconds(10)).takeWhile(x -> true))
-						.takeUntilOther(Mono.firstWithSignal(
-								this.updatesStreamEnd
-										.asMono()
-										.doOnTerminate(() -> logger.trace("About to kill pinger because updates stream ended")),
-								this.crash
-										.asMono()
-										.onErrorResume(ex -> Mono.empty())
-										.doOnTerminate(() -> logger.trace("About to kill pinger because it has seen a crash signal"))
-						))
-						.doOnNext(s -> logger.trace("PING"))
-						.then()
-						.onErrorResume(ex -> {
-							logger.warn("Ping failed: {}", ex.getMessage());
-							return Mono.empty();
-						})
-						.doOnNext(s -> logger.debug("END PING"))
-						.then(MonoUtils.fromBlockingEmpty(() -> {
-							while (this.pingFail.tryEmitEmpty() == EmitResult.FAIL_NON_SERIALIZED) {
-								// 10ms
-								LockSupport.parkNanos(10000000);
-							}
-						}))
-						.subscribeOn(Schedulers.parallel())
-						.subscribe();
-			}
-			logger.trace("Ping setup success");
-			return null;
-		}).subscribeOn(Schedulers.boundedElastic());
+		// Disable ping on local servers
+		if (local) {
+			return Mono.empty();
+		}
+
+		var pingRequest = cluster.getEventBus()
+				.<byte[]>rxRequest(botAddress + ".ping", EMPTY, pingDeliveryOptions)
+				.to(RxJava2Adapter::singleToMono)
+				.doFirst(() -> logger.trace("Requesting ping..."));
+
+		return Mono
+				.fromRunnable(() -> pinger.set(pingRequest
+					.flatMap(msg -> Mono.fromCallable(msg::body).subscribeOn(Schedulers.boundedElastic()))
+					.repeatWhen(l -> l.delayElements(Duration.ofSeconds(10)).takeWhile(x -> true))
+					.doOnNext(s -> logger.trace("PING"))
+					.then()
+					.onErrorResume(ex -> {
+						logger.warn("Ping failed: {}", ex.getMessage());
+						return Mono.empty();
+					})
+					.doOnNext(s -> logger.debug("END PING"))
+					.then(Mono.fromRunnable(() -> {
+						while (this.pingFail.tryEmitEmpty() == EmitResult.FAIL_NON_SERIALIZED) {
+							// 10ms
+							LockSupport.parkNanos(10000000);
+						}
+					}).subscribeOn(Schedulers.boundedElastic()))
+					.subscribeOn(Schedulers.parallel())
+					.subscribe())
+				)
+				.then()
+				.doFirst(() -> logger.trace("Setting up ping"))
+				.doOnSuccess(s -> logger.trace("Ping setup success"))
+				.subscribeOn(Schedulers.boundedElastic());
 	}
 
 	private Mono<Void> setupUpdatesListener() {
 		return Mono
 				.fromRunnable(() -> logger.trace("Setting up updates listener..."))
-				.then(MonoUtils.<MessageConsumer<TdResultList>>fromBlockingSingle(() -> MessageConsumer
+				.then(Mono.<MessageConsumer<TdResultList>>fromSupplier(() -> MessageConsumer
 						.newInstance(cluster.getEventBus().<TdResultList>consumer(botAddress + ".updates")
 								.setMaxBufferedMessages(5000)
 								.getDelegate()
@@ -228,7 +235,7 @@ public class AsyncTdMiddleEventBusClient implements AsyncTdMiddle {
 					// Return when the registration of all the consumers has been done across the cluster
 					return Mono
 							.fromRunnable(() -> logger.trace("Emitting updates flux to sink"))
-							.then(MonoUtils.fromBlockingEmpty(() -> {
+							.then(Mono.fromRunnable(() -> {
 								var previous = this.updates.getAndSet(updateConsumer);
 								if (previous != null) {
 									logger.error("Already subscribed a consumer to the updates");
@@ -257,38 +264,12 @@ public class AsyncTdMiddleEventBusClient implements AsyncTdMiddle {
 						.then(cluster.getEventBus().<byte[]>rxRequest(botAddress + ".ready-to-receive",
 								EMPTY,
 								deliveryOptionsWithTimeout
-						).as(MonoUtils::toMono))
+						).to(RxJava2Adapter::singleToMono))
 						.doOnSuccess(s -> logger.trace("Sent ready-to-receive, received reply"))
 						.doOnSuccess(s -> logger.trace("About to read updates flux"))
 						.then(), updatesMessageConsumer)
 				)
-				.takeUntilOther(Flux
-						.merge(
-								crash.asMono()
-										.onErrorResume(ex -> {
-											logger.error("TDLib crashed", ex);
-											return Mono.empty();
-										}),
-								pingFail.asMono()
-										.then(Mono.fromCallable(() -> {
-											var ex = new ConnectException("Server did not respond to ping");
-											ex.setStackTrace(new StackTraceElement[0]);
-											throw ex;
-										})).onErrorResume(ex -> MonoUtils.fromBlockingSingle(() -> {
-											EmitResult result;
-											while ((result = this.crash.tryEmitError(ex)) == EmitResult.FAIL_NON_SERIALIZED) {
-												// 10ms
-												LockSupport.parkNanos(10000000);
-											}
-											return result;
-										}))
-										.takeUntilOther(Mono
-												.firstWithSignal(crash.asMono(), authStateClosing.asMono())
-												.onErrorResume(e -> Mono.empty())
-										)
-						)
-						.doOnTerminate(() -> logger.trace("TakeUntilOther has been trigghered, the receive() flux will end"))
-				)
+				.takeUntilOther(pingFail.asMono())
 				.takeUntil(a -> a.succeeded() && a.value().stream().anyMatch(item -> {
 					if (item.getConstructor() == UpdateAuthorizationState.CONSTRUCTOR) {
 						return ((UpdateAuthorizationState) item).authorizationState.getConstructor()
@@ -305,13 +286,20 @@ public class AsyncTdMiddleEventBusClient implements AsyncTdMiddle {
 				})
 				.concatMap(update -> interceptUpdate(update))
 				// Redirect errors to crash sink
-				.doOnError(error -> crash.tryEmitError(error))
+				.doOnError(error -> crash.compareAndSet(null, error))
 				.onErrorResume(ex -> {
 					logger.trace("Absorbing the error, the error has been published using the crash sink", ex);
 					return Mono.empty();
 				})
-
-				.doOnTerminate(updatesStreamEnd::tryEmitEmpty);
+				.doOnCancel(() -> {
+				})
+				.doFinally(s -> {
+					var pinger = this.pinger.get();
+					if (pinger != null) {
+						pinger.dispose();
+					}
+					updatesStreamEnd.tryEmitEmpty();
+				});
 	}
 
 	private Mono<TdApi.Object> interceptUpdate(Object update) {
@@ -326,7 +314,7 @@ public class AsyncTdMiddleEventBusClient implements AsyncTdMiddle {
 					logger.info("Received AuthorizationStateClosed from tdlib");
 					return cluster.getEventBus()
 							.<EndSessionMessage>rxRequest(this.botAddress + ".read-binlog", EMPTY)
-							.as(MonoUtils::toMono)
+							.to(RxJava2Adapter::singleToMono)
 							.mapNotNull(Message::body)
 							.doOnNext(latestBinlog -> logger.info("Received binlog from server. Size: {}",
 									BinlogUtils.humanReadableByteCountBin(latestBinlog.binlog().length())))
@@ -346,13 +334,9 @@ public class AsyncTdMiddleEventBusClient implements AsyncTdMiddle {
 				// Timeout + 5s (5 seconds extra are used to wait the graceful server-side timeout response)
 				.setSendTimeout(timeout.toMillis() + 5000);
 
-		var crashMono = crash.asMono()
-				.doOnSuccess(s -> logger.debug("Failed request {} because the TDLib session was already crashed", request))
-				.then(Mono.<TdResult<T>>empty());
-
 		var executionMono = cluster.getEventBus()
 				.<TdResultMessage>rxRequest(botAddress + ".execute", req, deliveryOptions)
-				.as(MonoUtils::toMono)
+				.to(RxJava2Adapter::singleToMono)
 				.onErrorMap(ex -> ResponseError.newResponseError(request, botAlias, ex))
 				.<TdResult<T>>handle((resp, sink) -> {
 					if (resp.body() == null) {
@@ -366,9 +350,17 @@ public class AsyncTdMiddleEventBusClient implements AsyncTdMiddle {
 				.doOnSuccess(s -> logger.trace("Executed request {}", request))
 				.doOnError(ex -> logger.debug("Failed request {}: {}", req, ex));
 
-		return Mono
-				.firstWithSignal(crashMono, executionMono)
+		return executionMono
+				.transformDeferred(mono -> {
+					var crash = this.crash.get();
+					if (crash != null) {
+						logger.debug("Failed request {} because the TDLib session was already crashed", request);
+						return Mono.empty();
+					} else {
+						return mono;
+					}
+				})
 				.switchIfEmpty(Mono.error(() -> ResponseError.newResponseError(request, botAlias,
-						new TdError(500, "Client is closed or response is empty"))));
+						new TdError(500, "The client is closed or the response is empty"))));
 	}
 }

@@ -35,6 +35,7 @@ import org.warp.commonutils.concurrency.future.CompletableFutureUtils;
 import org.warp.commonutils.functional.IOConsumer;
 import org.warp.commonutils.log.Logger;
 import org.warp.commonutils.log.LoggerFactory;
+import reactor.adapter.rxjava.RxJava2Adapter;
 import reactor.core.CoreSubscriber;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.FluxSink.OverflowStrategy;
@@ -171,38 +172,12 @@ public class MonoUtils {
 
 	public static <T> Flux<Message<T>> fromReplyableMessageConsumer(Mono<Void> onRegistered,
 			MessageConsumer<T> messageConsumer) {
-		Mono<Void> endMono = Mono.create(sink -> {
-			AtomicBoolean alreadyRequested = new AtomicBoolean();
-			sink.onRequest(n -> {
-				if (n > 0 && alreadyRequested.compareAndSet(false, true)) {
-					messageConsumer.endHandler(e -> sink.success());
-				}
-			});
-		});
-
-		Mono<MessageConsumer<T>> registrationCompletionMono = Mono
-				.fromRunnable(() -> logger.trace("Waiting for consumer registration completion..."))
-				.<Void>then(messageConsumer.rxCompletionHandler().as(MonoUtils::toMono))
+		var registration = messageConsumer
+				.rxCompletionHandler().to(RxJava2Adapter::completableToMono)
+				.doFirst(() -> logger.trace("Waiting for consumer registration completion..."))
 				.doOnSuccess(s -> logger.trace("Consumer registered"))
-				.then(onRegistered)
-				.thenReturn(messageConsumer);
-
-		messageConsumer.handler(s -> {
-			throw new IllegalStateException("Subscriber still didn't request any value!");
-		});
-
-		Flux<Message<T>> dataFlux = Flux
-				.push(sink -> sink.onRequest(n -> messageConsumer.handler(sink::next)), OverflowStrategy.ERROR);
-
-		Mono<Void> disposeMono = messageConsumer
-				.rxUnregister()
-				.as(MonoUtils::<Message<T>>toMono)
-				.doOnSuccess(s -> logger.trace("Unregistered message consumer"))
-				.then();
-
-		return Flux
-				.usingWhen(registrationCompletionMono, msgCons -> dataFlux, msgCons -> disposeMono)
-				.takeUntilOther(endMono);
+				.then(onRegistered);
+		return messageConsumer.toFlowable().to(RxJava2Adapter::flowableToFlux).mergeWith(registration.then(Mono.empty()));
 	}
 
 	public static Scheduler newBoundedSingle(String name) {
