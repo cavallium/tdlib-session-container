@@ -6,9 +6,11 @@ import io.atomix.cluster.Node;
 import io.atomix.cluster.discovery.BootstrapDiscoveryProvider;
 import io.atomix.core.Atomix;
 import io.atomix.core.AtomixBuilder;
+import io.atomix.core.profile.ConsensusProfileConfig;
 import io.atomix.core.profile.Profile;
 import io.atomix.protocols.backup.partition.PrimaryBackupPartitionGroup;
 import io.atomix.protocols.raft.partition.RaftPartitionGroup;
+import io.atomix.storage.StorageLevel;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Paths;
@@ -56,8 +58,10 @@ public class Entrypoint {
 
 		atomixBuilder.withClusterId(clusterSettings.id);
 
+		String nodeId;
 		if (instanceSettings.client) {
 			atomixBuilder.withMemberId(instanceSettings.id).withAddress(instanceSettings.clientAddress);
+			nodeId = null;
 		} else {
 			// Find node settings
 			var nodeSettingsOptional = clusterSettings.nodes
@@ -74,6 +78,7 @@ public class Entrypoint {
 			var nodeSettings = nodeSettingsOptional.get();
 
 			atomixBuilder.withMemberId(instanceSettings.id).withAddress(nodeSettings.address);
+			nodeId = nodeSettings.id;
 		}
 
 		var bootstrapDiscoveryProviderNodes = new ArrayList<Node>();
@@ -92,18 +97,32 @@ public class Entrypoint {
 				.builder("system")
 				.withNumPartitions(1)
 				.withMembers(systemPartitionGroupMembers)
+				.withDataDirectory(Paths.get(".data-" + instanceSettings.id).toFile())
 				.build());
 
-		atomixBuilder.withPartitionGroups(PrimaryBackupPartitionGroup.builder("data").withNumPartitions(32).build());
+		/*atomixBuilder.withPartitionGroups(RaftPartitionGroup
+				.builder("raft")
+				.withNumPartitions(3)
+				.withFlushOnCommit()
+				.withStorageLevel(StorageLevel.MAPPED)
+				.withDataDirectory(Paths.get(".data-" + instanceSettings.id).toFile())
+				.build());
+		 */
 
 		atomixBuilder.withShutdownHook(false);
 		atomixBuilder.withTypeRegistrationRequired();
 
 		if (instanceSettings.client) {
-			atomixBuilder.addProfile(Profile.consensus(systemPartitionGroupMembers));
-			atomixBuilder.addProfile(Profile.dataGrid(32));
-		} else {
 			atomixBuilder.addProfile(Profile.client());
+		} else {
+			var prof = Profile.consensus(systemPartitionGroupMembers);
+			var profCfg = (ConsensusProfileConfig) prof.config();
+			//profCfg.setDataGroup("raft");
+			profCfg.setDataPath(".data-" + instanceSettings.id);
+			//profCfg.setPartitions(3);
+			//profCfg.setManagementGroup("system");
+			atomixBuilder.addProfile(prof);
+			//atomixBuilder.addProfile(Profile.dataGrid(32));
 		}
 
 		atomixBuilder.withCompatibleSerialization(false);
@@ -114,11 +133,13 @@ public class Entrypoint {
 
 		atomix.start().join();
 
-		var api = new ReactiveApi(atomix, diskSessions);
+		var api = new ReactiveApi(nodeId, atomix, diskSessions);
 
 		LOG.info("Starting ReactiveApi...");
 
-		api.start();
+		api.start().block();
+
+		LOG.info("Started ReactiveApi");
 
 		return api;
 	}

@@ -28,7 +28,6 @@ public sealed interface CreateSessionRequest permits CreateUserSessionRequest, C
 			case 2 -> {
 				var dis = new DataInputStream(new ByteArrayInputStream(bytes, 1 + Long.BYTES, bytes.length - (1 + Long.BYTES)));
 				try {
-					var pathName = dis.readUTF();
 					var isBot = dis.readBoolean();
 					String token;
 					Long phoneNumber;
@@ -39,7 +38,7 @@ public sealed interface CreateSessionRequest permits CreateUserSessionRequest, C
 						token = null;
 						phoneNumber = dis.readLong();
 					}
-					yield new LoadSessionFromDiskRequest(userId, pathName, token, phoneNumber);
+					yield new LoadSessionFromDiskRequest(userId, token, phoneNumber, dis.readBoolean());
 				} catch (IOException e) {
 					throw new SerializationException(e);
 				}
@@ -52,7 +51,7 @@ public sealed interface CreateSessionRequest permits CreateUserSessionRequest, C
 
 	final record CreateBotSessionRequest(long userId, String token) implements CreateSessionRequest {}
 
-	final record LoadSessionFromDiskRequest(long userId, String pathName, String token, Long phoneNumber) implements
+	final record LoadSessionFromDiskRequest(long userId, String token, Long phoneNumber, boolean createNew) implements
 			CreateSessionRequest {
 
 		public LoadSessionFromDiskRequest {

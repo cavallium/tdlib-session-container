@@ -1,11 +1,12 @@
 package it.tdlight.reactiveapi;
 
 import io.atomix.core.Atomix;
-import io.atomix.core.AtomixBuilder;
 import it.tdlight.reactiveapi.CreateSessionRequest.CreateBotSessionRequest;
 import it.tdlight.reactiveapi.CreateSessionRequest.CreateUserSessionRequest;
 import java.io.IOException;
+import java.util.Map.Entry;
 import java.util.Set;
+import java.util.concurrent.ForkJoinPool;
 import java.util.concurrent.atomic.AtomicBoolean;
 import net.minecrell.terminalconsole.SimpleTerminalConsole;
 import org.jline.reader.LineReader;
@@ -34,13 +35,19 @@ public class Cli {
 
 		var console = new SimpleTerminalConsole() {
 
-			private static final Set<String> commands = Set.of("exit", "stop", "createsession", "help", "man", "?");
+			private static final Set<String> commands = Set.of("exit",
+					"stop",
+					"createsession",
+					"help",
+					"man",
+					"?",
+					"sessions",
+					"localsessions"
+			);
 
 			@Override
 			protected LineReader buildReader(LineReaderBuilder builder) {
-				var reader = super.buildReader(builder);
-				reader.addCommandsInBuffer(commands);
-				return reader;
+				return super.buildReader(builder);
 			}
 
 			@Override
@@ -59,11 +66,32 @@ public class Cli {
 					commandArgs = "";
 				}
 				switch (commandName) {
-					case "exit", "stop" -> acceptInputs.set(false);
+					case "exit", "stop" -> shutdown();
 					case "createsession" -> createSession(api, commandArgs);
 					case "help", "?", "man" -> LOG.info("Commands: {}", commands);
+					case "sessions" -> printSessions(api, false);
+					case "localsessions" -> printSessions(api, true);
 					default -> LOG.info("Unknown command \"{}\"", command);
 				}
+			}
+
+			private void printSessions(ReactiveApi api, boolean onlyLocal) {
+				api.getAllUsers().subscribe(sessions -> {
+					StringBuilder sb = new StringBuilder();
+					sb.append("Sessions:\n");
+					for (var userEntry : sessions.entrySet()) {
+						var userId = userEntry.getKey();
+						var nodeId = userEntry.getValue();
+						if (!onlyLocal || api.is(nodeId)) {
+							sb.append(" - session #IDU").append(userId);
+							if (!onlyLocal) {
+								sb.append(": ").append(nodeId);
+							}
+							sb.append("\n");
+						}
+					}
+					LOG.info(sb.toString());
+				});
 			}
 
 			@Override
@@ -71,6 +99,7 @@ public class Cli {
 				acceptInputs.set(false);
 				if (alreadyShutDown.compareAndSet(false, true)) {
 					api.getAtomix().stop().join();
+					System.exit(0);
 				}
 			}
 		};
@@ -91,8 +120,9 @@ public class Cli {
 				}
 			};
 			if (!invalid) {
-				CreateSessionResponse response = api.createSession(request).join();
-				LOG.info("Created a session with session id \"{}\"", response.sessionId());
+				api
+						.createSession(request)
+						.thenAccept(response -> LOG.info("Created a session with live id \"{}\"", response.sessionId()));
 			}
 		} else {
 			invalid = true;

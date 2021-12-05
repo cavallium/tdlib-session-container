@@ -9,17 +9,14 @@ import org.jetbrains.annotations.Nullable;
 @JsonInclude(Include.NON_NULL)
 public class DiskSession {
 
-	public long userId;
 	@Nullable
 	public String token;
 	@Nullable
 	public Long phoneNumber;
 
 	@JsonCreator
-	public DiskSession(@JsonProperty(required = true, value = "userId") long userId,
-			@JsonProperty("token") @Nullable String token,
+	public DiskSession(@JsonProperty("token") @Nullable String token,
 			@JsonProperty("phoneNumber") @Nullable Long phoneNumber) {
-		this.userId = userId;
 		this.token = token;
 		this.phoneNumber = phoneNumber;
 		this.validate();
