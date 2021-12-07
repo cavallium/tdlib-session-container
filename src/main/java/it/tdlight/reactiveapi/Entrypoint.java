@@ -100,15 +100,6 @@ public class Entrypoint {
 				.withDataDirectory(Paths.get(".data-" + instanceSettings.id).toFile())
 				.build());
 
-		/*atomixBuilder.withPartitionGroups(RaftPartitionGroup
-				.builder("raft")
-				.withNumPartitions(3)
-				.withFlushOnCommit()
-				.withStorageLevel(StorageLevel.MAPPED)
-				.withDataDirectory(Paths.get(".data-" + instanceSettings.id).toFile())
-				.build());
-		 */
-
 		atomixBuilder.withShutdownHook(false);
 		atomixBuilder.withTypeRegistrationRequired();
 
@@ -119,8 +110,7 @@ public class Entrypoint {
 			var profCfg = (ConsensusProfileConfig) prof.config();
 			//profCfg.setDataGroup("raft");
 			profCfg.setDataPath(".data-" + instanceSettings.id);
-			//profCfg.setPartitions(3);
-			//profCfg.setManagementGroup("system");
+			profCfg.setPartitions(3);
 			atomixBuilder.addProfile(prof);
 			//atomixBuilder.addProfile(Profile.dataGrid(32));
 		}

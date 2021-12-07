@@ -1,23 +1,31 @@
 package it.tdlight.reactiveapi;
 
 import it.tdlight.jni.TdApi;
-import it.tdlight.reactiveapi.Event.AuthenticatedEvent;
+import it.tdlight.reactiveapi.Event.ClientBoundEvent;
+import it.tdlight.reactiveapi.Event.ServerBoundEvent;
+import java.io.ByteArrayInputStream;
+import java.io.DataInput;
+import java.io.IOException;
+import java.time.Duration;
+import java.time.Instant;
+import org.apache.commons.lang3.SerializationException;
 
 /**
  * Any event received from a session
  */
-public sealed interface Event permits AuthenticatedEvent {
+public sealed interface Event permits ClientBoundEvent, ServerBoundEvent {
 
 	/**
 	 *
 	 * @return temporary unique identifier of the session
 	 */
-	long sessionId();
+	long liveId();
 
 	/**
 	 * Event received after choosing the user id of the session
 	 */
-	sealed interface AuthenticatedEvent extends Event permits OnLoginCodeRequested, OnUpdate {
+	sealed interface ClientBoundEvent extends Event permits OnLoginCodeRequested, OnOtherDeviceLoginRequested,
+			OnPasswordRequested, OnUpdate {
 
 		/**
 		 *
@@ -26,22 +34,45 @@ public sealed interface Event permits AuthenticatedEvent {
 		long userId();
 	}
 
+	sealed interface ServerBoundEvent extends Event permits Request {}
+
 	/**
 	 * TDLib is asking for an authorization code
 	 */
-	sealed interface OnLoginCodeRequested extends AuthenticatedEvent
+	sealed interface OnLoginCodeRequested extends ClientBoundEvent
 			permits OnBotLoginCodeRequested, OnUserLoginCodeRequested {}
 
-	final record OnUserLoginCodeRequested(long sessionId, long userId, long phoneNumber) implements OnLoginCodeRequested {}
+	record OnUserLoginCodeRequested(long liveId, long userId, long phoneNumber) implements OnLoginCodeRequested {}
 
-	final record OnBotLoginCodeRequested(long sessionId, long userId, String token) implements OnLoginCodeRequested {}
+	record OnBotLoginCodeRequested(long liveId, long userId, String token) implements OnLoginCodeRequested {}
+
+	record OnOtherDeviceLoginRequested(long liveId, long userId) implements ClientBoundEvent {}
+
+	record OnPasswordRequested(long liveId, long userId) implements ClientBoundEvent {}
 
 	/**
 	 * Event received from TDLib
 	 */
-	sealed interface OnUpdate extends AuthenticatedEvent permits OnUpdateData, OnUpdateError {}
+	sealed interface OnUpdate extends ClientBoundEvent permits OnUpdateData, OnUpdateError {}
 
-	final record OnUpdateData(long sessionId, long userId, TdApi.Update update) implements OnUpdate {}
+	record OnUpdateData(long liveId, long userId, TdApi.Update update) implements OnUpdate {}
 
-	final record OnUpdateError(long sessionId, long userId, TdApi.Error error) implements OnUpdate {}
+	record OnUpdateError(long liveId, long userId, TdApi.Error error) implements OnUpdate {}
+
+	record Request<T extends TdApi.Object>(long liveId, TdApi.Function<T> request, Instant timeout) implements
+			ServerBoundEvent {
+
+		public static <T extends TdApi.Object> Request<T> deserialize(DataInput dataInput) {
+			try {
+				var liveId = dataInput.readLong();
+				@SuppressWarnings("unchecked")
+				TdApi.Function<T> request = (TdApi.Function<T>) TdApi.Deserializer.deserialize(dataInput);
+				long millis = dataInput.readLong();
+				var timeout = Instant.ofEpochMilli(millis);
+				return new Request<>(liveId, request, timeout);
+			} catch (IOException e) {
+				throw new SerializationException(e);
+			}
+		}
+	}
 }
