@@ -9,7 +9,7 @@ import io.vertx.core.AsyncResult;
 import io.vertx.core.Future;
 import io.vertx.core.Handler;
 import io.vertx.core.Promise;
-import io.vertx.reactivex.core.eventbus.Message;
+ import io.vertx.reactivex.core.eventbus.Message;
 import io.vertx.reactivex.core.eventbus.MessageConsumer;
 import io.vertx.reactivex.core.streams.Pipe;
 import io.vertx.reactivex.core.streams.ReadStream;

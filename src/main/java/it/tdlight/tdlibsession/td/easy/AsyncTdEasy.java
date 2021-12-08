@@ -80,7 +80,7 @@ public class AsyncTdEasy {
 
 		this.incomingUpdates = td.receive()
 				.flatMapSequential(this::preprocessUpdates)
-				.flatMapSequential(update -> Mono.from(this.getState()).single().map(state -> new AsyncTdUpdateObj(state, update)))
+				.flatMapSequential(update -> Mono.from(this.state()).single().map(state -> new AsyncTdUpdateObj(state, update)))
 				.map(upd -> (TdApi.Update) upd.getUpdate())
 				.doOnError(ex -> {
 					if (ex instanceof TdError) {
@@ -156,7 +156,7 @@ public class AsyncTdEasy {
 	/**
 	 * Get TDLib state
 	 */
-	public Flux<AuthorizationState> getState() {
+	public Flux<AuthorizationState> state() {
 		return authState.asFlux().distinct();
 	}
 
@@ -323,7 +323,7 @@ public class AsyncTdEasy {
 	 * Closes the client gracefully by sending {@link TdApi.Close}.
 	 */
 	public Mono<Void> close() {
-		return Mono.from(getState())
+		return Mono.from(state())
 				.filter(state -> {
 					switch (state.getConstructor()) {
 						case AuthorizationStateClosing.CONSTRUCTOR:
@@ -438,7 +438,7 @@ public class AsyncTdEasy {
 							return thenOrFatalError(Mono.fromCallable(this.settings::get).single().flatMap(settings -> {
 								if (settings.isPhoneNumberSet()) {
 									return sendDirectly(new SetAuthenticationPhoneNumber(String.valueOf(settings.getPhoneNumber()),
-											new PhoneNumberAuthenticationSettings(false, false, false)
+											new PhoneNumberAuthenticationSettings(false, false, false, false, null)
 									), false);
 								} else if (settings.isBotTokenSet()) {
 									return sendDirectly(new CheckAuthenticationBotToken(settings.getBotToken()), false);
@@ -550,6 +550,7 @@ public class AsyncTdEasy {
 											.filterWhen(file -> Mono
 													.fromCallable(() -> Files.exists(file))
 													.subscribeOn(Schedulers.boundedElastic()))
+											.publishOn(Schedulers.boundedElastic())
 											.doOnNext(directory -> {
 												try {
 													if (!Files.walk(directory)

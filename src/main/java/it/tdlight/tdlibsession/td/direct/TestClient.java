@@ -57,7 +57,7 @@ public class TestClient implements ReactorTelegramClient {
 
 	private static Message generateRandomMessage(boolean randomSender, boolean randomChat, boolean randomText) {
 		var msg = new Message();
-		msg.sender = new MessageSenderUser(312042);
+		msg.senderId = new MessageSenderUser(312042);
 		msg.chatId = 240213;
 		msg.id = incrementalMessageId.getAndIncrement();
 		var content = new MessageText();
