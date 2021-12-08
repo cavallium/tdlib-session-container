@@ -479,7 +479,7 @@ public class AsyncTdEasy {
 									.fromCallable(this.settings::get).single().flatMap(settings -> {
 										if (settings.isPhoneNumberSet()) {
 											return sendDirectly(new SetAuthenticationPhoneNumber(String.valueOf(settings.getPhoneNumber()),
-													new PhoneNumberAuthenticationSettings(false, false, false)
+													new PhoneNumberAuthenticationSettings(false, false, false, false, null)
 											), false);
 										} else if (settings.isBotTokenSet()) {
 											return sendDirectly(new CheckAuthenticationBotToken(settings.getBotToken()), false);
@@ -598,6 +598,7 @@ public class AsyncTdEasy {
 											.filterWhen(file -> Mono
 													.fromCallable(() -> Files.exists(file))
 													.subscribeOn(Schedulers.boundedElastic()))
+											.publishOn(Schedulers.boundedElastic())
 											.doOnNext(directory -> {
 												try {
 													if (!Files.walk(directory)
