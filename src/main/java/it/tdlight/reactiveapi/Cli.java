@@ -122,7 +122,8 @@ public class Cli {
 			if (!invalid) {
 				api
 						.createSession(request)
-						.thenAccept(response -> LOG.info("Created a session with live id \"{}\"", response.sessionId()));
+						.doOnNext(response -> LOG.info("Created a session with live id \"{}\"", response.sessionId()))
+						.block();
 			}
 		} else {
 			invalid = true;

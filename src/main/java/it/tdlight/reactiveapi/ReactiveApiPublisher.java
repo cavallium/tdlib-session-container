@@ -55,7 +55,6 @@ public class ReactiveApiPublisher {
 	private static final Logger LOG = LoggerFactory.getLogger(ReactiveApiPublisher.class);
 	private static final Duration SPECIAL_RAW_TIMEOUT_DURATION = Duration.ofSeconds(10);
 
-	private final Atomix atomix;
 	private final ClusterEventService eventService;
 	private final ReactiveTelegramClient rawTelegramClient;
 	private final Flux<Signal> telegramClient;
@@ -66,10 +65,9 @@ public class ReactiveApiPublisher {
 	private final String botToken;
 	private final Long phoneNumber;
 
-	private AtomicReference<Disposable> disposable = new AtomicReference<>();
+	private final AtomicReference<Disposable> disposable = new AtomicReference<>();
 
 	private ReactiveApiPublisher(Atomix atomix, long liveId, long userId, String botToken, Long phoneNumber) {
-		this.atomix = atomix;
 		this.userId = userId;
 		this.liveId = liveId;
 		this.botToken = botToken;
@@ -119,7 +117,7 @@ public class ReactiveApiPublisher {
 				.filter(s -> s instanceof ClientBoundResultingEvent)
 				.cast(ClientBoundResultingEvent.class)
 				.subscribeOn(Schedulers.parallel())
-				.subscribe(clientBoundResultingEvent -> eventService.broadcast("session-" + liveId + "-clientbound-events",
+				.subscribe(clientBoundResultingEvent -> eventService.broadcast("session-" + liveId + "-client-bound-events",
 						clientBoundResultingEvent.event(),
 						ReactiveApiPublisher::serializeEvent
 				));
@@ -141,11 +139,12 @@ public class ReactiveApiPublisher {
 			var update = (TdApi.Update) signal.getUpdate();
 			return new ClientBoundResultingEvent(new OnUpdateData(liveId, userId, update));
 		} else {
-			LOG.trace("Signal has not been broadcasted because the session {} is not logged in: {}", userId, signal);
+			LOG.trace("Signal has not been broadcast because the session {} is not logged in: {}", userId, signal);
 			return this.handleSpecialSignal(state, signal);
 		}
 	}
 
+	@SuppressWarnings("SwitchStatementWithTooFewBranches")
 	@Nullable
 	private ResultingEvent handleSpecialSignal(State state, Signal signal) {
 		if (signal.isException()) {
@@ -224,24 +223,24 @@ public class ReactiveApiPublisher {
 	}
 
 	private static byte[] serializeEvent(ClientBoundEvent clientBoundEvent) {
-		try (var baos = new ByteArrayOutputStream()) {
-			try (var daos = new DataOutputStream(baos)) {
+		try (var byteArrayOutputStream = new ByteArrayOutputStream()) {
+			try (var dataOutputStream = new DataOutputStream(byteArrayOutputStream)) {
 				if (clientBoundEvent instanceof OnUpdateData onUpdateData) {
-					daos.write(0x1);
-					onUpdateData.update().serialize(daos);
+					dataOutputStream.write(0x1);
+					onUpdateData.update().serialize(dataOutputStream);
 				} else if (clientBoundEvent instanceof OnUpdateError onUpdateError) {
-					daos.write(0x2);
-					onUpdateError.error().serialize(daos);
+					dataOutputStream.write(0x2);
+					onUpdateError.error().serialize(dataOutputStream);
 				} else if (clientBoundEvent instanceof OnUserLoginCodeRequested onUserLoginCodeRequested) {
-					daos.write(0x3);
-					daos.writeLong(onUserLoginCodeRequested.phoneNumber());
+					dataOutputStream.write(0x3);
+					dataOutputStream.writeLong(onUserLoginCodeRequested.phoneNumber());
 				} else if (clientBoundEvent instanceof OnBotLoginCodeRequested onBotLoginCodeRequested) {
-					daos.write(0x4);
-					daos.writeUTF(onBotLoginCodeRequested.token());
+					dataOutputStream.write(0x4);
+					dataOutputStream.writeUTF(onBotLoginCodeRequested.token());
 				} else {
 					throw new UnsupportedOperationException("Unexpected value: " + clientBoundEvent);
 				}
-				return baos.toByteArray();
+				return byteArrayOutputStream.toByteArray();
 			}
 		} catch (IOException ex) {
 			throw new SerializationException(ex);
@@ -259,11 +258,11 @@ public class ReactiveApiPublisher {
 	private static byte[] serializeResponse(Response response) {
 		var id = response.getId();
 		var object = response.getObject();
-		try (var baos = new ByteArrayOutputStream()) {
-			try (var daos = new DataOutputStream(baos)) {
-				daos.writeLong(id);
-				object.serialize(daos);
-				return baos.toByteArray();
+		try (var byteArrayOutputStream = new ByteArrayOutputStream()) {
+			try (var dataOutputStream = new DataOutputStream(byteArrayOutputStream)) {
+				dataOutputStream.writeLong(id);
+				object.serialize(dataOutputStream);
+				return byteArrayOutputStream.toByteArray();
 			}
 		} catch (IOException ex) {
 			throw new SerializationException(ex);

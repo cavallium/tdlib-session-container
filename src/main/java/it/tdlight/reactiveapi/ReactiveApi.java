@@ -42,8 +42,6 @@ public class ReactiveApi {
 	@NotNull
 	private final String nodeId;
 	private final Atomix atomix;
-	private static final SchedulerExecutor SCHEDULER_EXECUTOR = new SchedulerExecutor(Schedulers.parallel());
-	private static final SchedulerExecutor BOUNDED_ELASTIC_EXECUTOR = new SchedulerExecutor(Schedulers.boundedElastic());
 	private final AsyncAtomicIdGenerator nextSessionLiveId;
 
 	private final AsyncAtomicLock sessionModificationLock;
@@ -138,21 +136,21 @@ public class ReactiveApi {
 		var addNewDiskSessions = addedDiskSessionsFlux.flatMap(diskSessionAndId -> {
 			var id = diskSessionAndId.id;
 			var diskSession = diskSessionAndId.diskSession;
-			return fromCompletionStage(() -> createSession(new LoadSessionFromDiskRequest(id,
+			return createSession(new LoadSessionFromDiskRequest(id,
 					diskSession.token,
 					diskSession.phoneNumber,
 					true
-			)));
+			));
 		}).then();
 
 		var loadExistingDiskSessions = normalDiskSessionsFlux.flatMap(diskSessionAndId -> {
 			var id = diskSessionAndId.id;
 			var diskSession = diskSessionAndId.diskSession;
-			return fromCompletionStage(() -> createSession(new LoadSessionFromDiskRequest(id,
+			return createSession(new LoadSessionFromDiskRequest(id,
 					diskSession.token,
 					diskSession.phoneNumber,
 					false
-			)));
+			));
 		}).then();
 
 		var diskInitMono = Mono.when(removeObsoleteDiskSessions, loadExistingDiskSessions, addNewDiskSessions)
@@ -166,7 +164,7 @@ public class ReactiveApi {
 					if (req instanceof LoadSessionFromDiskRequest) {
 						return failedFuture(new IllegalArgumentException("Can't pass a local request through the cluster"));
 					} else {
-						return createSession(req);
+						return createSession(req).toFuture();
 					}
 				}, CreateSessionResponse::serializeBytes));
 
@@ -174,7 +172,7 @@ public class ReactiveApi {
 	}
 
 	private CompletableFuture<Void> destroySession(long userId, String nodeId) {
-		LOG.debug("Received session delete request: userid={}, nodeid=\"{}\"", userId, nodeId);
+		LOG.debug("Received session delete request: user_id={}, node_id=\"{}\"", userId, nodeId);
 
 		// Lock sessions modification
 		return sessionModificationLock
@@ -192,39 +190,35 @@ public class ReactiveApi {
 				.whenComplete((resp, ex) -> LOG.debug("Handled session delete request {} \"{}\", the response is: {}", userId, nodeId, resp, ex));
 	}
 
-	public CompletableFuture<CreateSessionResponse> createSession(CreateSessionRequest req) {
+	public Mono<CreateSessionResponse> createSession(CreateSessionRequest req) {
 		LOG.debug("Received create session request: {}", req);
-		// Lock sessions creation
-		return sessionModificationLock
-				.lock()
-				.thenCompose(lockVersion -> {
-					LOG.trace("Obtained session modification lock for session request: {}", req);
-					// Generate session id
-					return this.nextFreeLiveId().thenCompose(liveId -> {
+
+		Mono<CreateSessionResponse> unlockedSessionCreationMono = Mono.defer(() -> {
+			LOG.trace("Obtained session modification lock for session request: {}", req);
+			// Generate session id
+			return this
+					.nextFreeLiveId()
+					.flatMap(liveId -> {
 						// Create the session instance
 						ReactiveApiPublisher reactiveApiPublisher;
 						boolean loadedFromDisk;
-						boolean createNew;
 						long userId;
 						String botToken;
 						Long phoneNumber;
 						if (req instanceof CreateBotSessionRequest createBotSessionRequest) {
 							loadedFromDisk = false;
-							createNew = true;
 							userId = createBotSessionRequest.userId();
 							botToken = createBotSessionRequest.token();
 							phoneNumber = null;
 							reactiveApiPublisher = ReactiveApiPublisher.fromToken(atomix, liveId, userId, botToken);
 						} else if (req instanceof CreateUserSessionRequest createUserSessionRequest) {
 							loadedFromDisk = false;
-							createNew = true;
 							userId = createUserSessionRequest.userId();
 							botToken = null;
 							phoneNumber = createUserSessionRequest.phoneNumber();
 							reactiveApiPublisher = ReactiveApiPublisher.fromPhoneNumber(atomix, liveId, userId, phoneNumber);
 						} else if (req instanceof LoadSessionFromDiskRequest loadSessionFromDiskRequest) {
 							loadedFromDisk = true;
-							createNew = loadSessionFromDiskRequest.createNew();
 							userId = loadSessionFromDiskRequest.userId();
 							botToken = loadSessionFromDiskRequest.token();
 							phoneNumber = loadSessionFromDiskRequest.phoneNumber();
@@ -234,7 +228,7 @@ public class ReactiveApi {
 								reactiveApiPublisher = ReactiveApiPublisher.fromToken(atomix, liveId, userId, botToken);
 							}
 						} else {
-							return failedFuture(new UnsupportedOperationException("Unexpected value: " + req));
+							return Mono.error(new UnsupportedOperationException("Unexpected value: " + req));
 						}
 
 						// Register the session instance to the local nodes map
@@ -244,57 +238,73 @@ public class ReactiveApi {
 						}
 
 						// Register the session instance to the distributed nodes map
-						return userIdToNodeId.put(userId, nodeId).thenComposeAsync(prevDistributed -> {
-							if (prevDistributed != null && prevDistributed.value() != null &&
-									!Objects.equals(this.nodeId, prevDistributed.value())) {
-								LOG.error("Session id \"{}\" is already registered in the node \"{}\"!", liveId, prevDistributed.value());
-							}
-
-							Path baseSessionsPath;
-							synchronized (diskSessions) {
-								baseSessionsPath = Paths.get(diskSessions.getSettings().path);
-							}
-							String diskSessionFolderName = Long.toUnsignedString(userId);
-							Path sessionPath = baseSessionsPath.resolve(diskSessionFolderName);
-
-							CompletableFuture<?> saveToDiskFuture;
-							if (!loadedFromDisk) {
-								// Create the disk session configuration
-								var diskSession = new DiskSession(botToken, phoneNumber);
-								synchronized (diskSessions) {
-									diskSessions.getSettings().userIdToSession().put(userId, diskSession);
-								}
-
-								saveToDiskFuture = CompletableFuture.runAsync(() -> {
-									// Save updated sessions configuration to disk
-									try {
-										synchronized (diskSessions) {
-											diskSessions.save();
-										}
-									} catch (IOException e) {
-										throw new CompletionException("Failed to save disk sessions configuration", e);
+						return Mono
+								.fromCompletionStage(() -> userIdToNodeId.put(userId, nodeId))
+								.flatMap(prevDistributed -> {
+									if (prevDistributed != null && prevDistributed.value() != null &&
+											!Objects.equals(this.nodeId, prevDistributed.value())) {
+										LOG.error("Session id \"{}\" is already registered in the node \"{}\"!", liveId, prevDistributed.value());
 									}
-								}, BOUNDED_ELASTIC_EXECUTOR);
-							} else {
-								saveToDiskFuture = completedFuture(null);
-							}
 
-							// Start the session instance
-							reactiveApiPublisher.start(sessionPath);
+									var saveToDiskMono = Mono
+											.<Void>fromCallable(() -> {
+												// Save updated sessions configuration to disk
+												try {
+													synchronized (diskSessions) {
+														diskSessions.save();
+														return null;
+													}
+												} catch (IOException e) {
+													throw new CompletionException("Failed to save disk sessions configuration", e);
+												}
+											})
+											.subscribeOn(Schedulers.boundedElastic());
 
-							return saveToDiskFuture.thenApply(ignored -> new CreateSessionResponse(liveId));
-						}, BOUNDED_ELASTIC_EXECUTOR);
+									// Start the session instance
+									return Mono
+											.fromCallable(() -> {
+												synchronized (diskSessions) {
+													return Paths.get(diskSessions.getSettings().path);
+												}
+											})
+											.subscribeOn(Schedulers.boundedElastic())
+											.flatMap(baseSessionsPath -> {
+												String diskSessionFolderName = Long.toUnsignedString(userId);
+												Path sessionPath = baseSessionsPath.resolve(diskSessionFolderName);
+
+												if (!loadedFromDisk) {
+													// Create the disk session configuration
+													var diskSession = new DiskSession(botToken, phoneNumber);
+													return Mono.<Void>fromCallable(() -> {
+														synchronized (diskSessions) {
+															diskSessions.getSettings().userIdToSession().put(userId, diskSession);
+															return null;
+														}
+													}).subscribeOn(Schedulers.boundedElastic()).then(saveToDiskMono).thenReturn(sessionPath);
+												} else {
+													return Mono.just(sessionPath);
+												}
+											})
+											.doOnNext(reactiveApiPublisher::start)
+											.thenReturn(new CreateSessionResponse(liveId));
+								});
 					});
-				})
-				.whenComplete((response, error) -> sessionModificationLock
-						.unlock()
-						.thenRun(() -> LOG.trace("Released session modification lock for session request: {}", req))
+		});
+
+		// Lock sessions creation
+		return Mono
+				.usingWhen(Mono.fromCompletionStage(sessionModificationLock::lock),
+						lockVersion -> unlockedSessionCreationMono,
+						lockVersion -> Mono
+								.fromCompletionStage(sessionModificationLock::unlock)
+								.doOnTerminate(() -> LOG.trace("Released session modification lock for session request: {}", req))
 				)
-				.whenComplete((resp, ex) -> LOG.debug("Handled session request {}, the response is: {}", req, resp, ex));
+				.doOnNext(resp -> LOG.debug("Handled session request {}, the response is: {}", req, resp))
+				.doOnError(ex -> LOG.debug("Handled session request {}, the response is: error", req, ex));
 	}
 
-	public CompletableFuture<Long> nextFreeLiveId() {
-		return nextSessionLiveId.nextId();
+	public Mono<Long> nextFreeLiveId() {
+		return Mono.fromCompletionStage(nextSessionLiveId::nextId);
 	}
 
 	public Atomix getAtomix() {
@@ -327,7 +337,7 @@ public class ReactiveApi {
 		return this.nodeId.equals(nodeId);
 	}
 
-	private static record DiskSessionAndId(DiskSession diskSession, long id) {}
+	private record DiskSessionAndId(DiskSession diskSession, long id) {}
 
 	private Mono<DiskSessionAndId> getLocalDiskSession(Long localId) {
 		return Mono.fromCallable(() -> {

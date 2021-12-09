@@ -4,6 +4,7 @@ import java.util.concurrent.Executor;
 import org.jetbrains.annotations.NotNull;
 import reactor.core.scheduler.Scheduler;
 
+@SuppressWarnings("ClassCanBeRecord")
 public class SchedulerExecutor implements Executor {
 
 	private final Scheduler scheduler;
