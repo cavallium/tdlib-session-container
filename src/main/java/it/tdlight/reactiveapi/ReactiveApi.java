@@ -118,7 +118,7 @@ public class ReactiveApi {
 				LOG.warn("The user id {} has been deleted from the disk configuration file", user);
 			}
 
-			return new DiskChanges(unmodifiableSet(normalUsers), unmodifiableSet(addedUsers), unmodifiableSet(remoteSet));
+			return new DiskChanges(unmodifiableSet(normalUsers), unmodifiableSet(addedUsers), unmodifiableSet(deletedUsers));
 		}).cache();
 
 		var removeObsoleteDiskSessions = diskChangesMono
