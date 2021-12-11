@@ -21,6 +21,7 @@ import java.util.HashSet;
 import java.util.Map;
 import java.util.Map.Entry;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
@@ -239,11 +240,12 @@ public class ReactiveApi {
 
 						// Register the session instance to the distributed nodes map
 						return Mono
-								.fromCompletionStage(() -> userIdToNodeId.put(userId, nodeId))
+								.fromCompletionStage(() -> userIdToNodeId.put(userId, nodeId).thenApply(Optional::ofNullable))
 								.flatMap(prevDistributed -> {
-									if (prevDistributed != null && prevDistributed.value() != null &&
-											!Objects.equals(this.nodeId, prevDistributed.value())) {
-										LOG.error("Session id \"{}\" is already registered in the node \"{}\"!", liveId, prevDistributed.value());
+									if (prevDistributed.isPresent() && prevDistributed.get().value() != null &&
+											!Objects.equals(this.nodeId, prevDistributed.get().value())) {
+										LOG.error("Session id \"{}\" is already registered in the node \"{}\"!", liveId,
+												prevDistributed.get().value());
 									}
 
 									var saveToDiskMono = Mono
@@ -264,7 +266,8 @@ public class ReactiveApi {
 									return Mono
 											.fromCallable(() -> {
 												synchronized (diskSessions) {
-													return Paths.get(diskSessions.getSettings().path);
+													return Objects.requireNonNull(Paths.get(diskSessions.getSettings().path),
+															"Session " + userId + " path is missing");
 												}
 											})
 											.subscribeOn(Schedulers.boundedElastic())
@@ -285,7 +288,9 @@ public class ReactiveApi {
 													return Mono.just(sessionPath);
 												}
 											})
-											.doOnNext(reactiveApiPublisher::start)
+											.doOnNext(path -> reactiveApiPublisher.start(path,
+													() -> ReactiveApi.this.onPublisherClosed(userId)
+											))
 											.thenReturn(new CreateSessionResponse(liveId));
 								});
 					});
@@ -301,6 +306,16 @@ public class ReactiveApi {
 				)
 				.doOnNext(resp -> LOG.debug("Handled session request {}, the response is: {}", req, resp))
 				.doOnError(ex -> LOG.debug("Handled session request {}, the response is: error", req, ex));
+	}
+
+	private void onPublisherClosed(long userId) {
+		this.destroySession(userId, nodeId).whenComplete((result, ex) -> {
+			if (ex != null) {
+				LOG.error("Failed to close the session for user {} after it was closed itself", userId);
+			} else {
+				LOG.debug("Closed the session for user {} after it was closed itself", userId);
+			}
+		});
 	}
 
 	public Mono<Long> nextFreeLiveId() {

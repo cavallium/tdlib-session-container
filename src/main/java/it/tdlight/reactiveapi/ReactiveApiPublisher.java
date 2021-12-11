@@ -26,6 +26,8 @@ import it.tdlight.reactiveapi.Event.OnUpdateError;
 import it.tdlight.reactiveapi.Event.OnUserLoginCodeRequested;
 import it.tdlight.reactiveapi.Event.Request;
 import it.tdlight.reactiveapi.ResultingEvent.ClientBoundResultingEvent;
+import it.tdlight.reactiveapi.ResultingEvent.ClusterBoundResultingEvent;
+import it.tdlight.reactiveapi.ResultingEvent.ResultingEventPublisherClosed;
 import it.tdlight.reactiveapi.ResultingEvent.TDLibBoundResultingEvent;
 import it.tdlight.tdlight.ClientManager;
 import java.io.ByteArrayInputStream;
@@ -90,13 +92,16 @@ public abstract class ReactiveApiPublisher {
 		return new ReactiveApiPublisherPhoneNumber(atomix, liveId, userId, phoneNumber);
 	}
 
-	public void start(Path path) {
+	public void start(Path path, @Nullable Runnable onClose) {
 		this.path.set(path);
 		LOG.info("Starting session \"{}\" in path \"{}\"", this, path);
 		var publishedResultingEvents = telegramClient
 				.subscribeOn(Schedulers.parallel())
 				// Handle signals, then return a ResultingEvent
 				.mapNotNull(this::onSignal)
+				.doFinally(s -> {
+					LOG.trace("Finalized telegram client events");
+				})
 				.publish();
 
 		publishedResultingEvents
@@ -143,6 +148,23 @@ public abstract class ReactiveApiPublisher {
 				.subscribe(clientBoundEvent -> eventService.broadcast("session-" + liveId + "-client-bound-events",
 						clientBoundEvent, ReactiveApiPublisher::serializeEvent));
 
+		publishedResultingEvents
+				// Obtain only cluster-bound events
+				.filter(s -> s instanceof ClusterBoundResultingEvent)
+				.cast(ClusterBoundResultingEvent.class)
+
+				// Send events to the cluster
+				.subscribeOn(Schedulers.parallel())
+				.subscribe(clusterBoundEvent -> {
+					if (clusterBoundEvent instanceof ResultingEventPublisherClosed) {
+						if (onClose != null) {
+							onClose.run();
+						}
+					} else {
+						LOG.error("Unknown cluster-bound event: {}", clusterBoundEvent);
+					}
+				});
+
 
 		var prev = this.disposable.getAndSet(publishedResultingEvents.connect());
 		if (prev != null) {
@@ -175,7 +197,7 @@ public abstract class ReactiveApiPublisher {
 		if (signal.isClosed()) {
 			signal.getClosed();
 			LOG.info("Received a closed signal");
-			return null;
+			return new ResultingEventPublisherClosed();
 		}
 		if (signal.isUpdate() && signal.getUpdate().getConstructor() == TdApi.Error.CONSTRUCTOR) {
 			var error = ((TdApi.Error) signal.getUpdate());
@@ -195,25 +217,8 @@ public abstract class ReactiveApiPublisher {
 						var updateAuthorizationState = (TdApi.UpdateAuthorizationState) update;
 						switch (updateAuthorizationState.authorizationState.getConstructor()) {
 							case TdApi.AuthorizationStateWaitTdlibParameters.CONSTRUCTOR -> {
-								var tdlibParameters = new TdlibParameters();
-								var path = requireNonNull(this.path.get(), "Path must not be null");
-								tdlibParameters.databaseDirectory = path.resolve("database").toString();
-								tdlibParameters.apiId = 94575;
-								tdlibParameters.apiHash = "a3406de8d171bb422bb6ddf3bbd800e2";
-								tdlibParameters.filesDirectory = path.resolve("files").toString();
-								tdlibParameters.applicationVersion = it.tdlight.reactiveapi.generated.LibraryVersion.VERSION;
-								tdlibParameters.deviceModel = System.getProperty("os.name");
-								tdlibParameters.systemVersion = System.getProperty("os.version");
-								tdlibParameters.enableStorageOptimizer = true;
-								tdlibParameters.ignoreFileNames = true;
-								tdlibParameters.useTestDc = false;
-								tdlibParameters.useSecretChats = false;
-
-								tdlibParameters.useMessageDatabase = true;
-								tdlibParameters.useFileDatabase = true;
-								tdlibParameters.useChatInfoDatabase = true;
-								tdlibParameters.systemLanguageCode = System.getProperty("user.language", "en");
-								return new TDLibBoundResultingEvent<>(new SetTdlibParameters(tdlibParameters));
+								TdlibParameters parameters = generateTDLibParameters();
+								return new TDLibBoundResultingEvent<>(new SetTdlibParameters(parameters));
 							}
 						}
 					}
@@ -254,6 +259,28 @@ public abstract class ReactiveApiPublisher {
 			}
 		}
 		return null;
+	}
+
+	private TdlibParameters generateTDLibParameters() {
+		var tdlibParameters = new TdlibParameters();
+		var path = requireNonNull(this.path.get(), "Path must not be null");
+		tdlibParameters.databaseDirectory = path.resolve("database").toString();
+		tdlibParameters.apiId = 94575;
+		tdlibParameters.apiHash = "a3406de8d171bb422bb6ddf3bbd800e2";
+		tdlibParameters.filesDirectory = path.resolve("files").toString();
+		tdlibParameters.applicationVersion = it.tdlight.reactiveapi.generated.LibraryVersion.VERSION;
+		tdlibParameters.deviceModel = System.getProperty("os.name");
+		tdlibParameters.systemVersion = System.getProperty("os.version");
+		tdlibParameters.enableStorageOptimizer = true;
+		tdlibParameters.ignoreFileNames = true;
+		tdlibParameters.useTestDc = false;
+		tdlibParameters.useSecretChats = false;
+
+		tdlibParameters.useMessageDatabase = true;
+		tdlibParameters.useFileDatabase = true;
+		tdlibParameters.useChatInfoDatabase = true;
+		tdlibParameters.systemLanguageCode = System.getProperty("user.language", "en");
+		return tdlibParameters;
 	}
 
 	protected abstract ResultingEvent onWaitToken();
