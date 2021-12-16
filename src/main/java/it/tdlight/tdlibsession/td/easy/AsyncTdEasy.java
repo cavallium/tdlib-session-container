@@ -48,7 +48,6 @@ import java.util.concurrent.atomic.AtomicReference;
 import org.reactivestreams.Publisher;
 import org.warp.commonutils.log.Logger;
 import org.warp.commonutils.log.LoggerFactory;
-import org.warp.commonutils.error.InitializationException;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.core.publisher.Sinks;
@@ -136,7 +135,7 @@ public class AsyncTdEasy {
 						try {
 							Files.createDirectories(Path.of(settings.databaseDirectory));
 						} catch (IOException ex) {
-							throw new InitializationException(ex);
+							throw new IllegalStateException(ex);
 						}
 					}
 

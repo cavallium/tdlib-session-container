@@ -15,7 +15,6 @@ import it.tdlight.utils.MonoUtils;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.concurrent.atomic.AtomicReference;
-import org.warp.commonutils.error.InitializationException;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.core.publisher.Sinks;
@@ -65,7 +64,7 @@ public class AsyncTdMiddleLocal implements AsyncTdMiddle {
 						.getT1()
 						.start(botId, botAlias, true, implementationDetails, tuple.getT2())
 						.thenReturn(tuple.getT1()))
-				.onErrorMap(InitializationException::new)
+				.onErrorMap(IllegalStateException::new)
 				.doOnNext(this.cli::set)
 				.doOnError(this.startError::set)
 				.thenReturn(this);
