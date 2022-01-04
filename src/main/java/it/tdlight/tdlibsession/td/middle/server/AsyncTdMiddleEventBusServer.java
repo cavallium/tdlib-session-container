@@ -31,8 +31,8 @@ import java.time.Duration;
 import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.atomic.AtomicReference;
-import org.warp.commonutils.log.Logger;
-import org.warp.commonutils.log.LoggerFactory;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Schedulers;
@@ -41,7 +41,7 @@ import reactor.util.function.Tuples;
 public class AsyncTdMiddleEventBusServer extends AbstractVerticle {
 
 	// Static values
-	protected static final Logger logger = LoggerFactory.getLogger("TdMiddleServer");
+	protected static final Logger logger = LogManager.getLogger("TdMiddleServer");
 	public static final byte[] EMPTY = new byte[0];
 	public static final Duration WAIT_DURATION = Duration.ofSeconds(1);
 

@@ -14,8 +14,8 @@ import it.tdlight.utils.MonoUtils;
 import java.time.Duration;
 import java.util.Objects;
 import java.util.concurrent.atomic.AtomicReference;
-import org.warp.commonutils.log.Logger;
-import org.warp.commonutils.log.LoggerFactory;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.core.publisher.Sinks;
@@ -24,7 +24,7 @@ import reactor.core.scheduler.Schedulers;
 
 public class AsyncTdDirectImpl implements AsyncTdDirect {
 
-	private static final Logger logger = LoggerFactory.getLogger(AsyncTdDirect.class);
+	private static final Logger logger = LogManager.getLogger(AsyncTdDirect.class);
 
 	private final TelegramClientFactory telegramClientFactory;
 	private final JsonObject implementationDetails;

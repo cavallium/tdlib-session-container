@@ -29,9 +29,9 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.locks.LockSupport;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import org.warp.commonutils.locks.LockUtils;
-import org.warp.commonutils.log.Logger;
-import org.warp.commonutils.log.LoggerFactory;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.core.publisher.Sinks;
@@ -71,7 +71,7 @@ public class AsyncTdMiddleEventBusClient implements AsyncTdMiddle {
 	private boolean local;
 
 	public AsyncTdMiddleEventBusClient(TdClusterManager clusterManager) {
-		this.logger = LoggerFactory.getLogger(AsyncTdMiddleEventBusClient.class);
+		this.logger = LogManager.getLogger(AsyncTdMiddleEventBusClient.class);
 		this.cluster = clusterManager;
 		this.deliveryOptions = cluster.newDeliveryOpts().setLocalOnly(local);
 		this.deliveryOptionsWithTimeout = cluster.newDeliveryOpts().setLocalOnly(local).setSendTimeout(30000);
@@ -100,7 +100,7 @@ public class AsyncTdMiddleEventBusClient implements AsyncTdMiddle {
 						.flatMap(binlog -> binlog
 								.getLastModifiedTime()
 								.filter(modTime -> modTime == 0)
-								.doOnNext(v -> LoggerFactory
+								.doOnNext(v -> LogManager
 										.getLogger(AsyncTdMiddleEventBusClient.class)
 										.error("Can't retrieve binlog of bot " + botId + " " + botAlias + ". Creating a new one..."))
 								.thenReturn(binlog)).<AsyncTdMiddle>flatMap(binlog -> instance
@@ -133,7 +133,7 @@ public class AsyncTdMiddleEventBusClient implements AsyncTdMiddle {
 		this.botAlias = botAlias;
 		this.botAddress = "bots.bot." + this.botId;
 		this.local = local;
-		this.logger = LoggerFactory.getLogger(this.botId + " " + botAlias);
+		this.logger = LogManager.getLogger(this.botId + " " + botAlias);
 		return MonoUtils
 				.fromBlockingEmpty(() -> {
 					EmitResult result;

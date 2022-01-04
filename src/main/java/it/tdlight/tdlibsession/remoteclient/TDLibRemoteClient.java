@@ -25,9 +25,8 @@ import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import org.jetbrains.annotations.Nullable;
-import org.warp.commonutils.log.Logger;
-import org.warp.commonutils.log.LoggerFactory;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.core.publisher.Sinks;
@@ -37,7 +36,7 @@ import reactor.tools.agent.ReactorDebugAgent;
 
 public class TDLibRemoteClient implements AutoCloseable {
 
-	private static final Logger logger = LoggerFactory.getLogger(TDLibRemoteClient.class);
+	private static final Logger logger = LogManager.getLogger(TDLibRemoteClient.class);
 
 	@Nullable
 	private final SecurityInfo securityInfo;

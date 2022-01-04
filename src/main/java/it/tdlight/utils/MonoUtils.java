@@ -27,13 +27,13 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.reactivestreams.Publisher;
 import org.reactivestreams.Subscription;
 import org.warp.commonutils.functional.IOConsumer;
-import org.warp.commonutils.log.Logger;
-import org.warp.commonutils.log.LoggerFactory;
 import reactor.core.CoreSubscriber;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.FluxSink.OverflowStrategy;
@@ -53,7 +53,7 @@ import reactor.util.context.Context;
 
 public class MonoUtils {
 
-	private static final Logger logger = LoggerFactory.getLogger(MonoUtils.class);
+	private static final Logger logger = LogManager.getLogger(MonoUtils.class);
 
 	public static <T> Mono<T> notImplemented() {
 		return Mono.fromCallable(() -> {

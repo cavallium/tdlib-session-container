@@ -18,8 +18,8 @@ import it.tdlight.tdlibsession.td.middle.TdClusterManager;
 import it.tdlight.utils.MonoUtils;
 import java.time.Duration;
 import java.util.concurrent.atomic.AtomicReference;
-import org.warp.commonutils.log.Logger;
-import org.warp.commonutils.log.LoggerFactory;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import reactor.core.Disposable;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
@@ -29,7 +29,7 @@ import reactor.core.scheduler.Schedulers;
 
 public class AsyncTdMiddleDirect extends AbstractVerticle implements AsyncTdMiddle {
 
-	private static final Logger logger = LoggerFactory.getLogger(AsyncTdMiddleDirect.class);
+	private static final Logger logger = LogManager.getLogger(AsyncTdMiddleDirect.class);
 
 	private final TelegramClientFactory clientFactory;
 

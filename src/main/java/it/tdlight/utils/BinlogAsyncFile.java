@@ -4,14 +4,14 @@ import io.vertx.core.file.OpenOptions;
 import io.vertx.reactivex.core.buffer.Buffer;
 import io.vertx.reactivex.core.file.AsyncFile;
 import io.vertx.reactivex.core.file.FileProps;
-import io.vertx.reactivex.core.file.FileSystem;
-import org.warp.commonutils.log.Logger;
-import org.warp.commonutils.log.LoggerFactory;
+import io.vertx.reactivex.core.file.FileSystem;;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import reactor.core.publisher.Mono;
 
 public class BinlogAsyncFile {
 
-	private static final Logger logger = LoggerFactory.getLogger(BinlogAsyncFile.class);
+	private static final Logger logger = LogManager.getLogger(BinlogAsyncFile.class);
 
 	private final FileSystem filesystem;
 	private final String path;

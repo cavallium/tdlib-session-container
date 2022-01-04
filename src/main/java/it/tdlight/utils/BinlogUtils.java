@@ -15,8 +15,8 @@ import java.text.StringCharacterIterator;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
-import org.warp.commonutils.log.Logger;
-import org.warp.commonutils.log.LoggerFactory;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Schedulers;
@@ -25,7 +25,7 @@ import reactor.util.function.Tuples;
 
 public class BinlogUtils {
 
-	private static final Logger logger = LoggerFactory.getLogger(BinlogUtils.class);
+	private static final Logger logger = LogManager.getLogger(BinlogUtils.class);
 
 	public static Mono<BinlogAsyncFile> retrieveBinlog(FileSystem vertxFilesystem, Path binlogPath) {
 		var path = binlogPath.toString();
