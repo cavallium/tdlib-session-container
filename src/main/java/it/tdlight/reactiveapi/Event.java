@@ -46,7 +46,7 @@ public sealed interface Event permits ClientBoundEvent, ServerBoundEvent {
 
 	record OnBotLoginCodeRequested(long liveId, long userId, String token) implements OnLoginCodeRequested {}
 
-	record OnOtherDeviceLoginRequested(long liveId, long userId) implements ClientBoundEvent {}
+	record OnOtherDeviceLoginRequested(long liveId, long userId, String link) implements ClientBoundEvent {}
 
 	record OnPasswordRequested(long liveId, long userId) implements ClientBoundEvent {}
 

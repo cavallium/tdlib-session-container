@@ -8,14 +8,13 @@ import io.atomix.core.Atomix;
 import io.atomix.core.AtomixBuilder;
 import io.atomix.core.profile.ConsensusProfileConfig;
 import io.atomix.core.profile.Profile;
-import io.atomix.protocols.backup.partition.PrimaryBackupPartitionGroup;
 import io.atomix.protocols.raft.partition.RaftPartitionGroup;
-import io.atomix.storage.StorageLevel;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.List;
+import org.jetbrains.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -53,16 +52,35 @@ public class Entrypoint {
 			String diskSessionsConfigPath = args.diskSessionsPath;
 			clusterSettings = mapper.readValue(Paths.get(clusterConfigPath).toFile(), ClusterSettings.class);
 			instanceSettings = mapper.readValue(Paths.get(instanceConfigPath).toFile(), InstanceSettings.class);
-			diskSessions = new DiskSessionsManager(mapper, diskSessionsConfigPath);
+			if (instanceSettings.client) {
+				diskSessions = null;
+			} else {
+				diskSessions = new DiskSessionsManager(mapper, diskSessionsConfigPath);
+			}
 		}
 
+		return start(clusterSettings, instanceSettings, diskSessions, atomixBuilder);
+	}
+
+	public static ReactiveApi start(ClusterSettings clusterSettings,
+			InstanceSettings instanceSettings,
+			@Nullable DiskSessionsManager diskSessions,
+			AtomixBuilder atomixBuilder) {
+
+		atomixBuilder.withCompatibleSerialization(false);
 		atomixBuilder.withClusterId(clusterSettings.id);
 
 		String nodeId;
 		if (instanceSettings.client) {
+			if (diskSessions != null) {
+				throw new IllegalArgumentException("A client instance can't have a session manager!");
+			}
 			atomixBuilder.withMemberId(instanceSettings.id).withAddress(instanceSettings.clientAddress);
 			nodeId = null;
 		} else {
+			if (diskSessions == null) {
+				throw new IllegalArgumentException("A full instance must have a session manager!");
+			}
 			// Find node settings
 			var nodeSettingsOptional = clusterSettings.nodes
 					.stream()
@@ -115,15 +133,13 @@ public class Entrypoint {
 			//atomixBuilder.addProfile(Profile.dataGrid(32));
 		}
 
-		atomixBuilder.withCompatibleSerialization(false);
-
 		var atomix = atomixBuilder.build();
 
 		TdSerializer.register(atomix.getSerializationService());
 
 		atomix.start().join();
 
-		var api = new ReactiveApi(nodeId, atomix, diskSessions);
+		var api = new AtomixReactiveApi(nodeId, atomix, diskSessions);
 
 		LOG.info("Starting ReactiveApi...");
 

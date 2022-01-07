@@ -21,7 +21,7 @@ public class Cli {
 	public static void main(String[] args) throws IOException {
 		var validArgs = Entrypoint.parseArguments(args);
 		var atomixBuilder = Atomix.builder();
-		var api = Entrypoint.start(validArgs, atomixBuilder);
+		var api = (AtomixReactiveApi) Entrypoint.start(validArgs, atomixBuilder);
 
 		AtomicBoolean alreadyShutDown = new AtomicBoolean(false);
 		AtomicBoolean acceptInputs = new AtomicBoolean(true);

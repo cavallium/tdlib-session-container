@@ -1,15 +1,18 @@
 package it.tdlight.reactiveapi;
 
-import static it.tdlight.reactiveapi.AuthPhase.*;
+import static it.tdlight.reactiveapi.AuthPhase.LOGGED_IN;
+import static it.tdlight.reactiveapi.AuthPhase.LOGGED_OUT;
 import static java.util.Objects.requireNonNull;
 
+import com.google.common.primitives.Longs;
 import io.atomix.cluster.messaging.ClusterEventService;
+import io.atomix.cluster.messaging.Subscription;
 import io.atomix.core.Atomix;
 import it.tdlight.common.ReactiveTelegramClient;
 import it.tdlight.common.Response;
 import it.tdlight.common.Signal;
-import it.tdlight.common.utils.LibraryVersion;
 import it.tdlight.jni.TdApi;
+import it.tdlight.jni.TdApi.AuthorizationStateWaitOtherDeviceConfirmation;
 import it.tdlight.jni.TdApi.CheckAuthenticationBotToken;
 import it.tdlight.jni.TdApi.CheckDatabaseEncryptionKey;
 import it.tdlight.jni.TdApi.Object;
@@ -64,23 +67,26 @@ public abstract class ReactiveApiPublisher {
 	private final AtomicReference<State> state = new AtomicReference<>(new State(LOGGED_OUT));
 	protected final long userId;
 	protected final long liveId;
+	private final String dynamicIdResolveSubject;
 
 	private final AtomicReference<Disposable> disposable = new AtomicReference<>();
 	private final AtomicReference<Path> path = new AtomicReference<>();
 
 	private ReactiveApiPublisher(Atomix atomix, long liveId, long userId) {
+		this.eventService = atomix.getEventService();
 		this.userId = userId;
 		this.liveId = liveId;
+		this.dynamicIdResolveSubject = SubjectNaming.getDynamicIdResolveSubject(userId);
 		this.rawTelegramClient = ClientManager.createReactive();
-		this.telegramClient = Flux.<Signal>create(sink -> {
+		this.telegramClient = Flux.<Signal>create(sink -> this.registerTopics().thenAccept(subscription -> {
 			rawTelegramClient.createAndRegisterClient();
 			rawTelegramClient.setListener(sink::next);
 			sink.onCancel(rawTelegramClient::cancel);
-			sink.onDispose(rawTelegramClient::dispose);
-
-			this.registerTopics();
-		}).share();
-		this.eventService = atomix.getEventService();
+			sink.onDispose(() -> {
+				subscription.close();
+				rawTelegramClient.dispose();
+			});
+		})).share();
 	}
 
 	public static ReactiveApiPublisher fromToken(Atomix atomix, Long liveId, long userId, String token) {
@@ -142,7 +148,7 @@ public abstract class ReactiveApiPublisher {
 
 				// Send events to the client
 				.subscribeOn(Schedulers.parallel())
-				.subscribe(clientBoundEvent -> eventService.broadcast("session-" + liveId + "-client-bound-events",
+				.subscribe(clientBoundEvent -> eventService.broadcast("session-client-bound-events",
 						clientBoundEvent, ReactiveApiPublisher::serializeEvent));
 
 		publishedResultingEvents
@@ -242,7 +248,8 @@ public abstract class ReactiveApiPublisher {
 								return onWaitCode();
 							}
 							case TdApi.AuthorizationStateWaitOtherDeviceConfirmation.CONSTRUCTOR -> {
-								return new ClientBoundResultingEvent(new OnOtherDeviceLoginRequested(liveId, userId));
+								var link = ((AuthorizationStateWaitOtherDeviceConfirmation) updateAuthorizationState.authorizationState).link;
+								return new ClientBoundResultingEvent(new OnOtherDeviceLoginRequested(liveId, userId, link));
 							}
 							case TdApi.AuthorizationStateWaitPassword.CONSTRUCTOR -> {
 								return new ClientBoundResultingEvent(new OnPasswordRequested(liveId, userId));
@@ -290,6 +297,8 @@ public abstract class ReactiveApiPublisher {
 	private static byte[] serializeEvent(ClientBoundEvent clientBoundEvent) {
 		try (var byteArrayOutputStream = new ByteArrayOutputStream()) {
 			try (var dataOutputStream = new DataOutputStream(byteArrayOutputStream)) {
+				dataOutputStream.writeLong(clientBoundEvent.liveId());
+				dataOutputStream.writeLong(clientBoundEvent.userId());
 				if (clientBoundEvent instanceof OnUpdateData onUpdateData) {
 					dataOutputStream.writeByte(0x1);
 					onUpdateData.update().serialize(dataOutputStream);
@@ -302,6 +311,9 @@ public abstract class ReactiveApiPublisher {
 				} else if (clientBoundEvent instanceof OnBotLoginCodeRequested onBotLoginCodeRequested) {
 					dataOutputStream.writeByte(0x4);
 					dataOutputStream.writeUTF(onBotLoginCodeRequested.token());
+				} else if (clientBoundEvent instanceof OnOtherDeviceLoginRequested onOtherDeviceLoginRequested) {
+					dataOutputStream.writeByte(0x5);
+					dataOutputStream.writeUTF(onOtherDeviceLoginRequested.link());
 				} else {
 					throw new UnsupportedOperationException("Unexpected value: " + clientBoundEvent);
 				}
@@ -312,12 +324,19 @@ public abstract class ReactiveApiPublisher {
 		}
 	}
 
-	private void registerTopics() {
+	private CompletableFuture<Subscription> registerTopics() {
 		// Start receiving requests
 		eventService.subscribe("session-" + liveId + "-requests",
 				ReactiveApiPublisher::deserializeRequest,
 				this::handleRequest,
 				ReactiveApiPublisher::serializeResponse);
+
+		// Start receiving request
+		return eventService.subscribe(dynamicIdResolveSubject,
+				b -> null,
+				r -> CompletableFuture.completedFuture(liveId),
+				Longs::toByteArray
+		);
 	}
 
 	private static byte[] serializeResponse(Response response) {
@@ -325,7 +344,7 @@ public abstract class ReactiveApiPublisher {
 		var object = response.getObject();
 		try (var byteArrayOutputStream = new ByteArrayOutputStream()) {
 			try (var dataOutputStream = new DataOutputStream(byteArrayOutputStream)) {
-				dataOutputStream.writeLong(id);
+				//dataOutputStream.writeLong(id);
 				object.serialize(dataOutputStream);
 				return byteArrayOutputStream.toByteArray();
 			}

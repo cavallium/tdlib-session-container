@@ -11,4 +11,6 @@ public interface ReactiveApiClient {
 	Flux<ClientBoundEvent> clientBoundEvents();
 
 	<T extends TdApi.Object> Mono<T> request(TdApi.Function<T> request, Instant timeout);
+
+	long getUserId();
 }
