@@ -10,7 +10,7 @@
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
     <revision>0-SNAPSHOT</revision>
 
-    <atomix.version>3.0.6</atomix.version>
+    <atomix.version>3.1.10</atomix.version>
 		<record.builder.version>29</record.builder.version>
   </properties>
   <repositories>
@@ -45,60 +45,17 @@
   </scm>
   <dependencyManagement>
     <dependencies>
-      <dependency>
-        <groupId>it.unimi.dsi</groupId>
-        <artifactId>fastutil</artifactId>
-        <version>8.5.6</version>
-      </dependency>
-			<dependency>
-				<groupId>io.atomix</groupId>
-				<artifactId>atomix</artifactId>
-				<version>${atomix.version}</version>
-			</dependency>
-			<dependency>
-				<groupId>io.atomix</groupId>
-				<artifactId>atomix-raft</artifactId>
-				<version>${atomix.version}</version>
-			</dependency>
-			<dependency>
-				<groupId>io.atomix</groupId>
-				<artifactId>atomix-primary-backup</artifactId>
-				<version>${atomix.version}</version>
-			</dependency>
-			<dependency>
-				<groupId>io.projectreactor</groupId>
-				<artifactId>reactor-core</artifactId>
-				<version>3.4.12</version>
-			</dependency>
-			<dependency>
-				<groupId>org.slf4j</groupId>
-				<artifactId>slf4j-api</artifactId>
-				<version>1.7.32</version>
-			</dependency>
-			<dependency>
-				<groupId>org.apache.logging.log4j</groupId>
-				<artifactId>log4j-core</artifactId>
-				<version>2.15.0</version>
-			</dependency>
-			<dependency>
-				<groupId>org.apache.logging.log4j</groupId>
-				<artifactId>log4j-slf4j-impl</artifactId>
-				<version>2.15.0</version>
-			</dependency>
-			<dependency>
-				<groupId>com.fasterxml.jackson.dataformat</groupId>
-				<artifactId>jackson-dataformat-yaml</artifactId>
-				<version>2.13.0</version>
-			</dependency>
-			<dependency>
-				<groupId>net.minecrell</groupId>
-				<artifactId>terminalconsoleappender</artifactId>
-				<version>1.3.0</version>
-			</dependency>
 			<dependency>
 				<groupId>it.tdlight</groupId>
 				<artifactId>tdlight-java-bom</artifactId>
 				<version>2.7.10.8</version>
+				<type>pom</type>
+				<scope>import</scope>
+			</dependency>
+			<dependency>
+				<groupId>io.projectreactor</groupId>
+				<artifactId>reactor-bom</artifactId>
+				<version>2020.0.14</version>
 				<type>pom</type>
 				<scope>import</scope>
 			</dependency>
@@ -124,25 +81,9 @@
       <scope>test</scope>
     </dependency>
     <dependency>
-      <groupId>io.projectreactor</groupId>
-      <artifactId>reactor-core</artifactId>
-    </dependency>
-    <dependency>
-      <groupId>org.slf4j</groupId>
-      <artifactId>slf4j-api</artifactId>
-    </dependency>
-    <dependency>
-      <groupId>org.apache.logging.log4j</groupId>
-      <artifactId>log4j-core</artifactId>
-    </dependency>
-    <dependency>
-      <groupId>org.apache.logging.log4j</groupId>
-      <artifactId>log4j-slf4j-impl</artifactId>
-    </dependency>
-    <dependency>
       <groupId>org.warp</groupId>
       <artifactId>common-utils</artifactId>
-      <version>1.1.5</version>
+      <version>1.1.7</version>
     </dependency>
     <dependency>
       <groupId>io.netty</groupId>
@@ -160,30 +101,49 @@
 		</dependency>
 
 		<dependency>
+			<groupId>it.unimi.dsi</groupId>
+			<artifactId>fastutil</artifactId>
+			<version>8.5.6</version>
+		</dependency>
+		<dependency>
 			<groupId>io.atomix</groupId>
 			<artifactId>atomix</artifactId>
+			<version>${atomix.version}</version>
 		</dependency>
 		<dependency>
 			<groupId>io.atomix</groupId>
 			<artifactId>atomix-raft</artifactId>
+			<version>${atomix.version}</version>
 		</dependency>
 		<dependency>
 			<groupId>io.atomix</groupId>
 			<artifactId>atomix-primary-backup</artifactId>
+			<version>${atomix.version}</version>
 		</dependency>
-
-    <dependency>
-      <groupId>it.unimi.dsi</groupId>
-      <artifactId>fastutil</artifactId>
-    </dependency>
+		<dependency>
+			<groupId>io.projectreactor</groupId>
+			<artifactId>reactor-core</artifactId>
+		</dependency>
+		<dependency>
+			<groupId>io.projectreactor</groupId>
+			<artifactId>reactor-tools</artifactId>
+		</dependency>
+		<dependency>
+			<groupId>org.apache.logging.log4j</groupId>
+			<artifactId>log4j-core</artifactId>
+			<version>2.17.1</version>
+		</dependency>
 		<dependency>
 			<groupId>com.fasterxml.jackson.dataformat</groupId>
 			<artifactId>jackson-dataformat-yaml</artifactId>
+			<version>2.13.1</version>
 		</dependency>
 		<dependency>
 			<groupId>net.minecrell</groupId>
 			<artifactId>terminalconsoleappender</artifactId>
+			<version>1.3.0</version>
 		</dependency>
+
 		<dependency>
 			<groupId>io.soabase.record-builder</groupId>
 			<artifactId>record-builder-processor</artifactId>
