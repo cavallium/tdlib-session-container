@@ -98,9 +98,7 @@ public abstract class ReactiveApiPublisher {
 				.subscribeOn(Schedulers.parallel())
 				// Handle signals, then return a ResultingEvent
 				.mapNotNull(this::onSignal)
-				.doFinally(s -> {
-					LOG.trace("Finalized telegram client events");
-				})
+				.doFinally(s -> LOG.trace("Finalized telegram client events"))
 				.publish();
 
 		publishedResultingEvents
@@ -293,16 +291,16 @@ public abstract class ReactiveApiPublisher {
 		try (var byteArrayOutputStream = new ByteArrayOutputStream()) {
 			try (var dataOutputStream = new DataOutputStream(byteArrayOutputStream)) {
 				if (clientBoundEvent instanceof OnUpdateData onUpdateData) {
-					dataOutputStream.write(0x1);
+					dataOutputStream.writeByte(0x1);
 					onUpdateData.update().serialize(dataOutputStream);
 				} else if (clientBoundEvent instanceof OnUpdateError onUpdateError) {
-					dataOutputStream.write(0x2);
+					dataOutputStream.writeByte(0x2);
 					onUpdateError.error().serialize(dataOutputStream);
 				} else if (clientBoundEvent instanceof OnUserLoginCodeRequested onUserLoginCodeRequested) {
-					dataOutputStream.write(0x3);
+					dataOutputStream.writeByte(0x3);
 					dataOutputStream.writeLong(onUserLoginCodeRequested.phoneNumber());
 				} else if (clientBoundEvent instanceof OnBotLoginCodeRequested onBotLoginCodeRequested) {
-					dataOutputStream.write(0x4);
+					dataOutputStream.writeByte(0x4);
 					dataOutputStream.writeUTF(onBotLoginCodeRequested.token());
 				} else {
 					throw new UnsupportedOperationException("Unexpected value: " + clientBoundEvent);
