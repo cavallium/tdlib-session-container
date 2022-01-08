@@ -19,6 +19,7 @@ import it.tdlight.reactiveapi.CreateSessionRequest.LoadSessionFromDiskRequest;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.time.Duration;
 import java.util.HashSet;
 import java.util.Map;
 import java.util.Map.Entry;
@@ -399,9 +400,15 @@ public class AtomixReactiveApi implements ReactiveApi {
 
 	@Override
 	public Mono<Long> resolveUserLiveId(long userId) {
-		return Mono.fromCompletionStage(() -> atomix
-				.getEventService()
-				.send(SubjectNaming.getDynamicIdResolveSubject(userId), userId, Longs::toByteArray, Longs::fromByteArray))
+		return Mono
+				.fromCompletionStage(() -> atomix
+						.getEventService()
+						.send(SubjectNaming.getDynamicIdResolveSubject(userId),
+								userId,
+								Longs::toByteArray,
+								Longs::fromByteArray,
+								Duration.ofSeconds(1)
+						))
 				.onErrorResume(ex -> {
 					if (ex instanceof MessagingException.NoRemoteHandler) {
 						return Mono.empty();

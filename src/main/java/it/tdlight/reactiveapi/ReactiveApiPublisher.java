@@ -357,7 +357,7 @@ public abstract class ReactiveApiPublisher {
 		return Mono
 				.just(requestObj)
 				.filter(req -> {
-					if (userId != req.liveId()) {
+					if (liveId != req.liveId()) {
 						LOG.error("Received a request for another session!");
 						return false;
 					} else {

@@ -89,11 +89,12 @@ public class LiveAtomixReactiveApiClient implements ReactiveApiClient {
 		try (var byteArrayOutputStream = new ByteArrayOutputStream()) {
 			try (var dataOutputStream = new DataOutputStream(byteArrayOutputStream)) {
 				dataOutputStream.writeLong(request.liveId());
-				request.request().serialize(dataOutputStream);
 				dataOutputStream.writeLong(request.timeout().toEpochMilli());
+				request.request().serialize(dataOutputStream);
+				dataOutputStream.flush();
 				return byteArrayOutputStream.toByteArray();
 			}
-		} catch (IOException ex) {
+		} catch (UnsupportedOperationException | IOException ex) {
 			throw new SerializationException(ex);
 		}
 	}

@@ -65,12 +65,12 @@ public sealed interface Event permits ClientBoundEvent, ServerBoundEvent {
 		public static <T extends TdApi.Object> Request<T> deserialize(DataInput dataInput) {
 			try {
 				var liveId = dataInput.readLong();
-				@SuppressWarnings("unchecked")
-				TdApi.Function<T> request = (TdApi.Function<T>) TdApi.Deserializer.deserialize(dataInput);
 				long millis = dataInput.readLong();
 				var timeout = Instant.ofEpochMilli(millis);
+				@SuppressWarnings("unchecked")
+				TdApi.Function<T> request = (TdApi.Function<T>) TdApi.Deserializer.deserialize(dataInput);
 				return new Request<>(liveId, request, timeout);
-			} catch (IOException e) {
+			} catch (UnsupportedOperationException | IOException e) {
 				throw new SerializationException(e);
 			}
 		}
