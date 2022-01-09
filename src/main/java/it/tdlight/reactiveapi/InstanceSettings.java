@@ -2,6 +2,7 @@ package it.tdlight.reactiveapi;
 
 import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonProperty;
+import java.util.Set;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -22,12 +23,20 @@ public class InstanceSettings {
 	 */
 	public @Nullable String clientAddress;
 
+	/**
+	 * If {@link #client} is false, this will transform resulting events <b>before</b> being sent
+	 */
+	public @Nullable Set<Class<? extends ResultingEventTransformer>> resultingEventTransformers;
+
 	@JsonCreator
 	public InstanceSettings(@JsonProperty(required = true, value = "id") @NotNull String id,
 			@JsonProperty(required = true, value = "client") boolean client,
-			@JsonProperty("clientAddress") @Nullable String clientAddress) {
+			@JsonProperty("clientAddress") @Nullable String clientAddress,
+			@JsonProperty("resultingEventTransformers") @Nullable
+					Set<Class<? extends ResultingEventTransformer>> resultingEventTransformers) {
 		this.id = id;
 		this.client = client;
 		this.clientAddress = clientAddress;
+		this.resultingEventTransformers = resultingEventTransformers;
 	}
 }

@@ -1,5 +1,7 @@
 package it.tdlight.reactiveapi;
 
+import static java.util.Collections.unmodifiableSet;
+
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.dataformat.yaml.YAMLFactory;
 import io.atomix.cluster.Node;
@@ -10,10 +12,13 @@ import io.atomix.core.profile.ConsensusProfileConfig;
 import io.atomix.core.profile.Profile;
 import io.atomix.protocols.raft.partition.RaftPartitionGroup;
 import java.io.IOException;
+import java.lang.reflect.InvocationTargetException;
 import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import org.jetbrains.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -70,13 +75,19 @@ public class Entrypoint {
 		atomixBuilder.withCompatibleSerialization(false);
 		atomixBuilder.withClusterId(clusterSettings.id);
 
+		Set<ResultingEventTransformer> resultingEventTransformerSet;
 		String nodeId;
 		if (instanceSettings.client) {
 			if (diskSessions != null) {
 				throw new IllegalArgumentException("A client instance can't have a session manager!");
 			}
-			atomixBuilder.withMemberId(instanceSettings.id).withAddress(instanceSettings.clientAddress);
+			if (instanceSettings.clientAddress == null) {
+				throw new IllegalArgumentException("A client instance must have an address (host:port)");
+			}
+			var address = Address.fromString(instanceSettings.clientAddress);
+			atomixBuilder.withMemberId(instanceSettings.id).withHost(address.host()).withPort(address.port());
 			nodeId = null;
+			resultingEventTransformerSet = Set.of();
 		} else {
 			if (diskSessions == null) {
 				throw new IllegalArgumentException("A full instance must have a session manager!");
@@ -95,8 +106,28 @@ public class Entrypoint {
 
 			var nodeSettings = nodeSettingsOptional.get();
 
-			atomixBuilder.withMemberId(instanceSettings.id).withAddress(nodeSettings.address);
+			var address = Address.fromString(nodeSettings.address);
+			atomixBuilder.withMemberId(instanceSettings.id).withHost(address.host()).withPort(address.port());
+
+			resultingEventTransformerSet = new HashSet<>();
+			if (instanceSettings.resultingEventTransformers != null) {
+				for (var resultingEventTransformer: instanceSettings.resultingEventTransformers) {
+					try {
+						var instance = resultingEventTransformer.getConstructor().newInstance();
+						resultingEventTransformerSet.add(instance);
+						LOG.info("Loaded and applied resulting event transformer: " + resultingEventTransformer.getName());
+					} catch (InstantiationException | IllegalAccessException | InvocationTargetException e) {
+						throw new IllegalArgumentException("Failed to load resulting event transformer: "
+								+ resultingEventTransformer.getName());
+					} catch (NoSuchMethodException e) {
+						throw new IllegalArgumentException("The client transformer must declare an empty constructor: "
+								+ resultingEventTransformer.getName());
+					}
+				}
+			}
+
 			nodeId = nodeSettings.id;
+			resultingEventTransformerSet = unmodifiableSet(resultingEventTransformerSet);
 		}
 
 		var bootstrapDiscoveryProviderNodes = new ArrayList<Node>();
@@ -139,7 +170,7 @@ public class Entrypoint {
 
 		atomix.start().join();
 
-		var api = new AtomixReactiveApi(nodeId, atomix, diskSessions);
+		var api = new AtomixReactiveApi(nodeId, atomix, diskSessions, resultingEventTransformerSet);
 
 		LOG.info("Starting ReactiveApi...");
 

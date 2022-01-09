@@ -31,6 +31,7 @@ import java.util.concurrent.CompletionException;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.stream.Collectors;
+import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -48,6 +49,7 @@ public class AtomixReactiveApi implements ReactiveApi {
 	@Nullable
 	private final String nodeId;
 	private final Atomix atomix;
+	private final Set<ResultingEventTransformer> resultingEventTransformerSet;
 	private final AsyncAtomicIdGenerator nextSessionLiveId;
 
 	private final AsyncAtomicLock sessionModificationLock;
@@ -62,9 +64,13 @@ public class AtomixReactiveApi implements ReactiveApi {
 	@Nullable
 	private final DiskSessionsManager diskSessions;
 
-	public AtomixReactiveApi(@Nullable String nodeId, Atomix atomix, @Nullable DiskSessionsManager diskSessions) {
+	public AtomixReactiveApi(@Nullable String nodeId,
+			Atomix atomix,
+			@Nullable DiskSessionsManager diskSessions,
+			@NotNull Set<ResultingEventTransformer> resultingEventTransformerSet) {
 		this.nodeId = nodeId;
 		this.atomix = atomix;
+		this.resultingEventTransformerSet = resultingEventTransformerSet;
 
 		if (nodeId == null) {
 			if (diskSessions != null) {
@@ -248,22 +254,38 @@ public class AtomixReactiveApi implements ReactiveApi {
 							userId = createBotSessionRequest.userId();
 							botToken = createBotSessionRequest.token();
 							phoneNumber = null;
-							reactiveApiPublisher = ReactiveApiPublisher.fromToken(atomix, liveId, userId, botToken);
+							reactiveApiPublisher = ReactiveApiPublisher.fromToken(atomix, resultingEventTransformerSet,
+									liveId,
+									userId,
+									botToken
+							);
 						} else if (req instanceof CreateUserSessionRequest createUserSessionRequest) {
 							loadedFromDisk = false;
 							userId = createUserSessionRequest.userId();
 							botToken = null;
 							phoneNumber = createUserSessionRequest.phoneNumber();
-							reactiveApiPublisher = ReactiveApiPublisher.fromPhoneNumber(atomix, liveId, userId, phoneNumber);
+							reactiveApiPublisher = ReactiveApiPublisher.fromPhoneNumber(atomix, resultingEventTransformerSet,
+									liveId,
+									userId,
+									phoneNumber
+							);
 						} else if (req instanceof LoadSessionFromDiskRequest loadSessionFromDiskRequest) {
 							loadedFromDisk = true;
 							userId = loadSessionFromDiskRequest.userId();
 							botToken = loadSessionFromDiskRequest.token();
 							phoneNumber = loadSessionFromDiskRequest.phoneNumber();
 							if (loadSessionFromDiskRequest.phoneNumber() != null) {
-								reactiveApiPublisher = ReactiveApiPublisher.fromPhoneNumber(atomix, liveId, userId, phoneNumber);
+								reactiveApiPublisher = ReactiveApiPublisher.fromPhoneNumber(atomix, resultingEventTransformerSet,
+										liveId,
+										userId,
+										phoneNumber
+								);
 							} else {
-								reactiveApiPublisher = ReactiveApiPublisher.fromToken(atomix, liveId, userId, botToken);
+								reactiveApiPublisher = ReactiveApiPublisher.fromToken(atomix, resultingEventTransformerSet,
+										liveId,
+										userId,
+										botToken
+								);
 							}
 						} else {
 							return Mono.error(new UnsupportedOperationException("Unexpected value: " + req));

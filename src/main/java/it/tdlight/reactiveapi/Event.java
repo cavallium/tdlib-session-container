@@ -3,10 +3,8 @@ package it.tdlight.reactiveapi;
 import it.tdlight.jni.TdApi;
 import it.tdlight.reactiveapi.Event.ClientBoundEvent;
 import it.tdlight.reactiveapi.Event.ServerBoundEvent;
-import java.io.ByteArrayInputStream;
 import java.io.DataInput;
 import java.io.IOException;
-import java.time.Duration;
 import java.time.Instant;
 import org.apache.commons.lang3.SerializationException;
 
@@ -48,7 +46,8 @@ public sealed interface Event permits ClientBoundEvent, ServerBoundEvent {
 
 	record OnOtherDeviceLoginRequested(long liveId, long userId, String link) implements ClientBoundEvent {}
 
-	record OnPasswordRequested(long liveId, long userId) implements ClientBoundEvent {}
+	record OnPasswordRequested(long liveId, long userId, String passwordHint, boolean hasRecoveryEmail,
+														 String recoveryEmailPattern) implements ClientBoundEvent {}
 
 	/**
 	 * Event received from TDLib

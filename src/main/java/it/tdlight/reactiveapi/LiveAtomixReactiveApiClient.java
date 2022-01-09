@@ -7,6 +7,7 @@ import it.tdlight.jni.TdApi;
 import it.tdlight.reactiveapi.Event.ClientBoundEvent;
 import it.tdlight.reactiveapi.Event.OnBotLoginCodeRequested;
 import it.tdlight.reactiveapi.Event.OnOtherDeviceLoginRequested;
+import it.tdlight.reactiveapi.Event.OnPasswordRequested;
 import it.tdlight.reactiveapi.Event.OnUpdateData;
 import it.tdlight.reactiveapi.Event.OnUpdateError;
 import it.tdlight.reactiveapi.Event.OnUserLoginCodeRequested;
@@ -101,16 +102,17 @@ public class LiveAtomixReactiveApiClient implements ReactiveApiClient {
 
 	static ClientBoundEvent deserializeEvent(byte[] bytes) {
 		try (var byteArrayInputStream = new ByteArrayInputStream(bytes)) {
-			try (var dataInputStream = new DataInputStream(byteArrayInputStream)) {
-				var liveId = dataInputStream.readLong();
-				var userId = dataInputStream.readLong();
-				return switch (dataInputStream.readByte()) {
-					case 0x01 -> new OnUpdateData(liveId, userId, (TdApi.Update) TdApi.Deserializer.deserialize(dataInputStream));
-					case 0x02 -> new OnUpdateError(liveId, userId, (TdApi.Error) TdApi.Deserializer.deserialize(dataInputStream));
-					case 0x03 -> new OnUserLoginCodeRequested(liveId, userId, dataInputStream.readLong());
-					case 0x04 -> new OnBotLoginCodeRequested(liveId, userId, dataInputStream.readUTF());
-					case 0x05 -> new OnOtherDeviceLoginRequested(liveId, userId, dataInputStream.readUTF());
-					default -> throw new IllegalStateException("Unexpected value: " + dataInputStream.readByte());
+			try (var is = new DataInputStream(byteArrayInputStream)) {
+				var liveId = is.readLong();
+				var userId = is.readLong();
+				return switch (is.readByte()) {
+					case 0x01 -> new OnUpdateData(liveId, userId, (TdApi.Update) TdApi.Deserializer.deserialize(is));
+					case 0x02 -> new OnUpdateError(liveId, userId, (TdApi.Error) TdApi.Deserializer.deserialize(is));
+					case 0x03 -> new OnUserLoginCodeRequested(liveId, userId, is.readLong());
+					case 0x04 -> new OnBotLoginCodeRequested(liveId, userId, is.readUTF());
+					case 0x05 -> new OnOtherDeviceLoginRequested(liveId, userId, is.readUTF());
+					case 0x06 -> new OnPasswordRequested(liveId, userId, is.readUTF(), is.readBoolean(), is.readUTF());
+					default -> throw new IllegalStateException("Unexpected value: " + is.readByte());
 				};
 			}
 		} catch (IOException ex) {

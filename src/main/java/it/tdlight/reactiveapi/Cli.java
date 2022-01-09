@@ -6,8 +6,11 @@ import it.tdlight.reactiveapi.CreateSessionRequest.CreateUserSessionRequest;
 import java.io.IOException;
 import java.util.Map.Entry;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ForkJoinPool;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.locks.LockSupport;
 import net.minecrell.terminalconsole.SimpleTerminalConsole;
 import org.jline.reader.LineReader;
 import org.jline.reader.LineReaderBuilder;
@@ -17,6 +20,10 @@ import org.slf4j.LoggerFactory;
 public class Cli {
 
 	private static final Logger LOG = LoggerFactory.getLogger(Cli.class);
+
+	private static final Object parameterLock = new Object();
+	private static boolean askedParameter = false;
+	private static CompletableFuture<String> askedParameterResult = null;
 
 	public static void main(String[] args) throws IOException {
 		var validArgs = Entrypoint.parseArguments(args);
@@ -57,6 +64,15 @@ public class Cli {
 
 			@Override
 			protected void runCommand(String command) {
+				synchronized (parameterLock) {
+					if (askedParameter) {
+						askedParameterResult.complete(command);
+						askedParameterResult = null;
+						askedParameter = false;
+						return;
+					}
+				}
+
 				var parts = command.split(" ", 2);
 				var commandName = parts[0].trim().toLowerCase();
 				String commandArgs;
@@ -131,5 +147,15 @@ public class Cli {
 		if (invalid) {
 			LOG.error("Syntax: CreateSession <\"bot\"|\"user\"> <userid> <token|phoneNumber>");
 		}
+	}
+
+	public static String askParameter(String question) {
+		var cf = new CompletableFuture<String>();
+		synchronized (parameterLock) {
+			LOG.info(question);
+			askedParameter = true;
+			askedParameterResult = cf;
+		}
+		return cf.join();
 	}
 }

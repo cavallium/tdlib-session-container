@@ -13,6 +13,7 @@ import it.tdlight.common.Response;
 import it.tdlight.common.Signal;
 import it.tdlight.jni.TdApi;
 import it.tdlight.jni.TdApi.AuthorizationStateWaitOtherDeviceConfirmation;
+import it.tdlight.jni.TdApi.AuthorizationStateWaitPassword;
 import it.tdlight.jni.TdApi.CheckAuthenticationBotToken;
 import it.tdlight.jni.TdApi.CheckDatabaseEncryptionKey;
 import it.tdlight.jni.TdApi.Object;
@@ -41,15 +42,18 @@ import java.io.IOException;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Set;
 import java.util.StringJoiner;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicReference;
 import javax.annotation.Nullable;
 import org.apache.commons.lang3.SerializationException;
+import org.jetbrains.annotations.NotNull;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import reactor.core.Disposable;
-import reactor.core.publisher.BufferOverflowStrategy;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Schedulers;
@@ -61,6 +65,7 @@ public abstract class ReactiveApiPublisher {
 	private static final Duration SPECIAL_RAW_TIMEOUT_DURATION = Duration.ofSeconds(10);
 
 	private final ClusterEventService eventService;
+	private final Set<ResultingEventTransformer> resultingEventTransformerSet;
 	private final ReactiveTelegramClient rawTelegramClient;
 	private final Flux<Signal> telegramClient;
 
@@ -72,8 +77,12 @@ public abstract class ReactiveApiPublisher {
 	private final AtomicReference<Disposable> disposable = new AtomicReference<>();
 	private final AtomicReference<Path> path = new AtomicReference<>();
 
-	private ReactiveApiPublisher(Atomix atomix, long liveId, long userId) {
+	private ReactiveApiPublisher(Atomix atomix,
+			Set<ResultingEventTransformer> resultingEventTransformerSet,
+			long liveId,
+			long userId) {
 		this.eventService = atomix.getEventService();
+		this.resultingEventTransformerSet = resultingEventTransformerSet;
 		this.userId = userId;
 		this.liveId = liveId;
 		this.dynamicIdResolveSubject = SubjectNaming.getDynamicIdResolveSubject(userId);
@@ -89,12 +98,20 @@ public abstract class ReactiveApiPublisher {
 		})).share();
 	}
 
-	public static ReactiveApiPublisher fromToken(Atomix atomix, Long liveId, long userId, String token) {
-		return new ReactiveApiPublisherToken(atomix, liveId, userId, token);
+	public static ReactiveApiPublisher fromToken(Atomix atomix,
+			Set<ResultingEventTransformer> resultingEventTransformerSet,
+			Long liveId,
+			long userId,
+			String token) {
+		return new ReactiveApiPublisherToken(atomix, resultingEventTransformerSet, liveId, userId, token);
 	}
 
-	public static ReactiveApiPublisher fromPhoneNumber(Atomix atomix, Long liveId, long userId, long phoneNumber) {
-		return new ReactiveApiPublisherPhoneNumber(atomix, liveId, userId, phoneNumber);
+	public static ReactiveApiPublisher fromPhoneNumber(Atomix atomix,
+			Set<ResultingEventTransformer> resultingEventTransformerSet,
+			Long liveId,
+			long userId,
+			long phoneNumber) {
+		return new ReactiveApiPublisherPhoneNumber(atomix, resultingEventTransformerSet, liveId, userId, phoneNumber);
 	}
 
 	public void start(Path path, @Nullable Runnable onClose) {
@@ -103,19 +120,32 @@ public abstract class ReactiveApiPublisher {
 		var publishedResultingEvents = telegramClient
 				.subscribeOn(Schedulers.parallel())
 				// Handle signals, then return a ResultingEvent
-				.mapNotNull(this::onSignal)
+				.flatMapIterable(this::onSignal)
 				.doFinally(s -> LOG.trace("Finalized telegram client events"))
+
+				// Transform resulting events using all the registered resulting event transformers
+				.transform(flux -> {
+					Flux<ResultingEvent> transformedFlux = flux;
+					for (ResultingEventTransformer resultingEventTransformer : resultingEventTransformerSet) {
+						transformedFlux = resultingEventTransformer.transform(isBot(), transformedFlux);
+					}
+					return transformedFlux;
+				})
+
 				.publish();
 
 		publishedResultingEvents
 				// Obtain only TDLib-bound events
 				.filter(s -> s instanceof TDLibBoundResultingEvent<?>)
 				.map(s -> ((TDLibBoundResultingEvent<?>) s).action())
+
+				//.limitRate(4)
+				.onBackpressureBuffer()
 				// Buffer up to 64 requests to avoid halting the event loop, throw an error if too many requests are buffered
-				.limitRate(4)
-				.onBackpressureBuffer(64, BufferOverflowStrategy.ERROR)
+				//.onBackpressureBuffer(64, BufferOverflowStrategy.ERROR)
+
 				// Send requests to tdlib
-				.concatMap(function -> Mono
+				.flatMap(function -> Mono
 						.from(rawTelegramClient.send(function, SPECIAL_RAW_TIMEOUT_DURATION))
 						.mapNotNull(resp -> {
 							if (resp.getConstructor() == TdApi.Error.CONSTRUCTOR) {
@@ -146,6 +176,9 @@ public abstract class ReactiveApiPublisher {
 				.cast(ClientBoundResultingEvent.class)
 				.map(ClientBoundResultingEvent::event)
 
+				// Buffer requests
+				.onBackpressureBuffer()
+
 				// Send events to the client
 				.subscribeOn(Schedulers.parallel())
 				.subscribe(clientBoundEvent -> eventService.broadcast("session-client-bound-events",
@@ -155,6 +188,9 @@ public abstract class ReactiveApiPublisher {
 				// Obtain only cluster-bound events
 				.filter(s -> s instanceof ClusterBoundResultingEvent)
 				.cast(ClusterBoundResultingEvent.class)
+
+				// Buffer requests
+				.onBackpressureBuffer()
 
 				// Send events to the cluster
 				.subscribeOn(Schedulers.parallel())
@@ -176,14 +212,28 @@ public abstract class ReactiveApiPublisher {
 		}
 	}
 
-	@Nullable
-	private ResultingEvent onSignal(Signal signal) {
+	protected abstract boolean isBot();
+
+	private ResultingEvent wrapUpdateSignal(Signal signal) {
+		var update = (TdApi.Update) signal.getUpdate();
+		return new ClientBoundResultingEvent(new OnUpdateData(liveId, userId, update));
+	}
+
+	private List<ResultingEvent> withUpdateSignal(Signal signal, List<ResultingEvent> list) {
+		var result = new ArrayList<ResultingEvent>(list.size() + 1);
+		result.add(wrapUpdateSignal(signal));
+		result.addAll(list);
+		return result;
+	}
+
+	@NotNull
+	private List<@NotNull ResultingEvent> onSignal(Signal signal) {
 		// Update the state
 		var state = this.state.updateAndGet(oldState -> oldState.withSignal(signal));
 
 		if (state.authPhase() == LOGGED_IN) {
-			var update = (TdApi.Update) signal.getUpdate();
-			return new ClientBoundResultingEvent(new OnUpdateData(liveId, userId, update));
+			ResultingEvent resultingEvent = wrapUpdateSignal(signal);
+			return List.of(resultingEvent);
 		} else {
 			LOG.trace("Signal has not been broadcast because the session {} is not logged in: {}", userId, signal);
 			return this.handleSpecialSignal(state, signal);
@@ -191,27 +241,28 @@ public abstract class ReactiveApiPublisher {
 	}
 
 	@SuppressWarnings("SwitchStatementWithTooFewBranches")
-	@Nullable
-	private ResultingEvent handleSpecialSignal(State state, Signal signal) {
+	@NotNull
+	private List<@NotNull ResultingEvent> handleSpecialSignal(State state, Signal signal) {
 		if (signal.isException()) {
 			LOG.error("Received an error signal", signal.getException());
-			return null;
+			return List.of();
 		}
 		if (signal.isClosed()) {
 			signal.getClosed();
 			LOG.info("Received a closed signal");
-			return new ResultingEventPublisherClosed();
+			return List.of(new ResultingEventPublisherClosed());
 		}
 		if (signal.isUpdate() && signal.getUpdate().getConstructor() == TdApi.Error.CONSTRUCTOR) {
 			var error = ((TdApi.Error) signal.getUpdate());
 			LOG.error("Received a TDLib error signal! Error {}: {}", error.code, error.message);
-			return null;
+			return List.of();
 		}
 		if (!signal.isUpdate()) {
 			LOG.error("Received a signal that's not an update: {}", signal);
-			return null;
+			return List.of();
 		}
 		var update = signal.getUpdate();
+		var updateResult = wrapUpdateSignal(signal);
 		switch (state.authPhase()) {
 			case BROKEN -> {}
 			case PARAMETERS_PHASE -> {
@@ -221,7 +272,7 @@ public abstract class ReactiveApiPublisher {
 						switch (updateAuthorizationState.authorizationState.getConstructor()) {
 							case TdApi.AuthorizationStateWaitTdlibParameters.CONSTRUCTOR -> {
 								TdlibParameters parameters = generateTDLibParameters();
-								return new TDLibBoundResultingEvent<>(new SetTdlibParameters(parameters));
+								return List.of(updateResult, new TDLibBoundResultingEvent<>(new SetTdlibParameters(parameters)));
 							}
 						}
 					}
@@ -233,7 +284,7 @@ public abstract class ReactiveApiPublisher {
 						var updateAuthorizationState = (TdApi.UpdateAuthorizationState) update;
 						switch (updateAuthorizationState.authorizationState.getConstructor()) {
 							case TdApi.AuthorizationStateWaitEncryptionKey.CONSTRUCTOR -> {
-								return new TDLibBoundResultingEvent<>(new CheckDatabaseEncryptionKey());
+								return List.of(updateResult, new TDLibBoundResultingEvent<>(new CheckDatabaseEncryptionKey()));
 							}
 						}
 					}
@@ -245,24 +296,33 @@ public abstract class ReactiveApiPublisher {
 						var updateAuthorizationState = (TdApi.UpdateAuthorizationState) update;
 						switch (updateAuthorizationState.authorizationState.getConstructor()) {
 							case TdApi.AuthorizationStateWaitCode.CONSTRUCTOR -> {
-								return onWaitCode();
+								return withUpdateSignal(signal, onWaitCode());
 							}
 							case TdApi.AuthorizationStateWaitOtherDeviceConfirmation.CONSTRUCTOR -> {
 								var link = ((AuthorizationStateWaitOtherDeviceConfirmation) updateAuthorizationState.authorizationState).link;
-								return new ClientBoundResultingEvent(new OnOtherDeviceLoginRequested(liveId, userId, link));
+								return List.of(updateResult,
+										new ClientBoundResultingEvent(new OnOtherDeviceLoginRequested(liveId, userId, link)));
 							}
 							case TdApi.AuthorizationStateWaitPassword.CONSTRUCTOR -> {
-								return new ClientBoundResultingEvent(new OnPasswordRequested(liveId, userId));
+								var authorizationStateWaitPassword = ((AuthorizationStateWaitPassword) updateAuthorizationState.authorizationState);
+								return List.of(updateResult,
+										new ClientBoundResultingEvent(new OnPasswordRequested(liveId,
+												userId,
+												authorizationStateWaitPassword.passwordHint,
+												authorizationStateWaitPassword.hasRecoveryEmailAddress,
+												authorizationStateWaitPassword.recoveryEmailAddressPattern
+										))
+								);
 							}
 							case TdApi.AuthorizationStateWaitPhoneNumber.CONSTRUCTOR -> {
-								return onWaitToken();
+								return withUpdateSignal(signal, onWaitToken());
 							}
 						}
 					}
 				}
 			}
 		}
-		return null;
+		return List.of();
 	}
 
 	private TdlibParameters generateTDLibParameters() {
@@ -287,11 +347,11 @@ public abstract class ReactiveApiPublisher {
 		return tdlibParameters;
 	}
 
-	protected abstract ResultingEvent onWaitToken();
+	protected abstract List<ResultingEvent> onWaitToken();
 
-	protected ResultingEvent onWaitCode() {
+	protected List<ResultingEvent> onWaitCode() {
 		LOG.error("Wait code event is not supported");
-		return null;
+		return List.of();
 	}
 
 	private static byte[] serializeEvent(ClientBoundEvent clientBoundEvent) {
@@ -314,6 +374,11 @@ public abstract class ReactiveApiPublisher {
 				} else if (clientBoundEvent instanceof OnOtherDeviceLoginRequested onOtherDeviceLoginRequested) {
 					dataOutputStream.writeByte(0x5);
 					dataOutputStream.writeUTF(onOtherDeviceLoginRequested.link());
+				} else if (clientBoundEvent instanceof OnPasswordRequested onPasswordRequested) {
+					dataOutputStream.writeByte(0x6);
+					dataOutputStream.writeUTF(onPasswordRequested.passwordHint());
+					dataOutputStream.writeBoolean(onPasswordRequested.hasRecoveryEmail());
+					dataOutputStream.writeUTF(onPasswordRequested.recoveryEmailPattern());
 				} else {
 					throw new UnsupportedOperationException("Unexpected value: " + clientBoundEvent);
 				}
@@ -402,14 +467,23 @@ public abstract class ReactiveApiPublisher {
 
 		private final String botToken;
 
-		public ReactiveApiPublisherToken(Atomix atomix, Long liveId, long userId, String botToken) {
-			super(atomix, liveId, userId);
+		public ReactiveApiPublisherToken(Atomix atomix,
+				Set<ResultingEventTransformer> resultingEventTransformerSet,
+				Long liveId,
+				long userId,
+				String botToken) {
+			super(atomix, resultingEventTransformerSet, liveId, userId);
 			this.botToken = botToken;
 		}
 
 		@Override
-		protected ResultingEvent onWaitToken() {
-			return new TDLibBoundResultingEvent<>(new CheckAuthenticationBotToken(botToken));
+		protected boolean isBot() {
+			return true;
+		}
+
+		@Override
+		protected List<ResultingEvent> onWaitToken() {
+			return List.of(new TDLibBoundResultingEvent<>(new CheckAuthenticationBotToken(botToken)));
 		}
 
 		@Override
@@ -426,25 +500,34 @@ public abstract class ReactiveApiPublisher {
 
 		private final long phoneNumber;
 
-		public ReactiveApiPublisherPhoneNumber(Atomix atomix, Long liveId, long userId, long phoneNumber) {
-			super(atomix, liveId, userId);
+		public ReactiveApiPublisherPhoneNumber(Atomix atomix,
+				Set<ResultingEventTransformer> resultingEventTransformerSet,
+				Long liveId,
+				long userId,
+				long phoneNumber) {
+			super(atomix, resultingEventTransformerSet, liveId, userId);
 			this.phoneNumber = phoneNumber;
 		}
 
 		@Override
-		protected ResultingEvent onWaitToken() {
+		protected boolean isBot() {
+			return false;
+		}
+
+		@Override
+		protected List<ResultingEvent> onWaitToken() {
 			var authSettings = new PhoneNumberAuthenticationSettings();
 			authSettings.allowFlashCall = false;
 			authSettings.allowSmsRetrieverApi = false;
 			authSettings.isCurrentPhoneNumber = false;
-			return new TDLibBoundResultingEvent<>(new SetAuthenticationPhoneNumber("+" + phoneNumber,
+			return List.of(new TDLibBoundResultingEvent<>(new SetAuthenticationPhoneNumber("+" + phoneNumber,
 					authSettings
-			));
+			)));
 		}
 
 		@Override
-		public ClientBoundResultingEvent onWaitCode() {
-			return new ClientBoundResultingEvent(new OnUserLoginCodeRequested(liveId, userId, phoneNumber));
+		public List<ResultingEvent> onWaitCode() {
+			return List.of(new ClientBoundResultingEvent(new OnUserLoginCodeRequested(liveId, userId, phoneNumber)));
 		}
 
 		@Override
