@@ -374,7 +374,7 @@ public class AtomixReactiveApi implements ReactiveApi {
 												}
 											})
 											.doOnNext(path -> reactiveApiPublisher.start(path,
-													() -> AtomixReactiveApi.this.onPublisherClosed(userId)
+													() -> AtomixReactiveApi.this.onPublisherClosed(userId, liveId)
 											))
 											.thenReturn(new CreateSessionResponse(liveId));
 								});
@@ -393,8 +393,9 @@ public class AtomixReactiveApi implements ReactiveApi {
 				.doOnError(ex -> LOG.debug("Handled session request {}, the response is: error", req, ex));
 	}
 
-	private void onPublisherClosed(long userId) {
+	private void onPublisherClosed(long userId, Long liveId) {
 		this.destroySession(userId, nodeId).whenComplete((result, ex) -> {
+			localLiveSessions.remove(liveId);
 			if (ex != null) {
 				LOG.error("Failed to close the session for user {} after it was closed itself", userId);
 			} else {
