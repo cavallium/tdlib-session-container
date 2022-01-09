@@ -32,7 +32,7 @@ public class DynamicAtomixReactiveApiClient implements ReactiveApiClient, AutoCl
 	private final Flux<Long> liveIdChange;
 	private final Mono<Long> liveIdResolution;
 
-	public DynamicAtomixReactiveApiClient(AtomixReactiveApi api, long userId) {
+	DynamicAtomixReactiveApiClient(AtomixReactiveApi api, long userId) {
 		this.api = api;
 		this.eventService = api.getAtomix().getEventService();
 		this.userId = userId;
@@ -76,20 +76,19 @@ public class DynamicAtomixReactiveApiClient implements ReactiveApiClient, AutoCl
 						LiveAtomixReactiveApiClient::serializeRequest,
 						LiveAtomixReactiveApiClient::deserializeResponse,
 						Duration.between(Instant.now(), timeout)
-				)))
+				)).onErrorMap(ex -> {
+					if (ex instanceof MessagingException.NoRemoteHandler) {
+						return new TdError(404, "Bot #IDU" + this.userId + " (liveId: " + liveId + ") is not found on the cluster");
+					} else {
+						return ex;
+					}
+				}))
 				.<T>handle((item, sink) -> {
 					if (item instanceof TdApi.Error error) {
 						sink.error(new TdError(error.code, error.message));
 					} else {
 						//noinspection unchecked
 						sink.next((T) item);
-					}
-				})
-				.onErrorMap(ex -> {
-					if (ex instanceof MessagingException.NoRemoteHandler) {
-						return new TdError(404, "Bot #IDU" + this.userId + " is not found on the cluster");
-					} else {
-						return ex;
 					}
 				});
 	}

@@ -12,6 +12,7 @@ import it.tdlight.common.ReactiveTelegramClient;
 import it.tdlight.common.Response;
 import it.tdlight.common.Signal;
 import it.tdlight.jni.TdApi;
+import it.tdlight.jni.TdApi.AuthorizationStateClosed;
 import it.tdlight.jni.TdApi.AuthorizationStateWaitOtherDeviceConfirmation;
 import it.tdlight.jni.TdApi.AuthorizationStateWaitPassword;
 import it.tdlight.jni.TdApi.CheckAuthenticationBotToken;
@@ -54,6 +55,7 @@ import org.jetbrains.annotations.NotNull;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import reactor.core.Disposable;
+import reactor.core.publisher.BufferOverflowStrategy;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Schedulers;
@@ -139,10 +141,9 @@ public abstract class ReactiveApiPublisher {
 				.filter(s -> s instanceof TDLibBoundResultingEvent<?>)
 				.map(s -> ((TDLibBoundResultingEvent<?>) s).action())
 
-				//.limitRate(4)
-				.onBackpressureBuffer()
+				.limitRate(4)
 				// Buffer up to 64 requests to avoid halting the event loop, throw an error if too many requests are buffered
-				//.onBackpressureBuffer(64, BufferOverflowStrategy.ERROR)
+				.onBackpressureBuffer(64, BufferOverflowStrategy.ERROR)
 
 				// Send requests to tdlib
 				.flatMap(function -> Mono
@@ -176,9 +177,6 @@ public abstract class ReactiveApiPublisher {
 				.cast(ClientBoundResultingEvent.class)
 				.map(ClientBoundResultingEvent::event)
 
-				// Buffer requests
-				.onBackpressureBuffer()
-
 				// Send events to the client
 				.subscribeOn(Schedulers.parallel())
 				.subscribe(clientBoundEvent -> eventService.broadcast("session-client-bound-events",
@@ -188,9 +186,6 @@ public abstract class ReactiveApiPublisher {
 				// Obtain only cluster-bound events
 				.filter(s -> s instanceof ClusterBoundResultingEvent)
 				.cast(ClusterBoundResultingEvent.class)
-
-				// Buffer requests
-				.onBackpressureBuffer()
 
 				// Send events to the cluster
 				.subscribeOn(Schedulers.parallel())
@@ -250,7 +245,10 @@ public abstract class ReactiveApiPublisher {
 		if (signal.isClosed()) {
 			signal.getClosed();
 			LOG.info("Received a closed signal");
-			return List.of(new ResultingEventPublisherClosed());
+			return List.of(new ClientBoundResultingEvent(new OnUpdateData(liveId,
+					userId,
+					new TdApi.UpdateAuthorizationState(new AuthorizationStateClosed())
+			)), new ResultingEventPublisherClosed());
 		}
 		if (signal.isUpdate() && signal.getUpdate().getConstructor() == TdApi.Error.CONSTRUCTOR) {
 			var error = ((TdApi.Error) signal.getUpdate());
@@ -405,6 +403,7 @@ public abstract class ReactiveApiPublisher {
 	}
 
 	private static byte[] serializeResponse(Response response) {
+		if (response == null) return null;
 		var id = response.getId();
 		var object = response.getObject();
 		try (var byteArrayOutputStream = new ByteArrayOutputStream()) {

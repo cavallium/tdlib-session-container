@@ -34,7 +34,7 @@ public class LiveAtomixReactiveApiClient implements ReactiveApiClient {
 
 	private final Flux<ClientBoundEvent> clientBoundEvents;
 
-	public LiveAtomixReactiveApiClient(Atomix atomix, long liveId, long userId) {
+	LiveAtomixReactiveApiClient(Atomix atomix, long liveId, long userId) {
 		this.eventService = atomix.getEventService();
 		this.liveId = liveId;
 		this.userId = userId;

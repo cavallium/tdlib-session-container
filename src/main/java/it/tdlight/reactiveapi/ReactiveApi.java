@@ -1,15 +1,24 @@
 package it.tdlight.reactiveapi;
 
+import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import reactor.core.publisher.Mono;
 
 public interface ReactiveApi {
 
 	Mono<Void> start();
 
+	/**
+	 * Send a request to the cluster to load that user id from disk
+	 */
+	Mono<Void> tryReviveSession(long userId);
+
 	Mono<CreateSessionResponse> createSession(CreateSessionRequest req);
 
 	Mono<Map<Long, String>> getAllUsers();
+
+	Set<UserIdAndLiveId> getLocalLiveSessionIds();
 
 	boolean is(String nodeId);
 
@@ -17,6 +26,12 @@ public interface ReactiveApi {
 	 * May return empty
 	 */
 	Mono<Long> resolveUserLiveId(long userId);
+
+	ReactiveApiMultiClient multiClient();
+
+	ReactiveApiClient dynamicClient(long userId);
+
+	ReactiveApiClient liveClient(long liveId, long userId);
 
 	Mono<Void> close();
 }

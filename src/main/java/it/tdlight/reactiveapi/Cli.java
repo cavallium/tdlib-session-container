@@ -1,16 +1,16 @@
 package it.tdlight.reactiveapi;
 
+import static java.util.Collections.unmodifiableSet;
+
 import io.atomix.core.Atomix;
 import it.tdlight.reactiveapi.CreateSessionRequest.CreateBotSessionRequest;
 import it.tdlight.reactiveapi.CreateSessionRequest.CreateUserSessionRequest;
+import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
 import java.io.IOException;
-import java.util.Map.Entry;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ForkJoinPool;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicReference;
-import java.util.concurrent.locks.LockSupport;
+import java.util.stream.Collectors;
 import net.minecrell.terminalconsole.SimpleTerminalConsole;
 import org.jline.reader.LineReader;
 import org.jline.reader.LineReaderBuilder;
@@ -93,6 +93,16 @@ public class Cli {
 
 			private void printSessions(ReactiveApi api, boolean onlyLocal) {
 				api.getAllUsers().subscribe(sessions -> {
+					var userIdToLiveId = api
+							.getLocalLiveSessionIds()
+							.stream()
+							.collect(Collectors.toMap(UserIdAndLiveId::userId, k -> Set.of(k.liveId()), (a, b) -> {
+								var r = new LongOpenHashSet(a.size() + b.size());
+								r.addAll(a);
+								r.addAll(b);
+								return unmodifiableSet(r);
+							}));
+
 					StringBuilder sb = new StringBuilder();
 					sb.append("Sessions:\n");
 					for (var userEntry : sessions.entrySet()) {
@@ -102,6 +112,14 @@ public class Cli {
 							sb.append(" - session #IDU").append(userId);
 							if (!onlyLocal) {
 								sb.append(": ").append(nodeId);
+							} else {
+								sb
+										.append(": liveId=")
+										.append(userIdToLiveId
+												.get(userId)
+												.stream()
+												.map(Object::toString)
+												.collect(Collectors.joining(", ", "(", ")")));
 							}
 							sb.append("\n");
 						}

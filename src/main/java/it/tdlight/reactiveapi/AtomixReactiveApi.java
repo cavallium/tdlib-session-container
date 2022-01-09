@@ -55,7 +55,7 @@ public class AtomixReactiveApi implements ReactiveApi {
 	private final AsyncAtomicLock sessionModificationLock;
 	private final AsyncAtomicMap<Long, String> userIdToNodeId;
 	/**
-	 * User id -> session
+	 * live id -> session
 	 */
 	private final ConcurrentMap<Long, ReactiveApiPublisher> localLiveSessions = new ConcurrentHashMap<>();
 	/**
@@ -193,9 +193,9 @@ public class AtomixReactiveApi implements ReactiveApi {
 				.doOnTerminate(() -> LOG.info("Loaded all saved sessions from disk"));
 
 		// Listen for create-session signals
-		Mono<Subscription> subscriptionMono;
+		Mono<Subscription> createSessionSubscriptionMono;
 		if (nodeId != null) {
-			subscriptionMono = fromCompletionStage(() -> atomix
+			createSessionSubscriptionMono = fromCompletionStage(() -> atomix
 					.getEventService()
 					.subscribe("create-session", CreateSessionRequest::deserializeBytes, req -> {
 						if (req instanceof LoadSessionFromDiskRequest) {
@@ -205,9 +205,24 @@ public class AtomixReactiveApi implements ReactiveApi {
 						}
 					}, CreateSessionResponse::serializeBytes));
 		} else {
-			subscriptionMono = Mono.empty();
+			createSessionSubscriptionMono = Mono.empty();
 		}
-		return diskInitMono.then(subscriptionMono).then();
+
+		// Listen for revive-session signals
+		Mono<Subscription> reviveSessionSubscriptionMono;
+		if (nodeId != null) {
+			reviveSessionSubscriptionMono = fromCompletionStage(() -> atomix
+					.getEventService()
+					.subscribe("revive-session", (Long userId) -> this.getLocalDiskSession(userId).flatMap(sessionAndId -> {
+						var diskSession = sessionAndId.diskSession();
+						var request = new LoadSessionFromDiskRequest(userId, diskSession.token, diskSession.phoneNumber, false);
+						return this.createSession(request);
+					}).onErrorResume(ex -> Mono.empty()).then(Mono.empty()).toFuture()));
+		} else {
+			reviveSessionSubscriptionMono = Mono.empty();
+		}
+
+		return diskInitMono.then(Mono.when(createSessionSubscriptionMono, reviveSessionSubscriptionMono));
 	}
 
 	private CompletableFuture<Void> destroySession(long userId, String nodeId) {
@@ -227,6 +242,13 @@ public class AtomixReactiveApi implements ReactiveApi {
 						.thenRun(() -> LOG.trace("Released session modification lock for session delete request: {} \"{}\"", userId, nodeId))
 				)
 				.whenComplete((resp, ex) -> LOG.debug("Handled session delete request {} \"{}\", the response is: {}", userId, nodeId, resp, ex));
+	}
+
+	/**
+	 * Send a request to the cluster to load that user id from disk
+	 */
+	public Mono<Void> tryReviveSession(long userId) {
+		return Mono.fromRunnable(() -> atomix.getEventService().broadcast("revive-session", userId));
 	}
 
 	@Override
@@ -413,6 +435,15 @@ public class AtomixReactiveApi implements ReactiveApi {
 	}
 
 	@Override
+	public Set<UserIdAndLiveId> getLocalLiveSessionIds() {
+		return localLiveSessions
+				.values()
+				.stream()
+				.map(reactiveApiPublisher -> new UserIdAndLiveId(reactiveApiPublisher.userId, reactiveApiPublisher.liveId))
+				.collect(Collectors.toUnmodifiableSet());
+	}
+
+	@Override
 	public boolean is(String nodeId) {
 		if (this.nodeId == null) {
 			return nodeId == null;
@@ -441,26 +472,41 @@ public class AtomixReactiveApi implements ReactiveApi {
 	}
 
 	@Override
+	public ReactiveApiClient dynamicClient(long userId) {
+		return new DynamicAtomixReactiveApiClient(this, userId);
+	}
+
+	@Override
+	public ReactiveApiClient liveClient(long liveId, long userId) {
+		return new LiveAtomixReactiveApiClient(atomix, liveId, userId);
+	}
+
+	@Override
+	public ReactiveApiMultiClient multiClient() {
+		return new AtomixReactiveApiMultiClient(this);
+	}
+
+	@Override
 	public Mono<Void> close() {
 		return Mono.fromCompletionStage(this.atomix::stop);
 	}
 
 	private record DiskSessionAndId(DiskSession diskSession, long id) {}
 
-	private Mono<DiskSessionAndId> getLocalDiskSession(Long localId) {
+	private Mono<DiskSessionAndId> getLocalDiskSession(Long localUserId) {
 		return Mono.fromCallable(() -> {
 			Objects.requireNonNull(diskSessions);
 			synchronized (diskSessions) {
-				var diskSession = requireNonNull(diskSessions.getSettings().userIdToSession().get(localId),
-						"Id not found: " + localId
+				var diskSession = requireNonNull(diskSessions.getSettings().userIdToSession().get(localUserId),
+						"Id not found: " + localUserId
 				);
 				try {
 					diskSession.validate();
 				} catch (Throwable ex) {
-					LOG.error("Failed to load disk session {}", localId, ex);
+					LOG.error("Failed to load disk session {}", localUserId, ex);
 					return null;
 				}
-				return new DiskSessionAndId(diskSession, localId);
+				return new DiskSessionAndId(diskSession, localUserId);
 			}
 		}).subscribeOn(Schedulers.boundedElastic());
 	}
