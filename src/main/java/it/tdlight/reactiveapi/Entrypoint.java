@@ -133,7 +133,13 @@ public class Entrypoint {
 		var bootstrapDiscoveryProviderNodes = new ArrayList<Node>();
 		List<String> systemPartitionGroupMembers = new ArrayList<>();
 		for (NodeSettings node : clusterSettings.nodes) {
-			bootstrapDiscoveryProviderNodes.add(Node.builder().withId(node.id).withAddress(node.address).build());
+			var address = Address.fromString(node.address);
+			bootstrapDiscoveryProviderNodes.add(Node
+					.builder()
+					.withId(node.id)
+					.withHost(address.host())
+					.withPort(address.port())
+					.build());
 			systemPartitionGroupMembers.add(node.id);
 		}
 

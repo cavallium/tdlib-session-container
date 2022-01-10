@@ -327,8 +327,8 @@ public abstract class ReactiveApiPublisher {
 		var tdlibParameters = new TdlibParameters();
 		var path = requireNonNull(this.path.get(), "Path must not be null");
 		tdlibParameters.databaseDirectory = path.toString();
-		tdlibParameters.apiId = 94575;
-		tdlibParameters.apiHash = "a3406de8d171bb422bb6ddf3bbd800e2";
+		tdlibParameters.apiId = 376588;
+		tdlibParameters.apiHash = "2143fdfc2bbba3ec723228d2f81336c9";
 		tdlibParameters.filesDirectory = path.resolve("user_storage").toString();
 		tdlibParameters.applicationVersion = it.tdlight.reactiveapi.generated.LibraryVersion.VERSION;
 		tdlibParameters.deviceModel = System.getProperty("os.name");
