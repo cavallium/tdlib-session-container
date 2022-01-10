@@ -31,6 +31,7 @@ import java.util.concurrent.CompletionException;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.slf4j.Logger;
@@ -356,7 +357,7 @@ public class AtomixReactiveApi implements ReactiveApi {
 											})
 											.subscribeOn(Schedulers.boundedElastic())
 											.flatMap(baseSessionsPath -> {
-												String diskSessionFolderName = Long.toUnsignedString(userId);
+												String diskSessionFolderName = "id" + Long.toUnsignedString(userId);
 												Path sessionPath = baseSessionsPath.resolve(diskSessionFolderName);
 
 												if (!loadedFromDisk) {
