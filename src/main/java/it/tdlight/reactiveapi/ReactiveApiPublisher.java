@@ -134,14 +134,13 @@ public abstract class ReactiveApiPublisher {
 					return transformedFlux;
 				})
 
-				.publish();
+				.publish(256);
 
 		publishedResultingEvents
 				// Obtain only TDLib-bound events
 				.filter(s -> s instanceof TDLibBoundResultingEvent<?>)
 				.map(s -> ((TDLibBoundResultingEvent<?>) s).action())
 
-				.limitRate(4)
 				// Buffer up to 64 requests to avoid halting the event loop, throw an error if too many requests are buffered
 				.onBackpressureBuffer(64, BufferOverflowStrategy.ERROR)
 
@@ -159,7 +158,7 @@ public abstract class ReactiveApiPublisher {
 						.doOnError(ex -> LOG.error("Failed to receive the response for special request {}\n"
 								+ " The instance will be closed", function, ex))
 						.onErrorResume(ex -> Mono.just(new OnUpdateError(liveId, userId, new TdApi.Error(500, ex.getMessage()))))
-				)
+				, 1024)
 				.doOnError(ex -> LOG.error("Failed to receive resulting events. The instance will be closed", ex))
 				.onErrorResume(ex -> Mono.just(new OnUpdateError(liveId, userId, new TdApi.Error(500, ex.getMessage()))))
 
