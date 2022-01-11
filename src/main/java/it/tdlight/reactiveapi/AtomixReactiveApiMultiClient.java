@@ -8,6 +8,7 @@ import it.tdlight.reactiveapi.Event.ClientBoundEvent;
 import it.tdlight.reactiveapi.Event.Request;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import reactor.core.publisher.BufferOverflowStrategy;
 import reactor.core.publisher.Flux;
@@ -26,9 +27,9 @@ public class AtomixReactiveApiMultiClient implements ReactiveApiMultiClient, Aut
 		this.eventService = api.getAtomix().getEventService();
 
 		clientBoundEvents = Flux
-				.<ClientBoundEvent>push(sink -> {
+				.<List<ClientBoundEvent>>push(sink -> {
 					var subscriptionFuture = eventService.subscribe("session-client-bound-events",
-							LiveAtomixReactiveApiClient::deserializeEvent,
+							LiveAtomixReactiveApiClient::deserializeEvents,
 							s -> {
 								sink.next(s);
 								return CompletableFuture.completedFuture(null);
@@ -38,6 +39,7 @@ public class AtomixReactiveApiMultiClient implements ReactiveApiMultiClient, Aut
 					sink.onDispose(() -> subscriptionFuture.thenAccept(Subscription::close));
 				}, OverflowStrategy.ERROR)
 				.onBackpressureBuffer(0xFFFF, BufferOverflowStrategy.ERROR)
+				.flatMapIterable(list -> list)
 				.takeUntil(s -> closed)
 				.share();
 	}

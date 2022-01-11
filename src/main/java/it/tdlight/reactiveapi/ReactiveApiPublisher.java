@@ -177,10 +177,13 @@ public abstract class ReactiveApiPublisher {
 				.cast(ClientBoundResultingEvent.class)
 				.map(ClientBoundResultingEvent::event)
 
+				.limitRate(1)
+				.bufferTimeout(64, Duration.ofMillis(10))
+
 				// Send events to the client
 				.subscribeOn(Schedulers.parallel())
 				.subscribe(clientBoundEvent -> eventService.broadcast("session-client-bound-events",
-						clientBoundEvent, ReactiveApiPublisher::serializeEvent));
+						clientBoundEvent, ReactiveApiPublisher::serializeEvents));
 
 		publishedResultingEvents
 				// Obtain only cluster-bound events
@@ -352,38 +355,57 @@ public abstract class ReactiveApiPublisher {
 		return List.of();
 	}
 
-	private static byte[] serializeEvent(ClientBoundEvent clientBoundEvent) {
+	private static byte[] serializeEvents(List<ClientBoundEvent> clientBoundEvents) {
 		try (var byteArrayOutputStream = new ByteArrayOutputStream()) {
 			try (var dataOutputStream = new DataOutputStream(byteArrayOutputStream)) {
-				dataOutputStream.writeLong(clientBoundEvent.liveId());
-				dataOutputStream.writeLong(clientBoundEvent.userId());
-				if (clientBoundEvent instanceof OnUpdateData onUpdateData) {
-					dataOutputStream.writeByte(0x1);
-					onUpdateData.update().serialize(dataOutputStream);
-				} else if (clientBoundEvent instanceof OnUpdateError onUpdateError) {
-					dataOutputStream.writeByte(0x2);
-					onUpdateError.error().serialize(dataOutputStream);
-				} else if (clientBoundEvent instanceof OnUserLoginCodeRequested onUserLoginCodeRequested) {
-					dataOutputStream.writeByte(0x3);
-					dataOutputStream.writeLong(onUserLoginCodeRequested.phoneNumber());
-				} else if (clientBoundEvent instanceof OnBotLoginCodeRequested onBotLoginCodeRequested) {
-					dataOutputStream.writeByte(0x4);
-					dataOutputStream.writeUTF(onBotLoginCodeRequested.token());
-				} else if (clientBoundEvent instanceof OnOtherDeviceLoginRequested onOtherDeviceLoginRequested) {
-					dataOutputStream.writeByte(0x5);
-					dataOutputStream.writeUTF(onOtherDeviceLoginRequested.link());
-				} else if (clientBoundEvent instanceof OnPasswordRequested onPasswordRequested) {
-					dataOutputStream.writeByte(0x6);
-					dataOutputStream.writeUTF(onPasswordRequested.passwordHint());
-					dataOutputStream.writeBoolean(onPasswordRequested.hasRecoveryEmail());
-					dataOutputStream.writeUTF(onPasswordRequested.recoveryEmailPattern());
-				} else {
-					throw new UnsupportedOperationException("Unexpected value: " + clientBoundEvent);
+				dataOutputStream.writeInt(clientBoundEvents.size());
+				for (ClientBoundEvent clientBoundEvent : clientBoundEvents) {
+					writeClientBoundEvent(clientBoundEvent, dataOutputStream);
 				}
 				return byteArrayOutputStream.toByteArray();
 			}
 		} catch (IOException ex) {
 			throw new SerializationException(ex);
+		}
+	}
+
+	private static byte[] serializeEvent(ClientBoundEvent clientBoundEvent) {
+		try (var byteArrayOutputStream = new ByteArrayOutputStream()) {
+			try (var dataOutputStream = new DataOutputStream(byteArrayOutputStream)) {
+				writeClientBoundEvent(clientBoundEvent, dataOutputStream);
+				return byteArrayOutputStream.toByteArray();
+			}
+		} catch (IOException ex) {
+			throw new SerializationException(ex);
+		}
+	}
+
+	private static void writeClientBoundEvent(ClientBoundEvent clientBoundEvent, DataOutputStream dataOutputStream)
+			throws IOException {
+		dataOutputStream.writeLong(clientBoundEvent.liveId());
+		dataOutputStream.writeLong(clientBoundEvent.userId());
+		if (clientBoundEvent instanceof OnUpdateData onUpdateData) {
+			dataOutputStream.writeByte(0x1);
+			onUpdateData.update().serialize(dataOutputStream);
+		} else if (clientBoundEvent instanceof OnUpdateError onUpdateError) {
+			dataOutputStream.writeByte(0x2);
+			onUpdateError.error().serialize(dataOutputStream);
+		} else if (clientBoundEvent instanceof OnUserLoginCodeRequested onUserLoginCodeRequested) {
+			dataOutputStream.writeByte(0x3);
+			dataOutputStream.writeLong(onUserLoginCodeRequested.phoneNumber());
+		} else if (clientBoundEvent instanceof OnBotLoginCodeRequested onBotLoginCodeRequested) {
+			dataOutputStream.writeByte(0x4);
+			dataOutputStream.writeUTF(onBotLoginCodeRequested.token());
+		} else if (clientBoundEvent instanceof OnOtherDeviceLoginRequested onOtherDeviceLoginRequested) {
+			dataOutputStream.writeByte(0x5);
+			dataOutputStream.writeUTF(onOtherDeviceLoginRequested.link());
+		} else if (clientBoundEvent instanceof OnPasswordRequested onPasswordRequested) {
+			dataOutputStream.writeByte(0x6);
+			dataOutputStream.writeUTF(onPasswordRequested.passwordHint());
+			dataOutputStream.writeBoolean(onPasswordRequested.hasRecoveryEmail());
+			dataOutputStream.writeUTF(onPasswordRequested.recoveryEmailPattern());
+		} else {
+			throw new UnsupportedOperationException("Unexpected value: " + clientBoundEvent);
 		}
 	}
 

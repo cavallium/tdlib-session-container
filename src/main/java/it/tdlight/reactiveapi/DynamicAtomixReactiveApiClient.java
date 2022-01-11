@@ -8,6 +8,7 @@ import it.tdlight.reactiveapi.Event.ClientBoundEvent;
 import it.tdlight.reactiveapi.Event.Request;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicLong;
 import reactor.core.Disposable;
@@ -38,9 +39,9 @@ public class DynamicAtomixReactiveApiClient implements ReactiveApiClient, AutoCl
 		this.userId = userId;
 
 		clientBoundEvents = Flux
-				.<ClientBoundEvent>push(sink -> {
+				.<List<ClientBoundEvent>>push(sink -> {
 					var subscriptionFuture = eventService.subscribe("session-client-bound-events",
-							LiveAtomixReactiveApiClient::deserializeEvent,
+							LiveAtomixReactiveApiClient::deserializeEvents,
 							s -> {
 								sink.next(s);
 								return CompletableFuture.completedFuture(null);
@@ -49,9 +50,10 @@ public class DynamicAtomixReactiveApiClient implements ReactiveApiClient, AutoCl
 					);
 					sink.onDispose(() -> subscriptionFuture.thenAccept(Subscription::close));
 				}, OverflowStrategy.ERROR)
+				.onBackpressureBuffer(0xFFFF, BufferOverflowStrategy.ERROR)
+				.flatMapIterable(list -> list)
 				.filter(e -> e.userId() == userId)
 				.doOnNext(e -> liveId.set(e.liveId()))
-				.onBackpressureBuffer(0xFFFF, BufferOverflowStrategy.ERROR)
 				.share();
 
 		liveIdChange = this.clientBoundEvents()

@@ -19,6 +19,8 @@ import java.io.DataOutputStream;
 import java.io.IOException;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import org.apache.commons.lang3.SerializationException;
 import reactor.core.publisher.BufferOverflowStrategy;
@@ -39,15 +41,20 @@ public class LiveAtomixReactiveApiClient implements ReactiveApiClient {
 		this.liveId = liveId;
 		this.userId = userId;
 		this.clientBoundEvents = Flux
-				.<ClientBoundEvent>push(sink -> {
-					var subscriptionFuture = eventService.subscribe("session-client-bound-events", LiveAtomixReactiveApiClient::deserializeEvent, s -> {
-						sink.next(s);
-						return CompletableFuture.completedFuture(null);
-					}, (a) -> null);
+				.<List<ClientBoundEvent>>push(sink -> {
+					var subscriptionFuture = eventService.subscribe("session-client-bound-events",
+							LiveAtomixReactiveApiClient::deserializeEvents,
+							s -> {
+								sink.next(s);
+								return CompletableFuture.completedFuture(null);
+							},
+							(a) -> null
+					);
 					sink.onDispose(() -> subscriptionFuture.thenAccept(Subscription::close));
 				}, OverflowStrategy.ERROR)
-				.filter(e -> e.userId() == userId && e.liveId() == liveId)
 				.onBackpressureBuffer(0xFFFF, BufferOverflowStrategy.ERROR)
+				.flatMapIterable(list -> list)
+				.filter(e -> e.userId() == userId && e.liveId() == liveId)
 				.share();
 	}
 
@@ -103,20 +110,39 @@ public class LiveAtomixReactiveApiClient implements ReactiveApiClient {
 	static ClientBoundEvent deserializeEvent(byte[] bytes) {
 		try (var byteArrayInputStream = new ByteArrayInputStream(bytes)) {
 			try (var is = new DataInputStream(byteArrayInputStream)) {
-				var liveId = is.readLong();
-				var userId = is.readLong();
-				return switch (is.readByte()) {
-					case 0x01 -> new OnUpdateData(liveId, userId, (TdApi.Update) TdApi.Deserializer.deserialize(is));
-					case 0x02 -> new OnUpdateError(liveId, userId, (TdApi.Error) TdApi.Deserializer.deserialize(is));
-					case 0x03 -> new OnUserLoginCodeRequested(liveId, userId, is.readLong());
-					case 0x04 -> new OnBotLoginCodeRequested(liveId, userId, is.readUTF());
-					case 0x05 -> new OnOtherDeviceLoginRequested(liveId, userId, is.readUTF());
-					case 0x06 -> new OnPasswordRequested(liveId, userId, is.readUTF(), is.readBoolean(), is.readUTF());
-					default -> throw new IllegalStateException("Unexpected value: " + is.readByte());
-				};
+				return deserializeEvent(is);
 			}
 		} catch (IOException ex) {
 			throw new SerializationException(ex);
 		}
+	}
+
+	static List<ClientBoundEvent> deserializeEvents(byte[] bytes) {
+		try (var byteArrayInputStream = new ByteArrayInputStream(bytes)) {
+			try (var is = new DataInputStream(byteArrayInputStream)) {
+				var len = is.readInt();
+				var result = new ArrayList<ClientBoundEvent>(len);
+				for (int i = 0; i < len; i++) {
+					result.add(deserializeEvent(is));
+				}
+				return result;
+			}
+		} catch (IOException ex) {
+			throw new SerializationException(ex);
+		}
+	}
+
+	static ClientBoundEvent deserializeEvent(DataInputStream is) throws IOException {
+		var liveId = is.readLong();
+		var userId = is.readLong();
+		return switch (is.readByte()) {
+			case 0x01 -> new OnUpdateData(liveId, userId, (TdApi.Update) TdApi.Deserializer.deserialize(is));
+			case 0x02 -> new OnUpdateError(liveId, userId, (TdApi.Error) TdApi.Deserializer.deserialize(is));
+			case 0x03 -> new OnUserLoginCodeRequested(liveId, userId, is.readLong());
+			case 0x04 -> new OnBotLoginCodeRequested(liveId, userId, is.readUTF());
+			case 0x05 -> new OnOtherDeviceLoginRequested(liveId, userId, is.readUTF());
+			case 0x06 -> new OnPasswordRequested(liveId, userId, is.readUTF(), is.readBoolean(), is.readUTF());
+			default -> throw new IllegalStateException("Unexpected value: " + is.readByte());
+		};
 	}
 }
