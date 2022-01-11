@@ -490,7 +490,7 @@ public class AtomixReactiveApi implements ReactiveApi {
 
 	@Override
 	public Mono<Void> close() {
-		return Mono.fromCompletionStage(this.atomix::stop);
+		return Mono.fromCompletionStage(this.atomix::stop).timeout(Duration.ofSeconds(8), Mono.empty());
 	}
 
 	private record DiskSessionAndId(DiskSession diskSession, long id) {}

@@ -97,7 +97,7 @@ public abstract class ReactiveApiPublisher {
 				subscription.close();
 				rawTelegramClient.dispose();
 			});
-		})).share();
+		})).publishOn(Schedulers.parallel()).share();
 	}
 
 	public static ReactiveApiPublisher fromToken(Atomix atomix,
@@ -181,6 +181,7 @@ public abstract class ReactiveApiPublisher {
 
 				// Send events to the client
 				.subscribeOn(Schedulers.parallel())
+				.publishOn(Schedulers.boundedElastic())
 				.subscribe(clientBoundEvent -> eventService.broadcast("session-client-bound-events",
 						clientBoundEvent, ReactiveApiPublisher::serializeEvents));
 
@@ -466,6 +467,7 @@ public abstract class ReactiveApiPublisher {
 					}
 				})
 				.map(responseObj -> new Response(liveId, responseObj))
+				.publishOn(Schedulers.boundedElastic())
 				.toFuture();
 	}
 

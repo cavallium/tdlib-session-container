@@ -27,6 +27,7 @@ import reactor.core.publisher.BufferOverflowStrategy;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.FluxSink.OverflowStrategy;
 import reactor.core.publisher.Mono;
+import reactor.core.scheduler.Schedulers;
 
 public class LiveAtomixReactiveApiClient implements ReactiveApiClient {
 
@@ -65,19 +66,22 @@ public class LiveAtomixReactiveApiClient implements ReactiveApiClient {
 	
 	@Override
 	public <T extends TdApi.Object> Mono<T> request(TdApi.Function<T> request, Instant timeout) {
-		return Mono.fromCompletionStage(() -> eventService.send("session-" + liveId + "-requests",
-				new Request<>(liveId, request, timeout),
-				LiveAtomixReactiveApiClient::serializeRequest,
-				LiveAtomixReactiveApiClient::deserializeResponse,
-				Duration.between(Instant.now(), timeout)
-		)).handle((item, sink) -> {
-			if (item instanceof TdApi.Error error) {
-				sink.error(new TdError(error.code, error.message));
-			} else {
-				//noinspection unchecked
-				sink.next((T) item);
-			}
-		});
+		return Mono
+				.fromCompletionStage(() -> eventService.send("session-" + liveId + "-requests",
+						new Request<>(liveId, request, timeout),
+						LiveAtomixReactiveApiClient::serializeRequest,
+						LiveAtomixReactiveApiClient::deserializeResponse,
+						Duration.between(Instant.now(), timeout)
+				))
+				.subscribeOn(Schedulers.boundedElastic())
+				.handle((item, sink) -> {
+					if (item instanceof TdApi.Error error) {
+						sink.error(new TdError(error.code, error.message));
+					} else {
+						//noinspection unchecked
+						sink.next((T) item);
+					}
+				});
 	}
 
 	@Override

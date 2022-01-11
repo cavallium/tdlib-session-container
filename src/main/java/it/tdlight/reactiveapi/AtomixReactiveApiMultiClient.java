@@ -14,6 +14,7 @@ import reactor.core.publisher.BufferOverflowStrategy;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.FluxSink.OverflowStrategy;
 import reactor.core.publisher.Mono;
+import reactor.core.scheduler.Schedulers;
 
 public class AtomixReactiveApiMultiClient implements ReactiveApiMultiClient, AutoCloseable {
 
@@ -38,6 +39,7 @@ public class AtomixReactiveApiMultiClient implements ReactiveApiMultiClient, Aut
 					);
 					sink.onDispose(() -> subscriptionFuture.thenAccept(Subscription::close));
 				}, OverflowStrategy.ERROR)
+				.subscribeOn(Schedulers.boundedElastic())
 				.onBackpressureBuffer(0xFFFF, BufferOverflowStrategy.ERROR)
 				.flatMapIterable(list -> list)
 				.takeUntil(s -> closed)
@@ -61,7 +63,7 @@ public class AtomixReactiveApiMultiClient implements ReactiveApiMultiClient, Aut
 					LiveAtomixReactiveApiClient::deserializeResponse,
 					Duration.between(Instant.now(), timeout)
 			);
-		}).<T>handle((item, sink) -> {
+		}).subscribeOn(Schedulers.boundedElastic()).<T>handle((item, sink) -> {
 			if (item instanceof TdApi.Error error) {
 				sink.error(new TdError(error.code, error.message));
 			} else {

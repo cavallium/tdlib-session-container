@@ -50,6 +50,7 @@ public class DynamicAtomixReactiveApiClient implements ReactiveApiClient, AutoCl
 					);
 					sink.onDispose(() -> subscriptionFuture.thenAccept(Subscription::close));
 				}, OverflowStrategy.ERROR)
+				.subscribeOn(Schedulers.boundedElastic())
 				.onBackpressureBuffer(0xFFFF, BufferOverflowStrategy.ERROR)
 				.flatMapIterable(list -> list)
 				.filter(e -> e.userId() == userId)
@@ -78,7 +79,7 @@ public class DynamicAtomixReactiveApiClient implements ReactiveApiClient, AutoCl
 						LiveAtomixReactiveApiClient::serializeRequest,
 						LiveAtomixReactiveApiClient::deserializeResponse,
 						Duration.between(Instant.now(), timeout)
-				)).onErrorMap(ex -> {
+				)).subscribeOn(Schedulers.boundedElastic()).onErrorMap(ex -> {
 					if (ex instanceof MessagingException.NoRemoteHandler) {
 						return new TdError(404, "Bot #IDU" + this.userId + " (liveId: " + liveId + ") is not found on the cluster");
 					} else {
