@@ -141,8 +141,8 @@ public abstract class ReactiveApiPublisher {
 				.filter(s -> s instanceof TDLibBoundResultingEvent<?>)
 				.map(s -> ((TDLibBoundResultingEvent<?>) s).action())
 
-				// Buffer up to 64 requests to avoid halting the event loop, throw an error if too many requests are buffered
-				.onBackpressureBuffer(64, BufferOverflowStrategy.ERROR)
+				// Buffer requests to avoid halting the event loop
+				.onBackpressureBuffer()
 
 				// Send requests to tdlib
 				.flatMap(function -> Mono
@@ -176,8 +176,11 @@ public abstract class ReactiveApiPublisher {
 				.cast(ClientBoundResultingEvent.class)
 				.map(ClientBoundResultingEvent::event)
 
+				// Buffer requests to avoid halting the event loop
+				.onBackpressureBuffer()
+
 				.limitRate(1)
-				.bufferTimeout(64, Duration.ofMillis(10))
+				.bufferTimeout(512, Duration.ofMillis(100))
 
 				// Send events to the client
 				.subscribeOn(Schedulers.parallel())
@@ -189,6 +192,9 @@ public abstract class ReactiveApiPublisher {
 				// Obtain only cluster-bound events
 				.filter(s -> s instanceof ClusterBoundResultingEvent)
 				.cast(ClusterBoundResultingEvent.class)
+
+				// Buffer requests to avoid halting the event loop
+				.onBackpressureBuffer()
 
 				// Send events to the cluster
 				.subscribeOn(Schedulers.parallel())
