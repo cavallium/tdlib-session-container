@@ -33,6 +33,8 @@ public class DynamicAtomixReactiveApiClient implements ReactiveApiClient, AutoCl
 	private final Flux<Long> liveIdChange;
 	private final Mono<Long> liveIdResolution;
 
+	private volatile boolean closed;
+
 	DynamicAtomixReactiveApiClient(AtomixReactiveApi api, KafkaConsumer kafkaConsumer, long userId, String subGroupId) {
 		this.api = api;
 		this.eventService = api.getAtomix().getEventService();
@@ -40,6 +42,7 @@ public class DynamicAtomixReactiveApiClient implements ReactiveApiClient, AutoCl
 
 		clientBoundEvents = kafkaConsumer.consumeMessages(subGroupId, true, userId)
 				.doOnNext(e -> liveId.set(e.liveId()))
+				.takeWhile(n -> !closed)
 				.share();
 
 		liveIdChange = this.clientBoundEvents()
@@ -117,6 +120,7 @@ public class DynamicAtomixReactiveApiClient implements ReactiveApiClient, AutoCl
 	}
 
 	public void close() {
+		this.closed = true;
 		liveIdSubscription.dispose();
 	}
 }

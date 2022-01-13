@@ -7,6 +7,9 @@ public class ClientBoundEventDeserializer implements Deserializer<ClientBoundEve
 
 	@Override
 	public ClientBoundEvent deserialize(String topic, byte[] data) {
+		if (data == null || data.length == 0) {
+			return null;
+		}
 		return LiveAtomixReactiveApiClient.deserializeEvent(data);
 	}
 }

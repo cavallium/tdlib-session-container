@@ -77,6 +77,9 @@ public class LiveAtomixReactiveApiClient implements ReactiveApiClient {
 
 	static TdApi.Object deserializeResponse(byte[] bytes) {
 		try {
+			if (bytes == null || bytes.length == 0) {
+				return null;
+			}
 			return TdApi.Deserializer.deserialize(new DataInputStream(new ByteArrayInputStream(bytes)));
 		} catch (IOException ex) {
 			throw new SerializationException(ex);
