@@ -13,4 +13,6 @@ public interface ReactiveApiClient {
 	<T extends TdApi.Object> Mono<T> request(TdApi.Function<T> request, Instant timeout);
 
 	long getUserId();
+
+	boolean isPullMode();
 }

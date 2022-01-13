@@ -46,7 +46,7 @@ public class PeriodicRestarter {
 		this.api = api;
 		this.interval = interval;
 
-		this.multiClient = api.multiClient();
+		this.multiClient = api.multiClient("periodic-restarter");
 
 	}
 

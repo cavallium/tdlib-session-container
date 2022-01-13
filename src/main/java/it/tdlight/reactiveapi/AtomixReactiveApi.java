@@ -478,18 +478,18 @@ public class AtomixReactiveApi implements ReactiveApi {
 	}
 
 	@Override
-	public ReactiveApiClient dynamicClient(long userId) {
-		return new DynamicAtomixReactiveApiClient(this, kafkaConsumer, userId);
+	public ReactiveApiClient dynamicClient(String subGroupId, long userId) {
+		return new DynamicAtomixReactiveApiClient(this, kafkaConsumer, userId, subGroupId);
 	}
 
 	@Override
-	public ReactiveApiClient liveClient(long liveId, long userId) {
-		return new LiveAtomixReactiveApiClient(atomix, kafkaConsumer, liveId, userId);
+	public ReactiveApiClient liveClient(String subGroupId, long liveId, long userId) {
+		return new LiveAtomixReactiveApiClient(atomix, kafkaConsumer, liveId, userId, subGroupId);
 	}
 
 	@Override
-	public ReactiveApiMultiClient multiClient() {
-		return new AtomixReactiveApiMultiClient(this, kafkaConsumer);
+	public ReactiveApiMultiClient multiClient(String subGroupId) {
+		return new AtomixReactiveApiMultiClient(this, kafkaConsumer, subGroupId);
 	}
 
 	@Override

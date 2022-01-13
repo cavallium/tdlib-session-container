@@ -27,11 +27,11 @@ public interface ReactiveApi {
 	 */
 	Mono<Long> resolveUserLiveId(long userId);
 
-	ReactiveApiMultiClient multiClient();
+	ReactiveApiMultiClient multiClient(String subGroupId);
 
-	ReactiveApiClient dynamicClient(long userId);
+	ReactiveApiClient dynamicClient(String subGroupId, long userId);
 
-	ReactiveApiClient liveClient(long liveId, long userId);
+	ReactiveApiClient liveClient(String subGroupId, long liveId, long userId);
 
 	Mono<Void> close();
 }

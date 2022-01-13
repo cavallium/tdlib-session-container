@@ -19,14 +19,15 @@ import reactor.core.scheduler.Schedulers;
 public class AtomixReactiveApiMultiClient implements ReactiveApiMultiClient, AutoCloseable {
 
 	private final ClusterEventService eventService;
-
 	private final KafkaConsumer kafkaConsumer;
+	private final String subGroupId;
 
 	private volatile boolean closed = false;
 
-	AtomixReactiveApiMultiClient(AtomixReactiveApi api, KafkaConsumer kafkaConsumer) {
+	AtomixReactiveApiMultiClient(AtomixReactiveApi api, KafkaConsumer kafkaConsumer, String subGroupId) {
 		this.eventService = api.getAtomix().getEventService();
 		this.kafkaConsumer = kafkaConsumer;
+		this.subGroupId = subGroupId;
 	}
 
 	@Override
@@ -34,7 +35,7 @@ public class AtomixReactiveApiMultiClient implements ReactiveApiMultiClient, Aut
 		if (closed) {
 			return Flux.empty();
 		}
-		return kafkaConsumer.consumeMessages(kafkaConsumer.newRandomGroupId(), ack).takeUntil(s -> closed);
+		return kafkaConsumer.consumeMessages(subGroupId, ack).takeUntil(s -> closed);
 	}
 
 	@Override

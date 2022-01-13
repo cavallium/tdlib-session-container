@@ -33,11 +33,11 @@ public class LiveAtomixReactiveApiClient implements ReactiveApiClient {
 
 	private final Flux<ClientBoundEvent> clientBoundEvents;
 
-	LiveAtomixReactiveApiClient(Atomix atomix, KafkaConsumer kafkaConsumer, long liveId, long userId) {
+	LiveAtomixReactiveApiClient(Atomix atomix, KafkaConsumer kafkaConsumer, long liveId, long userId, String subGroupId) {
 		this.eventService = atomix.getEventService();
 		this.liveId = liveId;
 		this.userId = userId;
-		this.clientBoundEvents = kafkaConsumer.consumeMessages(kafkaConsumer.newRandomGroupId(), true, userId, liveId).share();
+		this.clientBoundEvents = kafkaConsumer.consumeMessages(subGroupId, true, userId, liveId).share();
 	}
 
 	@Override
@@ -68,6 +68,11 @@ public class LiveAtomixReactiveApiClient implements ReactiveApiClient {
 	@Override
 	public long getUserId() {
 		return userId;
+	}
+
+	@Override
+	public boolean isPullMode() {
+		return true;
 	}
 
 	static TdApi.Object deserializeResponse(byte[] bytes) {

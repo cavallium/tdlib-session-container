@@ -19,6 +19,7 @@ import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.ThreadLocalRandom;
 import org.jetbrains.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -84,8 +85,9 @@ public class Entrypoint {
 			if (instanceSettings.clientAddress == null) {
 				throw new IllegalArgumentException("A client instance must have an address (host:port)");
 			}
+			var randomizedClientId = instanceSettings.id + "-" + ThreadLocalRandom.current().nextLong(0, Long.MAX_VALUE);
 			var address = Address.fromString(instanceSettings.clientAddress);
-			atomixBuilder.withMemberId(instanceSettings.id).withHost(address.host()).withPort(address.port());
+			atomixBuilder.withMemberId(randomizedClientId).withHost(address.host()).withPort(address.port());
 			nodeId = null;
 			resultingEventTransformerSet = Set.of();
 		} else {
