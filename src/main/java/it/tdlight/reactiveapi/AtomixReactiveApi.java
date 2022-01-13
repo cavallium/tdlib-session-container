@@ -31,7 +31,6 @@ import java.util.concurrent.CompletionException;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.stream.Collectors;
-import java.util.stream.Stream;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.slf4j.Logger;
@@ -50,6 +49,8 @@ public class AtomixReactiveApi implements ReactiveApi {
 	@Nullable
 	private final String nodeId;
 	private final Atomix atomix;
+	private final KafkaProducer kafkaProducer;
+	private final KafkaConsumer kafkaConsumer;
 	private final Set<ResultingEventTransformer> resultingEventTransformerSet;
 	private final AsyncAtomicIdGenerator nextSessionLiveId;
 
@@ -67,10 +68,13 @@ public class AtomixReactiveApi implements ReactiveApi {
 
 	public AtomixReactiveApi(@Nullable String nodeId,
 			Atomix atomix,
+			KafkaParameters kafkaParameters,
 			@Nullable DiskSessionsManager diskSessions,
 			@NotNull Set<ResultingEventTransformer> resultingEventTransformerSet) {
 		this.nodeId = nodeId;
 		this.atomix = atomix;
+		this.kafkaProducer = new KafkaProducer(kafkaParameters);
+		this.kafkaConsumer = new KafkaConsumer(kafkaParameters);
 		this.resultingEventTransformerSet = resultingEventTransformerSet;
 
 		if (nodeId == null) {
@@ -277,7 +281,7 @@ public class AtomixReactiveApi implements ReactiveApi {
 							userId = createBotSessionRequest.userId();
 							botToken = createBotSessionRequest.token();
 							phoneNumber = null;
-							reactiveApiPublisher = ReactiveApiPublisher.fromToken(atomix, resultingEventTransformerSet,
+							reactiveApiPublisher = ReactiveApiPublisher.fromToken(atomix, kafkaProducer, resultingEventTransformerSet,
 									liveId,
 									userId,
 									botToken
@@ -287,7 +291,7 @@ public class AtomixReactiveApi implements ReactiveApi {
 							userId = createUserSessionRequest.userId();
 							botToken = null;
 							phoneNumber = createUserSessionRequest.phoneNumber();
-							reactiveApiPublisher = ReactiveApiPublisher.fromPhoneNumber(atomix, resultingEventTransformerSet,
+							reactiveApiPublisher = ReactiveApiPublisher.fromPhoneNumber(atomix, kafkaProducer, resultingEventTransformerSet,
 									liveId,
 									userId,
 									phoneNumber
@@ -298,13 +302,13 @@ public class AtomixReactiveApi implements ReactiveApi {
 							botToken = loadSessionFromDiskRequest.token();
 							phoneNumber = loadSessionFromDiskRequest.phoneNumber();
 							if (loadSessionFromDiskRequest.phoneNumber() != null) {
-								reactiveApiPublisher = ReactiveApiPublisher.fromPhoneNumber(atomix, resultingEventTransformerSet,
+								reactiveApiPublisher = ReactiveApiPublisher.fromPhoneNumber(atomix, kafkaProducer, resultingEventTransformerSet,
 										liveId,
 										userId,
 										phoneNumber
 								);
 							} else {
-								reactiveApiPublisher = ReactiveApiPublisher.fromToken(atomix, resultingEventTransformerSet,
+								reactiveApiPublisher = ReactiveApiPublisher.fromToken(atomix, kafkaProducer, resultingEventTransformerSet,
 										liveId,
 										userId,
 										botToken
@@ -475,22 +479,24 @@ public class AtomixReactiveApi implements ReactiveApi {
 
 	@Override
 	public ReactiveApiClient dynamicClient(long userId) {
-		return new DynamicAtomixReactiveApiClient(this, userId);
+		return new DynamicAtomixReactiveApiClient(this, kafkaConsumer, userId);
 	}
 
 	@Override
 	public ReactiveApiClient liveClient(long liveId, long userId) {
-		return new LiveAtomixReactiveApiClient(atomix, liveId, userId);
+		return new LiveAtomixReactiveApiClient(atomix, kafkaConsumer, liveId, userId);
 	}
 
 	@Override
 	public ReactiveApiMultiClient multiClient() {
-		return new AtomixReactiveApiMultiClient(this);
+		return new AtomixReactiveApiMultiClient(this, kafkaConsumer);
 	}
 
 	@Override
 	public Mono<Void> close() {
-		return Mono.fromCompletionStage(this.atomix::stop).timeout(Duration.ofSeconds(8), Mono.empty());
+		var atomixStopper = Mono.fromCompletionStage(this.atomix::stop).timeout(Duration.ofSeconds(8), Mono.empty());
+		var kafkaStopper = Mono.fromRunnable(kafkaProducer::close).subscribeOn(Schedulers.boundedElastic());
+		return Mono.when(atomixStopper, kafkaStopper);
 	}
 
 	private record DiskSessionAndId(DiskSession diskSession, long id) {}

@@ -11,12 +11,14 @@
 		</Async>
   </Appenders>
   <Loggers>
+		<AsyncLogger name="reactor.kafka" level="WARN" additivity="false"/>
+		<AsyncLogger name="org.apache.kafka" level="WARN" additivity="false"/>
 		<!-- log only INFO, WARN, ERROR and FATAL logging by classes in this package -->
-		<Logger name="io.atomix" level="INFO" />
+		<Logger name="io.atomix" level="INFO" additivity="false"/>
 		<!-- log only INFO, WARN, ERROR and FATAL logging by classes in this package -->
-		<Logger name="io.netty" level="INFO" />
+		<Logger name="io.netty" level="INFO" additivity="false"/>
 		<!-- log only INFO, WARN, ERROR and FATAL logging by classes in this package -->
-		<Logger name="io.net5" level="INFO" />
+		<Logger name="io.net5" level="INFO" additivity="false"/>
 
     <Root level="INFO">
       <filters>

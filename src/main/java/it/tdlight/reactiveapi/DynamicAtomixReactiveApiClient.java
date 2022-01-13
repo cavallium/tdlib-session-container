@@ -33,27 +33,12 @@ public class DynamicAtomixReactiveApiClient implements ReactiveApiClient, AutoCl
 	private final Flux<Long> liveIdChange;
 	private final Mono<Long> liveIdResolution;
 
-	DynamicAtomixReactiveApiClient(AtomixReactiveApi api, long userId) {
+	DynamicAtomixReactiveApiClient(AtomixReactiveApi api, KafkaConsumer kafkaConsumer, long userId) {
 		this.api = api;
 		this.eventService = api.getAtomix().getEventService();
 		this.userId = userId;
 
-		clientBoundEvents = Flux
-				.<List<ClientBoundEvent>>push(sink -> {
-					var subscriptionFuture = eventService.subscribe("session-client-bound-events",
-							LiveAtomixReactiveApiClient::deserializeEvents,
-							s -> {
-								sink.next(s);
-								return CompletableFuture.completedFuture(null);
-							},
-							(a) -> null
-					);
-					sink.onDispose(() -> subscriptionFuture.thenAccept(Subscription::close));
-				}, OverflowStrategy.ERROR)
-				.subscribeOn(Schedulers.boundedElastic())
-				.onBackpressureBuffer(0xFFFF, BufferOverflowStrategy.ERROR)
-				.flatMapIterable(list -> list)
-				.filter(e -> e.userId() == userId)
+		clientBoundEvents = kafkaConsumer.consumeMessages(kafkaConsumer.newRandomGroupId(), true, userId)
 				.doOnNext(e -> liveId.set(e.liveId()))
 				.share();
 

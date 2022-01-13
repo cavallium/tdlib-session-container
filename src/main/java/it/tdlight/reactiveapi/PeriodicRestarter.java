@@ -53,7 +53,7 @@ public class PeriodicRestarter {
 	public Mono<Void> start() {
 		return Mono.fromRunnable(() -> {
 			LOG.info("Starting periodic restarter...");
-			multiClient.clientBoundEvents().doOnNext(event -> {
+			multiClient.clientBoundEvents(true).doOnNext(event -> {
 				if (event instanceof OnUpdateData onUpdate) {
 					if (onUpdate.update() instanceof UpdateAuthorizationState updateAuthorizationState) {
 						if (updateAuthorizationState.authorizationState instanceof AuthorizationStateReady) {

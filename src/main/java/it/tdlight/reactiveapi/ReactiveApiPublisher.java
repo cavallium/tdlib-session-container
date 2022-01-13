@@ -55,7 +55,6 @@ import org.jetbrains.annotations.NotNull;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import reactor.core.Disposable;
-import reactor.core.publisher.BufferOverflowStrategy;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Schedulers;
@@ -66,6 +65,7 @@ public abstract class ReactiveApiPublisher {
 	private static final Logger LOG = LoggerFactory.getLogger(ReactiveApiPublisher.class);
 	private static final Duration SPECIAL_RAW_TIMEOUT_DURATION = Duration.ofSeconds(10);
 
+	private final KafkaProducer kafkaProducer;
 	private final ClusterEventService eventService;
 	private final Set<ResultingEventTransformer> resultingEventTransformerSet;
 	private final ReactiveTelegramClient rawTelegramClient;
@@ -80,9 +80,11 @@ public abstract class ReactiveApiPublisher {
 	private final AtomicReference<Path> path = new AtomicReference<>();
 
 	private ReactiveApiPublisher(Atomix atomix,
+			KafkaProducer kafkaProducer,
 			Set<ResultingEventTransformer> resultingEventTransformerSet,
 			long liveId,
 			long userId) {
+		this.kafkaProducer = kafkaProducer;
 		this.eventService = atomix.getEventService();
 		this.resultingEventTransformerSet = resultingEventTransformerSet;
 		this.userId = userId;
@@ -101,19 +103,27 @@ public abstract class ReactiveApiPublisher {
 	}
 
 	public static ReactiveApiPublisher fromToken(Atomix atomix,
+			KafkaProducer kafkaProducer,
 			Set<ResultingEventTransformer> resultingEventTransformerSet,
 			Long liveId,
 			long userId,
 			String token) {
-		return new ReactiveApiPublisherToken(atomix, resultingEventTransformerSet, liveId, userId, token);
+		return new ReactiveApiPublisherToken(atomix, kafkaProducer, resultingEventTransformerSet, liveId, userId, token);
 	}
 
 	public static ReactiveApiPublisher fromPhoneNumber(Atomix atomix,
+			KafkaProducer kafkaProducer,
 			Set<ResultingEventTransformer> resultingEventTransformerSet,
 			Long liveId,
 			long userId,
 			long phoneNumber) {
-		return new ReactiveApiPublisherPhoneNumber(atomix, resultingEventTransformerSet, liveId, userId, phoneNumber);
+		return new ReactiveApiPublisherPhoneNumber(atomix,
+				kafkaProducer,
+				resultingEventTransformerSet,
+				liveId,
+				userId,
+				phoneNumber
+		);
 	}
 
 	public void start(Path path, @Nullable Runnable onClose) {
@@ -170,23 +180,16 @@ public abstract class ReactiveApiPublisher {
 				.subscribeOn(Schedulers.parallel())
 				.subscribe();
 
-		publishedResultingEvents
+		var messagesToSend = publishedResultingEvents
 				// Obtain only client-bound events
 				.filter(s -> s instanceof ClientBoundResultingEvent)
 				.cast(ClientBoundResultingEvent.class)
 				.map(ClientBoundResultingEvent::event)
 
 				// Buffer requests to avoid halting the event loop
-				.onBackpressureBuffer()
+				.onBackpressureBuffer();
 
-				.limitRate(1)
-				.bufferTimeout(512, Duration.ofMillis(100))
-
-				// Send events to the client
-				.subscribeOn(Schedulers.parallel())
-				.publishOn(Schedulers.boundedElastic())
-				.subscribe(clientBoundEvent -> eventService.broadcast("session-client-bound-events",
-						clientBoundEvent, ReactiveApiPublisher::serializeEvents));
+		kafkaProducer.sendMessages(liveId, userId, messagesToSend).subscribeOn(Schedulers.parallel()).subscribe();
 
 		publishedResultingEvents
 				// Obtain only cluster-bound events
@@ -361,7 +364,7 @@ public abstract class ReactiveApiPublisher {
 		return List.of();
 	}
 
-	private static byte[] serializeEvents(List<ClientBoundEvent> clientBoundEvents) {
+	public static byte[] serializeEvents(List<ClientBoundEvent> clientBoundEvents) {
 		try (var byteArrayOutputStream = new ByteArrayOutputStream()) {
 			try (var dataOutputStream = new DataOutputStream(byteArrayOutputStream)) {
 				dataOutputStream.writeInt(clientBoundEvents.size());
@@ -375,7 +378,7 @@ public abstract class ReactiveApiPublisher {
 		}
 	}
 
-	private static byte[] serializeEvent(ClientBoundEvent clientBoundEvent) {
+	public static byte[] serializeEvent(ClientBoundEvent clientBoundEvent) {
 		try (var byteArrayOutputStream = new ByteArrayOutputStream()) {
 			try (var dataOutputStream = new DataOutputStream(byteArrayOutputStream)) {
 				writeClientBoundEvent(clientBoundEvent, dataOutputStream);
@@ -496,11 +499,12 @@ public abstract class ReactiveApiPublisher {
 		private final String botToken;
 
 		public ReactiveApiPublisherToken(Atomix atomix,
+				KafkaProducer kafkaProducer,
 				Set<ResultingEventTransformer> resultingEventTransformerSet,
 				Long liveId,
 				long userId,
 				String botToken) {
-			super(atomix, resultingEventTransformerSet, liveId, userId);
+			super(atomix, kafkaProducer, resultingEventTransformerSet, liveId, userId);
 			this.botToken = botToken;
 		}
 
@@ -529,11 +533,12 @@ public abstract class ReactiveApiPublisher {
 		private final long phoneNumber;
 
 		public ReactiveApiPublisherPhoneNumber(Atomix atomix,
+				KafkaProducer kafkaProducer,
 				Set<ResultingEventTransformer> resultingEventTransformerSet,
 				Long liveId,
 				long userId,
 				long phoneNumber) {
-			super(atomix, resultingEventTransformerSet, liveId, userId);
+			super(atomix, kafkaProducer, resultingEventTransformerSet, liveId, userId);
 			this.phoneNumber = phoneNumber;
 		}
 

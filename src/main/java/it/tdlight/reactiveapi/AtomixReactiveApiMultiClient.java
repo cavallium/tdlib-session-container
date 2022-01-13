@@ -20,35 +20,21 @@ public class AtomixReactiveApiMultiClient implements ReactiveApiMultiClient, Aut
 
 	private final ClusterEventService eventService;
 
-	private final Flux<ClientBoundEvent> clientBoundEvents;
+	private final KafkaConsumer kafkaConsumer;
 
 	private volatile boolean closed = false;
 
-	AtomixReactiveApiMultiClient(AtomixReactiveApi api) {
+	AtomixReactiveApiMultiClient(AtomixReactiveApi api, KafkaConsumer kafkaConsumer) {
 		this.eventService = api.getAtomix().getEventService();
-
-		clientBoundEvents = Flux
-				.<List<ClientBoundEvent>>push(sink -> {
-					var subscriptionFuture = eventService.subscribe("session-client-bound-events",
-							LiveAtomixReactiveApiClient::deserializeEvents,
-							s -> {
-								sink.next(s);
-								return CompletableFuture.completedFuture(null);
-							},
-							(a) -> null
-					);
-					sink.onDispose(() -> subscriptionFuture.thenAccept(Subscription::close));
-				}, OverflowStrategy.ERROR)
-				.subscribeOn(Schedulers.boundedElastic())
-				.onBackpressureBuffer(0xFFFF, BufferOverflowStrategy.ERROR)
-				.flatMapIterable(list -> list)
-				.takeUntil(s -> closed)
-				.share();
+		this.kafkaConsumer = kafkaConsumer;
 	}
 
 	@Override
-	public Flux<ClientBoundEvent> clientBoundEvents() {
-		return clientBoundEvents;
+	public Flux<ClientBoundEvent> clientBoundEvents(boolean ack) {
+		if (closed) {
+			return Flux.empty();
+		}
+		return kafkaConsumer.consumeMessages(kafkaConsumer.newRandomGroupId(), ack).takeUntil(s -> closed);
 	}
 
 	@Override

@@ -1,7 +1,6 @@
 package it.tdlight.reactiveapi;
 
 import io.atomix.cluster.messaging.ClusterEventService;
-import io.atomix.cluster.messaging.Subscription;
 import io.atomix.core.Atomix;
 import it.tdlight.jni.TdApi;
 import it.tdlight.reactiveapi.Event.ClientBoundEvent;
@@ -21,11 +20,8 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.concurrent.CompletableFuture;
 import org.apache.commons.lang3.SerializationException;
-import reactor.core.publisher.BufferOverflowStrategy;
 import reactor.core.publisher.Flux;
-import reactor.core.publisher.FluxSink.OverflowStrategy;
 import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Schedulers;
 
@@ -37,26 +33,11 @@ public class LiveAtomixReactiveApiClient implements ReactiveApiClient {
 
 	private final Flux<ClientBoundEvent> clientBoundEvents;
 
-	LiveAtomixReactiveApiClient(Atomix atomix, long liveId, long userId) {
+	LiveAtomixReactiveApiClient(Atomix atomix, KafkaConsumer kafkaConsumer, long liveId, long userId) {
 		this.eventService = atomix.getEventService();
 		this.liveId = liveId;
 		this.userId = userId;
-		this.clientBoundEvents = Flux
-				.<List<ClientBoundEvent>>push(sink -> {
-					var subscriptionFuture = eventService.subscribe("session-client-bound-events",
-							LiveAtomixReactiveApiClient::deserializeEvents,
-							s -> {
-								sink.next(s);
-								return CompletableFuture.completedFuture(null);
-							},
-							(a) -> null
-					);
-					sink.onDispose(() -> subscriptionFuture.thenAccept(Subscription::close));
-				}, OverflowStrategy.ERROR)
-				.onBackpressureBuffer(0xFFFF, BufferOverflowStrategy.ERROR)
-				.flatMapIterable(list -> list)
-				.filter(e -> e.userId() == userId && e.liveId() == liveId)
-				.share();
+		this.clientBoundEvents = kafkaConsumer.consumeMessages(kafkaConsumer.newRandomGroupId(), true, userId, liveId).share();
 	}
 
 	@Override

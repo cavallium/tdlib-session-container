@@ -27,7 +27,7 @@ public class Entrypoint {
 
 	private static final Logger LOG = LoggerFactory.getLogger(Entrypoint.class);
 
-	public static record ValidEntrypointArgs(String clusterPath, String instancePath, String diskSessionsPath) {}
+	public record ValidEntrypointArgs(String clusterPath, String instancePath, String diskSessionsPath) {}
 
 	public static ValidEntrypointArgs parseArguments(String[] args) {
 		// Check arguments validity
@@ -176,7 +176,9 @@ public class Entrypoint {
 
 		atomix.start().join();
 
-		var api = new AtomixReactiveApi(nodeId, atomix, diskSessions, resultingEventTransformerSet);
+		var kafkaParameters = new KafkaParameters(clusterSettings, instanceSettings.id);
+
+		var api = new AtomixReactiveApi(nodeId, atomix, kafkaParameters, diskSessions, resultingEventTransformerSet);
 
 		LOG.info("Starting ReactiveApi...");
 

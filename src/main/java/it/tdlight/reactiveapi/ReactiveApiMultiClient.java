@@ -8,7 +8,7 @@ import reactor.core.publisher.Mono;
 
 public interface ReactiveApiMultiClient {
 
-	Flux<ClientBoundEvent> clientBoundEvents();
+	Flux<ClientBoundEvent> clientBoundEvents(boolean ack);
 
 	<T extends TdApi.Object> Mono<T> request(long userId, long liveId, TdApi.Function<T> request, Instant timeout);
 
