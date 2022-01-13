@@ -1,6 +1,7 @@
 package it.tdlight.reactiveapi;
 
 import it.tdlight.reactiveapi.Event.ClientBoundEvent;
+import java.time.Duration;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
@@ -36,8 +37,9 @@ public class KafkaConsumer {
 		props.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, IntegerDeserializer.class);
 		props.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, ClientBoundEventDeserializer.class);
 		props.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
-		ReceiverOptions<Integer, ClientBoundEvent> receiverOptions = ReceiverOptions.create(props);
-		ReceiverOptions.create(receiverOptions.consumerProperties());
+		ReceiverOptions<Integer, ClientBoundEvent> receiverOptions = ReceiverOptions
+				.<Integer, ClientBoundEvent>create(props)
+				.commitInterval(Duration.ofSeconds(10));
 		Pattern pattern;
 		if (liveId == null && userId == null) {
 			pattern = Pattern.compile("tdlib\\.event\\.[0-9]+\\.[0-9]+");

@@ -31,7 +31,7 @@ public class KafkaProducer {
 		props.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, ClientBoundEventSerializer.class);
 		SenderOptions<Integer, ClientBoundEvent> senderOptions = SenderOptions.create(props);
 
-		sender = KafkaSender.create(senderOptions);
+		sender = KafkaSender.create(senderOptions.maxInFlight(1024));
 	}
 
 	public Mono<Void> sendMessages(long liveId, long userId, Flux<ClientBoundEvent> eventsFlux) {
@@ -40,7 +40,7 @@ public class KafkaProducer {
 						"tdlib.event.%d.%d".formatted(userId, liveId),
 						event
 				), null))
-				.flatMap(record -> sender.send(Mono.just(record)))
+				.transform(sender::send)
 				.doOnError(e -> LOG.error("Send failed", e))
 				.then();
 	}
