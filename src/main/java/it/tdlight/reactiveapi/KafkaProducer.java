@@ -40,8 +40,7 @@ public class KafkaProducer {
 						"tdlib.event.%d.%d".formatted(userId, liveId),
 						event
 				), null))
-				.windowTimeout(1024, Duration.ofMillis(10))
-				.flatMap(sender::send)
+				.flatMap(record -> sender.send(Mono.just(record)))
 				.doOnError(e -> LOG.error("Send failed", e))
 				.then();
 	}
