@@ -34,10 +34,10 @@ public class KafkaProducer {
 		sender = KafkaSender.create(senderOptions.maxInFlight(1024));
 	}
 
-	public Mono<Void> sendMessages(long liveId, long userId, Flux<ClientBoundEvent> eventsFlux) {
+	public Mono<Void> sendMessages(long userId, Flux<ClientBoundEvent> eventsFlux) {
 		return eventsFlux
 				.<SenderRecord<Integer, ClientBoundEvent, Integer>>map(event -> SenderRecord.create(new ProducerRecord<>(
-						"tdlib.event.%d.%d".formatted(userId, liveId),
+						"tdlib.event.%d".formatted(userId),
 						event
 				), null))
 				.transform(sender::send)

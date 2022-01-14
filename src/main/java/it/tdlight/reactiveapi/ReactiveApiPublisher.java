@@ -189,7 +189,7 @@ public abstract class ReactiveApiPublisher {
 				// Buffer requests to avoid halting the event loop
 				.onBackpressureBuffer();
 
-		kafkaProducer.sendMessages(liveId, userId, messagesToSend).subscribeOn(Schedulers.parallel()).subscribe();
+		kafkaProducer.sendMessages(userId, messagesToSend).subscribeOn(Schedulers.parallel()).subscribe();
 
 		publishedResultingEvents
 				// Obtain only cluster-bound events

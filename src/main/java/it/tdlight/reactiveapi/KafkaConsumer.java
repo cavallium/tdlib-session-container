@@ -31,9 +31,7 @@ public class KafkaConsumer {
 		this.kafkaParameters = kafkaParameters;
 	}
 
-	public KafkaReceiver<Integer, ClientBoundEvent> createReceiver(@NotNull String groupId,
-			@Nullable Long liveId,
-			@Nullable Long userId) {
+	public KafkaReceiver<Integer, ClientBoundEvent> createReceiver(@NotNull String groupId, @Nullable Long userId) {
 		Map<String, Object> props = new HashMap<>();
 		props.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, kafkaParameters.bootstrapServers());
 		props.put(ConsumerConfig.CLIENT_ID_CONFIG, kafkaParameters.clientId());
@@ -48,14 +46,10 @@ public class KafkaConsumer {
 				.maxCommitAttempts(100)
 				.maxDeferredCommits(100);
 		Pattern pattern;
-		if (liveId == null && userId == null) {
-			pattern = Pattern.compile("tdlib\\.event\\.[0-9]+\\.[0-9]+");
-		} else if (liveId == null) {
-			pattern = Pattern.compile("tdlib\\.event\\." + userId + "\\.[0-9]+");
-		} else if (userId == null) {
-			pattern = Pattern.compile("tdlib\\.event\\.[0-9]+\\." + liveId);
+		if (userId == null) {
+			pattern = Pattern.compile("tdlib\\.event\\.[0-9]+");
 		} else {
-			pattern = Pattern.compile("tdlib\\.event\\." + userId + "\\." + liveId);
+			pattern = Pattern.compile("tdlib\\.event\\." + userId);
 		}
 		ReceiverOptions<Integer, ClientBoundEvent> options = receiverOptions
 				.subscription(pattern)
@@ -73,41 +67,32 @@ public class KafkaConsumer {
 	}
 
 	public Flux<ClientBoundEvent> consumeMessages(@NotNull String subGroupId, boolean ack, long userId, long liveId) {
-		if (ack) {
-			return createReceiver(kafkaParameters.groupId() + "-" + subGroupId, liveId, userId)
-					.receive()
-					.log("consume-messages", Level.FINEST, SignalType.REQUEST)
-					.doOnNext(result -> result.receiverOffset().acknowledge())
-					.map(ConsumerRecord::value)
-					.transform(this::retryIfCleanup);
-		} else {
-			return createReceiver(kafkaParameters.groupId() + "-" + subGroupId, liveId, userId).receive().map(ConsumerRecord::value);
-		}
+		return consumeMessages(subGroupId, ack, userId).filter(e -> e.liveId() == liveId);
 	}
 
 	public Flux<ClientBoundEvent> consumeMessages(@NotNull String subGroupId, boolean ack, long userId) {
 		if (ack) {
-			return createReceiver(kafkaParameters.groupId() + "-" + subGroupId, null, userId)
+			return createReceiver(kafkaParameters.groupId() + "-" + subGroupId, userId)
 					.receive()
 					.log("consume-messages", Level.FINEST, SignalType.REQUEST)
 					.doOnNext(result -> result.receiverOffset().acknowledge())
 					.map(ConsumerRecord::value)
 					.transform(this::retryIfCleanup);
 		} else {
-			return createReceiver(kafkaParameters.groupId() + "-" + subGroupId, null, userId).receive().map(ConsumerRecord::value);
+			return createReceiver(kafkaParameters.groupId() + "-" + subGroupId, userId).receive().map(ConsumerRecord::value);
 		}
 	}
 
 	public Flux<ClientBoundEvent> consumeMessages(@NotNull String subGroupId, boolean ack) {
 		if (ack) {
-			return createReceiver(kafkaParameters.groupId() + "-" + subGroupId, null, null)
+			return createReceiver(kafkaParameters.groupId() + "-" + subGroupId, null)
 					.receive()
 					.log("consume-messages", Level.FINEST, SignalType.REQUEST)
 					.doOnNext(result -> result.receiverOffset().acknowledge())
 					.map(ConsumerRecord::value)
 					.transform(this::retryIfCleanup);
 		} else {
-			return createReceiver(kafkaParameters.groupId() + "-" + subGroupId, null, null).receive().map(ConsumerRecord::value);
+			return createReceiver(kafkaParameters.groupId() + "-" + subGroupId, null).receive().map(ConsumerRecord::value);
 		}
 	}
 }
