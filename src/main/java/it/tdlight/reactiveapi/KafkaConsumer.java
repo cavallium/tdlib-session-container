@@ -40,14 +40,11 @@ public class KafkaConsumer {
 		props.put(ConsumerConfig.GROUP_ID_CONFIG, groupId);
 		props.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, IntegerDeserializer.class);
 		props.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, ClientBoundEventDeserializer.class);
-		props.put(ConsumerConfig.SESSION_TIMEOUT_MS_CONFIG, (int) Duration.ofMinutes(5).toMillis());
-		props.put(ConsumerConfig.MAX_POLL_INTERVAL_MS_CONFIG, (int) Duration.ofMinutes(5).toMillis());
-		props.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
+		props.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "latest");
 		ReceiverOptions<Integer, ClientBoundEvent> receiverOptions = ReceiverOptions
 				.<Integer, ClientBoundEvent>create(props)
 				.commitInterval(Duration.ofSeconds(10))
 				.commitBatchSize(64)
-				.pollTimeout(Duration.ofMinutes(2))
 				.maxCommitAttempts(100)
 				.maxDeferredCommits(100);
 		Pattern pattern;

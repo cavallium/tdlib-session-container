@@ -471,7 +471,7 @@ public abstract class ReactiveApiPublisher {
 
 						return Mono.from(rawTelegramClient.send(request, timeoutDuration));
 					} else {
-						LOG.error("Ignored a request because the current state is {}", state);
+						LOG.error("Ignored a request because the current state is {}. Request: {}", state, requestObj);
 						return Mono.empty();
 					}
 				})
