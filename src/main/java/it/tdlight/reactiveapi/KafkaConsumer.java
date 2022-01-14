@@ -14,7 +14,6 @@ import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
-import org.reactivestreams.Publisher;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.SignalType;
 import reactor.kafka.receiver.KafkaReceiver;
@@ -66,33 +65,24 @@ public class KafkaConsumer {
 				.doBeforeRetry(s -> LOG.warn("Rebalancing in progress")));
 	}
 
-	public Flux<ClientBoundEvent> consumeMessages(@NotNull String subGroupId, boolean ack, long userId, long liveId) {
-		return consumeMessages(subGroupId, ack, userId).filter(e -> e.liveId() == liveId);
+	public Flux<ClientBoundEvent> consumeMessages(@NotNull String subGroupId, long userId, long liveId) {
+		return consumeMessagesInternal(subGroupId, userId).filter(e -> e.liveId() == liveId);
 	}
 
-	public Flux<ClientBoundEvent> consumeMessages(@NotNull String subGroupId, boolean ack, long userId) {
-		if (ack) {
-			return createReceiver(kafkaParameters.groupId() + "-" + subGroupId, userId)
-					.receive()
-					.log("consume-messages", Level.FINEST, SignalType.REQUEST)
-					.doOnNext(result -> result.receiverOffset().acknowledge())
-					.map(ConsumerRecord::value)
-					.transform(this::retryIfCleanup);
-		} else {
-			return createReceiver(kafkaParameters.groupId() + "-" + subGroupId, userId).receive().map(ConsumerRecord::value);
-		}
+	public Flux<ClientBoundEvent> consumeMessages(@NotNull String subGroupId, long userId) {
+		return consumeMessagesInternal(subGroupId, userId);
 	}
 
-	public Flux<ClientBoundEvent> consumeMessages(@NotNull String subGroupId, boolean ack) {
-		if (ack) {
-			return createReceiver(kafkaParameters.groupId() + "-" + subGroupId, null)
-					.receive()
-					.log("consume-messages", Level.FINEST, SignalType.REQUEST)
-					.doOnNext(result -> result.receiverOffset().acknowledge())
-					.map(ConsumerRecord::value)
-					.transform(this::retryIfCleanup);
-		} else {
-			return createReceiver(kafkaParameters.groupId() + "-" + subGroupId, null).receive().map(ConsumerRecord::value);
-		}
+	public Flux<ClientBoundEvent> consumeMessages(@NotNull String subGroupId) {
+		return consumeMessagesInternal(subGroupId, null);
+	}
+
+	private Flux<ClientBoundEvent> consumeMessagesInternal(@NotNull String subGroupId, @Nullable Long userId) {
+		return createReceiver(kafkaParameters.groupId() + "-" + subGroupId, userId)
+				.receive()
+				.log("consume-messages", Level.FINEST, SignalType.REQUEST)
+				.doOnNext(result -> result.receiverOffset().acknowledge())
+				.map(ConsumerRecord::value)
+				.transform(this::retryIfCleanup);
 	}
 }

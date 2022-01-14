@@ -37,7 +37,7 @@ public class LiveAtomixReactiveApiClient implements ReactiveApiClient {
 		this.eventService = atomix.getEventService();
 		this.liveId = liveId;
 		this.userId = userId;
-		this.clientBoundEvents = kafkaConsumer.consumeMessages(subGroupId, true, userId, liveId).share();
+		this.clientBoundEvents = kafkaConsumer.consumeMessages(subGroupId, userId, liveId).share();
 	}
 
 	@Override

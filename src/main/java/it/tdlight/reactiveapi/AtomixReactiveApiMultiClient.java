@@ -2,17 +2,13 @@ package it.tdlight.reactiveapi;
 
 import io.atomix.cluster.messaging.ClusterEventService;
 import io.atomix.cluster.messaging.MessagingException;
-import io.atomix.cluster.messaging.Subscription;
 import it.tdlight.jni.TdApi;
 import it.tdlight.reactiveapi.Event.ClientBoundEvent;
 import it.tdlight.reactiveapi.Event.Request;
 import java.time.Duration;
 import java.time.Instant;
-import java.util.List;
 import java.util.concurrent.CompletableFuture;
-import reactor.core.publisher.BufferOverflowStrategy;
 import reactor.core.publisher.Flux;
-import reactor.core.publisher.FluxSink.OverflowStrategy;
 import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Schedulers;
 
@@ -35,7 +31,7 @@ public class AtomixReactiveApiMultiClient implements ReactiveApiMultiClient, Aut
 		if (closed) {
 			return Flux.empty();
 		}
-		return kafkaConsumer.consumeMessages(subGroupId, ack).takeUntil(s -> closed);
+		return kafkaConsumer.consumeMessages(subGroupId).takeUntil(s -> closed);
 	}
 
 	@Override
