@@ -63,7 +63,7 @@ public abstract class ReactiveApiPublisher {
 
 
 	private static final Logger LOG = LoggerFactory.getLogger(ReactiveApiPublisher.class);
-	private static final Duration SPECIAL_RAW_TIMEOUT_DURATION = Duration.ofSeconds(10);
+	private static final Duration SPECIAL_RAW_TIMEOUT_DURATION = Duration.ofMinutes(1);
 
 	private final KafkaProducer kafkaProducer;
 	private final ClusterEventService eventService;
