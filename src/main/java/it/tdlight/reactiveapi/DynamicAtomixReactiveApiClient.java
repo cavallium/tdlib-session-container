@@ -7,6 +7,7 @@ import it.tdlight.reactiveapi.Event.ClientBoundEvent;
 import it.tdlight.reactiveapi.Event.Request;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicLong;
 import reactor.core.Disposable;
 import reactor.core.publisher.Flux;
@@ -65,6 +66,8 @@ public class DynamicAtomixReactiveApiClient implements ReactiveApiClient, AutoCl
 				)).subscribeOn(Schedulers.boundedElastic()).onErrorMap(ex -> {
 					if (ex instanceof MessagingException.NoRemoteHandler) {
 						return new TdError(404, "Bot #IDU" + this.userId + " (liveId: " + liveId + ") is not found on the cluster");
+					} else if (ex instanceof TimeoutException) {
+						return new TdError(408, "Request Timeout", ex);
 					} else {
 						return ex;
 					}

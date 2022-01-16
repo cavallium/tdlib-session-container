@@ -1,6 +1,7 @@
 package it.tdlight.reactiveapi;
 
 import io.atomix.cluster.messaging.ClusterEventService;
+import io.atomix.cluster.messaging.MessagingException;
 import io.atomix.core.Atomix;
 import it.tdlight.jni.TdApi;
 import it.tdlight.reactiveapi.Event.ClientBoundEvent;
@@ -20,6 +21,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.TimeoutException;
 import org.apache.commons.lang3.SerializationException;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
@@ -54,7 +56,15 @@ public class LiveAtomixReactiveApiClient implements ReactiveApiClient {
 						LiveAtomixReactiveApiClient::deserializeResponse,
 						Duration.between(Instant.now(), timeout)
 				))
-				.subscribeOn(Schedulers.boundedElastic())
+				.subscribeOn(Schedulers.boundedElastic()).onErrorMap(ex -> {
+					if (ex instanceof MessagingException.NoRemoteHandler) {
+						return new TdError(404, "Bot #IDU" + this.userId + " (liveId: " + liveId + ") is not found on the cluster");
+					} else if (ex instanceof TimeoutException) {
+						return new TdError(408, "Request Timeout", ex);
+					} else {
+						return ex;
+					}
+				})
 				.handle((item, sink) -> {
 					if (item instanceof TdApi.Error error) {
 						sink.error(new TdError(error.code, error.message));
