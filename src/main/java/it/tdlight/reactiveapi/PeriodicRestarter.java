@@ -24,6 +24,7 @@ import org.slf4j.LoggerFactory;
 import reactor.core.Disposable;
 import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Schedulers;
+import reactor.util.retry.Retry;
 
 public class PeriodicRestarter {
 
@@ -140,8 +141,14 @@ public class PeriodicRestarter {
 						multiClient
 								.request(userId, liveId, new Close(), Instant.now().plus(Duration.ofSeconds(15)))
 								.subscribeOn(Schedulers.parallel())
-								.retry(5)
-								.doOnError(ex -> LOG.error("Failed to restart bot {} (liveId={})", userId, liveId, ex))
+								.retryWhen(Retry.backoff(5, Duration.ofSeconds(1)).maxBackoff(Duration.ofSeconds(5)))
+								.doOnError(ex -> {
+									if (ex instanceof TdError tdError && tdError.getTdCode() == 404) {
+										LOG.warn("Failed to restart bot {} (liveId={}): not found", userId, liveId);
+									} else {
+										LOG.error("Failed to restart bot {} (liveId={})", userId, liveId, ex);
+									}
+								})
 								.onErrorResume(ex -> Mono.empty())
 								.subscribe();
 					}
