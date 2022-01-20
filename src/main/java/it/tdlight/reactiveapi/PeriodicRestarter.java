@@ -17,6 +17,7 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 import org.slf4j.Logger;
@@ -29,6 +30,8 @@ import reactor.util.retry.Retry;
 public class PeriodicRestarter {
 
 	private static final Logger LOG = LoggerFactory.getLogger(PeriodicRestarter.class);
+
+	private static Duration JITTER_MAX_DELAY = Duration.ofMinutes(5);
 
 	private final ReactiveApi api;
 	private final Duration interval;
@@ -123,10 +126,20 @@ public class PeriodicRestarter {
 	}
 
 	private void onSessionReady(long liveId, long userId) {
+		Duration maxRandomDelay;
+		if (JITTER_MAX_DELAY.compareTo(interval) < 0) {
+			maxRandomDelay = JITTER_MAX_DELAY;
+		} else {
+			maxRandomDelay = interval;
+		}
+		var randomDelay = randomTime(maxRandomDelay);
+
+		var totalDelay = interval.plus(randomDelay);
+
 		LOG.info("The session #IDU{} (liveId: {}) will be restarted at {}",
 				userId,
 				liveId,
-				Instant.now().plus(interval)
+				Instant.now().plus(totalDelay)
 		);
 
 		// Restart after x time
@@ -153,10 +166,17 @@ public class PeriodicRestarter {
 								.subscribe();
 					}
 
-				}, interval.toMillis(), TimeUnit.MILLISECONDS);
+				}, totalDelay.toMillis(), TimeUnit.MILLISECONDS);
 		disposableRef.set(disposable);
 		var prev = closeManagedByPeriodicRestarter.put(liveId, disposable);
 		if (prev != null) prev.dispose();
+	}
+
+	/**
+	 * @return random duration from 0 to n
+	 */
+	private Duration randomTime(Duration max) {
+		return Duration.ofMillis(ThreadLocalRandom.current().nextInt(0, Math.toIntExact(max.toMillis())));
 	}
 
 	public Mono<Void> stop() {
