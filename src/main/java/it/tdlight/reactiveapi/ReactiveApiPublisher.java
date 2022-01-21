@@ -17,6 +17,7 @@ import it.tdlight.jni.TdApi.AuthorizationStateWaitOtherDeviceConfirmation;
 import it.tdlight.jni.TdApi.AuthorizationStateWaitPassword;
 import it.tdlight.jni.TdApi.CheckAuthenticationBotToken;
 import it.tdlight.jni.TdApi.CheckDatabaseEncryptionKey;
+import it.tdlight.jni.TdApi.Function;
 import it.tdlight.jni.TdApi.Object;
 import it.tdlight.jni.TdApi.PhoneNumberAuthenticationSettings;
 import it.tdlight.jni.TdApi.SetAuthenticationPhoneNumber;
@@ -40,6 +41,7 @@ import java.io.ByteArrayOutputStream;
 import java.io.DataInputStream;
 import java.io.DataOutputStream;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
@@ -157,6 +159,7 @@ public abstract class ReactiveApiPublisher {
 				// Send requests to tdlib
 				.flatMap(function -> Mono
 						.from(rawTelegramClient.send(function, SPECIAL_RAW_TIMEOUT_DURATION))
+						.flatMap(result -> fixBrokenKey(function, result))
 						.mapNotNull(resp -> {
 							if (resp.getConstructor() == TdApi.Error.CONSTRUCTOR) {
 								LOG.error("Received error for special request {}: {}\nThe instance will be closed", function, resp);
@@ -168,7 +171,11 @@ public abstract class ReactiveApiPublisher {
 						.doOnError(ex -> LOG.error("Failed to receive the response for special request {}\n"
 								+ " The instance will be closed", function, ex))
 						.onErrorResume(ex -> Mono.just(new OnUpdateError(liveId, userId, new TdApi.Error(500, ex.getMessage()))))
-				, 1024)
+				, Integer.MAX_VALUE)
+
+				// Buffer requests to avoid halting the event loop
+				.onBackpressureBuffer()
+
 				.doOnError(ex -> LOG.error("Failed to receive resulting events. The instance will be closed", ex))
 				.onErrorResume(ex -> Mono.just(new OnUpdateError(liveId, userId, new TdApi.Error(500, ex.getMessage()))))
 
@@ -217,6 +224,30 @@ public abstract class ReactiveApiPublisher {
 			LOG.error("The API started twice!");
 			prev.dispose();
 		}
+	}
+
+	private <T extends TdApi.Object> Mono<TdApi.Object> fixBrokenKey(Function<T> function, TdApi.Object result) {
+		if (result.getConstructor() == TdApi.Error.CONSTRUCTOR
+				&& function instanceof TdApi.CheckDatabaseEncryptionKey checkDatabaseEncryptionKey) {
+			// Fix legacy "cucumbers" password
+			if (checkDatabaseEncryptionKey.encryptionKey == null
+					&& "Wrong password".equals(((TdApi.Error) result).message)) {
+
+				var checkOldKeyFunction = new TdApi.CheckDatabaseEncryptionKey("cucumber".getBytes(StandardCharsets.US_ASCII));
+				Mono<TdApi.Object> oldKeyCheckResultMono = Mono
+						.from(rawTelegramClient.send(checkOldKeyFunction, SPECIAL_RAW_TIMEOUT_DURATION));
+				return oldKeyCheckResultMono.flatMap(oldKeyCheckResult -> {
+					if (oldKeyCheckResult.getConstructor() != TdApi.Error.CONSTRUCTOR) {
+						var fixOldKeyFunction = new TdApi.SetDatabaseEncryptionKey();
+						return Mono
+								.from(rawTelegramClient.send(fixOldKeyFunction, SPECIAL_RAW_TIMEOUT_DURATION));
+					} else {
+						return Mono.just(oldKeyCheckResult);
+					}
+				});
+			}
+		}
+		return Mono.just(result);
 	}
 
 	protected abstract boolean isBot();
@@ -338,7 +369,7 @@ public abstract class ReactiveApiPublisher {
 	private TdlibParameters generateTDLibParameters() {
 		var tdlibParameters = new TdlibParameters();
 		var path = requireNonNull(this.path.get(), "Path must not be null");
-		tdlibParameters.databaseDirectory = path.toString();
+		tdlibParameters.databaseDirectory = path + "?use_custom_database_format=true";
 		tdlibParameters.apiId = 376588;
 		tdlibParameters.apiHash = "2143fdfc2bbba3ec723228d2f81336c9";
 		tdlibParameters.filesDirectory = path.resolve("user_storage").toString();
