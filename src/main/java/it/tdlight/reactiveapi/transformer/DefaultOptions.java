@@ -34,7 +34,7 @@ public class DefaultOptions implements ResultingEventTransformer {
 
 	@Override
 	public Flux<ResultingEvent> transform(boolean isBot, Flux<ResultingEvent> events) {
-		return events.flatMapIterable(event -> {
+		return events.concatMapIterable(event -> {
 
 			// Append the options if the initial auth state is intercepted
 			if (event instanceof ClientBoundResultingEvent clientBoundResultingEvent

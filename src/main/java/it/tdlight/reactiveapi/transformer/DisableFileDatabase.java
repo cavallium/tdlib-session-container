@@ -11,7 +11,7 @@ public class DisableFileDatabase implements ResultingEventTransformer {
 
 	@Override
 	public Flux<ResultingEvent> transform(boolean isBot, Flux<ResultingEvent> events) {
-		return events.flatMapIterable(event -> {
+		return events.concatMapIterable(event -> {
 
 			// Change option
 			if (event instanceof TDLibBoundResultingEvent tdLibBoundResultingEvent

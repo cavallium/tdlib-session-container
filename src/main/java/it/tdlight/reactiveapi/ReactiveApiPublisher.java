@@ -135,7 +135,7 @@ public abstract class ReactiveApiPublisher {
 		var publishedResultingEvents = telegramClient
 				.subscribeOn(Schedulers.parallel())
 				// Handle signals, then return a ResultingEvent
-				.flatMapIterable(this::onSignal)
+				.concatMapIterable(this::onSignal)
 				.doFinally(s -> LOG.trace("Finalized telegram client events"))
 
 				// Transform resulting events using all the registered resulting event transformers
