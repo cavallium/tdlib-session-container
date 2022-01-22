@@ -152,7 +152,7 @@ public class PeriodicRestarter {
 					if (!requireNonNullElse(closingByPeriodicRestarter.put(liveId, true), false)) {
 						// Request restart
 						multiClient
-								.request(userId, liveId, new Close(), Instant.now().plus(Duration.ofSeconds(15)))
+								.request(userId, liveId, new Close(), Instant.now().plus(Duration.ofMinutes(5)))
 								.subscribeOn(Schedulers.parallel())
 								.retryWhen(Retry.backoff(5, Duration.ofSeconds(1)).maxBackoff(Duration.ofSeconds(5)))
 								.doOnError(ex -> {

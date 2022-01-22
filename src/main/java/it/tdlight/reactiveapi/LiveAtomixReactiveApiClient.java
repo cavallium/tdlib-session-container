@@ -8,7 +8,7 @@ import reactor.core.publisher.Mono;
 public class LiveAtomixReactiveApiClient extends BaseAtomixReactiveApiClient {
 
 	private final Flux<ClientBoundEvent> clientBoundEvents;
-	private final Mono<Long> liveId;
+	private final long liveId;
 
 	LiveAtomixReactiveApiClient(Atomix atomix,
 			KafkaConsumer kafkaConsumer,
@@ -16,8 +16,11 @@ public class LiveAtomixReactiveApiClient extends BaseAtomixReactiveApiClient {
 			long userId,
 			String subGroupId) {
 		super(atomix, userId);
-		this.clientBoundEvents = kafkaConsumer.consumeMessages(subGroupId, userId, liveId).share();
-		this.liveId = Mono.just(liveId);
+		this.clientBoundEvents = kafkaConsumer
+				.consumeMessages(subGroupId, userId, liveId)
+				.map(TimestampedClientBoundEvent::event);
+		this.liveId = liveId;
+		super.initialize();
 	}
 
 	@Override
@@ -26,8 +29,7 @@ public class LiveAtomixReactiveApiClient extends BaseAtomixReactiveApiClient {
 	}
 
 	@Override
-	public Mono<Long> resolveLiveId() {
-		return liveId;
+	protected Flux<Long> liveIdChange() {
+		return Flux.just(liveId);
 	}
-
 }

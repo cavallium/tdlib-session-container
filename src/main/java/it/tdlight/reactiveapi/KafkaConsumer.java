@@ -7,8 +7,8 @@ import java.util.Map;
 import java.util.logging.Level;
 import java.util.regex.Pattern;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
-import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.common.errors.RebalanceInProgressException;
+import org.apache.kafka.common.record.TimestampType;
 import org.apache.kafka.common.serialization.IntegerDeserializer;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -57,7 +57,7 @@ public class KafkaConsumer {
 		return KafkaReceiver.create(options);
 	}
 
-	private Flux<ClientBoundEvent> retryIfCleanup(Flux<ClientBoundEvent> clientBoundEventFlux) {
+	private Flux<TimestampedClientBoundEvent> retryIfCleanup(Flux<TimestampedClientBoundEvent> clientBoundEventFlux) {
 		return clientBoundEventFlux.retryWhen(Retry
 				.backoff(Long.MAX_VALUE, Duration.ofMillis(100))
 				.maxBackoff(Duration.ofSeconds(5))
@@ -65,24 +65,30 @@ public class KafkaConsumer {
 				.doBeforeRetry(s -> LOG.warn("Rebalancing in progress")));
 	}
 
-	public Flux<ClientBoundEvent> consumeMessages(@NotNull String subGroupId, long userId, long liveId) {
-		return consumeMessagesInternal(subGroupId, userId).filter(e -> e.liveId() == liveId);
+	public Flux<TimestampedClientBoundEvent> consumeMessages(@NotNull String subGroupId, long userId, long liveId) {
+		return consumeMessagesInternal(subGroupId, userId).filter(e -> e.event().liveId() == liveId);
 	}
 
-	public Flux<ClientBoundEvent> consumeMessages(@NotNull String subGroupId, long userId) {
+	public Flux<TimestampedClientBoundEvent> consumeMessages(@NotNull String subGroupId, long userId) {
 		return consumeMessagesInternal(subGroupId, userId);
 	}
 
-	public Flux<ClientBoundEvent> consumeMessages(@NotNull String subGroupId) {
+	public Flux<TimestampedClientBoundEvent> consumeMessages(@NotNull String subGroupId) {
 		return consumeMessagesInternal(subGroupId, null);
 	}
 
-	private Flux<ClientBoundEvent> consumeMessagesInternal(@NotNull String subGroupId, @Nullable Long userId) {
+	private Flux<TimestampedClientBoundEvent> consumeMessagesInternal(@NotNull String subGroupId, @Nullable Long userId) {
 		return createReceiver(kafkaParameters.groupId() + "-" + subGroupId, userId)
 				.receive()
 				.log("consume-messages", Level.FINEST, SignalType.REQUEST)
 				.doOnNext(result -> result.receiverOffset().acknowledge())
-				.map(ConsumerRecord::value)
+				.map(record -> {
+					if (record.timestampType() == TimestampType.CREATE_TIME) {
+						return new TimestampedClientBoundEvent(record.timestamp(), record.value());
+					} else {
+						return new TimestampedClientBoundEvent(1, record.value());
+					}
+				})
 				.transform(this::retryIfCleanup);
 	}
 }

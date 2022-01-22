@@ -64,9 +64,8 @@ import reactor.core.scheduler.Schedulers;
 
 public abstract class ReactiveApiPublisher {
 
-
 	private static final Logger LOG = LoggerFactory.getLogger(ReactiveApiPublisher.class);
-	private static final Duration SPECIAL_RAW_TIMEOUT_DURATION = Duration.ofMinutes(3);
+	private static final Duration SPECIAL_RAW_TIMEOUT_DURATION = Duration.ofMinutes(5);
 
 	private final KafkaProducer kafkaProducer;
 	private final ClusterEventService eventService;
@@ -102,7 +101,7 @@ public abstract class ReactiveApiPublisher {
 				subscription.close();
 				rawTelegramClient.dispose();
 			});
-		})).publishOn(Schedulers.parallel()).share();
+		}));
 	}
 
 	public static ReactiveApiPublisher fromToken(Atomix atomix,
@@ -181,8 +180,9 @@ public abstract class ReactiveApiPublisher {
 				.onErrorResume(ex -> Mono.just(new OnUpdateError(liveId, userId, new TdApi.Error(500, ex.getMessage()))))
 
 				// when an error arrives, close the session
-				.flatMap(ignored -> Mono
-						.from(rawTelegramClient.send(new TdApi.Close(), Duration.ofMinutes(1)))
+				.take(1, true)
+				.concatMap(ignored -> Mono
+						.from(rawTelegramClient.send(new TdApi.Close(), SPECIAL_RAW_TIMEOUT_DURATION))
 						.then(Mono.empty())
 				)
 				.subscribeOn(Schedulers.parallel())

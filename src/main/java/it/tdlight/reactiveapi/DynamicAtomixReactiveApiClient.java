@@ -2,24 +2,32 @@ package it.tdlight.reactiveapi;
 
 import it.tdlight.reactiveapi.Event.ClientBoundEvent;
 import java.time.Duration;
-import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicReference;
+import org.jetbrains.annotations.NotNull;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import reactor.core.Disposable;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
-import reactor.core.scheduler.Schedulers;
 
 public class DynamicAtomixReactiveApiClient extends BaseAtomixReactiveApiClient implements AutoCloseable {
 
-	private static final long LIVE_ID_UNSET = -1L;
-	private static final long LIVE_ID_FAILED = -2L;
+	private static final Logger LOG = LoggerFactory.getLogger(DynamicAtomixReactiveApiClient.class);
+
+	private record CurrentLiveId(long sinceTimestamp, long liveId) implements Comparable<CurrentLiveId> {
+
+		@Override
+		public int compareTo(@NotNull DynamicAtomixReactiveApiClient.CurrentLiveId o) {
+			return Long.compare(this.sinceTimestamp, o.sinceTimestamp);
+		}
+	}
 
 	private final ReactiveApi api;
-	private final AtomicLong liveId = new AtomicLong(LIVE_ID_UNSET);
-	private final Disposable liveIdSubscription;
+	private final AtomicReference<Disposable> clientBoundEventsSubscription = new AtomicReference<>(null);
 	private final long userId;
 
-	private final Flux<ClientBoundEvent> clientBoundEvents;
-	private final Flux<Long> liveIdChange;
+	private final Flux<TimestampedClientBoundEvent> clientBoundEvents;
+	private final Flux<CurrentLiveId> liveIdChange;
 
 	private volatile boolean closed;
 
@@ -28,52 +36,67 @@ public class DynamicAtomixReactiveApiClient extends BaseAtomixReactiveApiClient 
 		this.api = api;
 		this.userId = userId;
 
-		clientBoundEvents = kafkaConsumer.consumeMessages(subGroupId, userId)
-				.doOnNext(e -> liveId.set(e.liveId()))
+		var clientBoundEvents = kafkaConsumer
+				.consumeMessages(subGroupId, userId)
 				.takeWhile(n -> !closed)
-				.share();
+				.publish()
+				.autoConnect(3, clientBoundEventsSubscription::set);
 
-		liveIdChange = this.clientBoundEvents()
+		var firstLiveId = clientBoundEvents
+				.take(1, true)
+				.singleOrEmpty()
+				.map(e -> new CurrentLiveId(e.timestamp(), e.event().liveId()));
+		var sampledLiveIds = clientBoundEvents
+				.skip(1)
 				.sample(Duration.ofSeconds(1))
-				.map(Event::liveId)
-				.distinctUntilChanged();
+				.map(e -> new CurrentLiveId(e.timestamp(), e.event().liveId()));
+		var startupLiveId = api
+				.resolveUserLiveId(userId)
+				.doOnError(ex -> LOG.error("Failed to resolve live id of user {}", userId, ex))
+				.onErrorResume(ex -> Mono.empty())
+				.map(liveId -> new CurrentLiveId(System.currentTimeMillis(), liveId));
 
-		this.liveIdSubscription = liveIdChange.subscribeOn(Schedulers.parallel()).subscribe(liveId::set);
+		liveIdChange = startupLiveId
+				.concatWith(Flux.merge(firstLiveId, sampledLiveIds))
+				.scan((prev, next) -> {
+					if (next.compareTo(prev) > 0) {
+						LOG.trace("Replaced id {} with id {}", prev, next);
+						return next;
+					} else {
+						return prev;
+					}
+				})
+				.distinctUntilChanged(CurrentLiveId::liveId);
+
+		// minimum 3 subscribers:
+		//  - firstClientBoundEvent
+		//  - sampledClientBoundEvents
+		//  - clientBoundEvents
+		this.clientBoundEvents = clientBoundEvents;
+
+		super.initialize();
 	}
 
 	@Override
 	public Flux<ClientBoundEvent> clientBoundEvents() {
-		return clientBoundEvents;
+		return clientBoundEvents.doFirst(() -> {
+			if (this.clientBoundEventsSubscription.get() != null) {
+				throw new UnsupportedOperationException("Already subscribed");
+			}
+		}).map(TimestampedClientBoundEvent::event);
 	}
 
 	@Override
-	protected Mono<Long> resolveLiveId() {
-		return Mono
-				.fromSupplier(this.liveId::get)
-				.flatMap(liveId -> {
-					if (liveId == LIVE_ID_UNSET) {
-						return api.resolveUserLiveId(userId)
-								.switchIfEmpty(Mono.error(this::createLiveIdFailed))
-								.doOnError(ex -> this.liveId.compareAndSet(LIVE_ID_UNSET, LIVE_ID_FAILED));
-					} else if (liveId == LIVE_ID_FAILED) {
-						return Mono.error(createLiveIdFailed());
-					} else {
-						return Mono.just(liveId);
-					}
-				});
-	}
-
-	private Throwable createLiveIdFailed() {
-		return new TdError(404, "Bot #IDU" + this.userId
-				+ " is not found on the cluster, no live id has been associated with it locally");
-	}
-
-	public Flux<Long> liveIdChange() {
-		return liveIdChange;
+	protected Flux<Long> liveIdChange() {
+		return liveIdChange.map(CurrentLiveId::liveId);
 	}
 
 	public void close() {
 		this.closed = true;
-		liveIdSubscription.dispose();
+		var clientBoundEventsSubscription = this.clientBoundEventsSubscription.get();
+		if (clientBoundEventsSubscription != null) {
+			clientBoundEventsSubscription.dispose();
+		}
+		super.close();
 	}
 }

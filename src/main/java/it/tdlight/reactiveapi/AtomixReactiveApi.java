@@ -163,17 +163,17 @@ public class AtomixReactiveApi implements ReactiveApi {
 
 		var removeObsoleteDiskSessions = diskChangesMono
 				.flatMapIterable(diskChanges -> diskChanges.removedIds)
-				.flatMap(removedIds -> fromCompletionStage(() -> destroySession(removedIds, nodeId)))
+				.concatMap(removedIds -> fromCompletionStage(() -> destroySession(removedIds, nodeId)))
 				.then();
 
 		var addedDiskSessionsFlux = diskChangesMono
 				.flatMapIterable(diskChanges -> diskChanges.addedIds)
-				.flatMap(this::getLocalDiskSession);
+				.concatMap(this::getLocalDiskSession);
 		var normalDiskSessionsFlux = diskChangesMono
 				.flatMapIterable(diskChanges -> diskChanges.normalIds)
-				.flatMap(this::getLocalDiskSession);
+				.concatMap(this::getLocalDiskSession);
 
-		var addNewDiskSessions = addedDiskSessionsFlux.flatMap(diskSessionAndId -> {
+		var addNewDiskSessions = addedDiskSessionsFlux.concatMap(diskSessionAndId -> {
 			var id = diskSessionAndId.id;
 			var diskSession = diskSessionAndId.diskSession;
 			return createSession(new LoadSessionFromDiskRequest(id,
@@ -183,7 +183,7 @@ public class AtomixReactiveApi implements ReactiveApi {
 			));
 		}).then();
 
-		var loadExistingDiskSessions = normalDiskSessionsFlux.flatMap(diskSessionAndId -> {
+		var loadExistingDiskSessions = normalDiskSessionsFlux.concatMap(diskSessionAndId -> {
 			var id = diskSessionAndId.id;
 			var diskSession = diskSessionAndId.diskSession;
 			return createSession(new LoadSessionFromDiskRequest(id,

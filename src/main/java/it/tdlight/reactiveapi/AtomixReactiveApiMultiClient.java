@@ -31,7 +31,7 @@ public class AtomixReactiveApiMultiClient implements ReactiveApiMultiClient, Aut
 		if (closed) {
 			return Flux.empty();
 		}
-		return kafkaConsumer.consumeMessages(subGroupId).takeUntil(s -> closed);
+		return kafkaConsumer.consumeMessages(subGroupId).map(TimestampedClientBoundEvent::event).takeUntil(s -> closed);
 	}
 
 	@Override

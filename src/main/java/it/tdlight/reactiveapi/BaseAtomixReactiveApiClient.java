@@ -23,30 +23,45 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.TimeoutException;
 import org.apache.commons.lang3.SerializationException;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import reactor.core.Disposable;
+import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Schedulers;
 
-abstract class BaseAtomixReactiveApiClient implements ReactiveApiClient {
+abstract class BaseAtomixReactiveApiClient implements ReactiveApiClient, AutoCloseable {
+
+	private static final Logger LOG = LoggerFactory.getLogger(BaseAtomixReactiveApiClient.class);
 
 	protected final ClusterEventService eventService;
 	protected final long userId;
-	private Mono<Long> liveIdMono;
+	private Disposable liveIdChangeSubscription;
+	private Flux<Long> liveIdChange;
+	private Mono<Long> emptyIdErrorMono;
 
 	public BaseAtomixReactiveApiClient(Atomix atomix, long userId) {
 		this.eventService = atomix.getEventService();
 		this.userId = userId;
 	}
 
+	protected void initialize() {
+		this.liveIdChange = liveIdChange().cache(1);
+		this.liveIdChangeSubscription = liveIdChange
+				.subscribeOn(Schedulers.parallel())
+				.subscribe(v -> LOG.debug("Live id of user {} changed: {}", userId, v),
+						ex -> LOG.error("Failed to retrieve live id of user {}", userId)
+				);
+		this.emptyIdErrorMono = Mono.error(() -> new TdError(404, "Bot #IDU" + this.userId
+				+ " is not found on the cluster, no live id has been associated with it locally"));
+	}
+
 	@Override
 	public final <T extends TdApi.Object> Mono<T> request(TdApi.Function<T> request, Instant timeout) {
-		// Don't care about race conditions here, because the mono is always the same.
-		// This variable is set just to avoid creating the mono every time
-		Mono<Long> liveIdMono = this.liveIdMono;
-		if (liveIdMono == null) {
-			liveIdMono = (this.liveIdMono = resolveLiveId());
-		}
-
-		return liveIdMono
+		return liveIdChange
+				.take(1, true)
+				.singleOrEmpty()
+				.switchIfEmpty(emptyIdErrorMono)
 				.flatMap(liveId -> Mono
 						.fromCompletionStage(() -> eventService.send("session-" + liveId + "-requests",
 								new Request<>(liveId, request, timeout),
@@ -75,7 +90,7 @@ abstract class BaseAtomixReactiveApiClient implements ReactiveApiClient {
 				});
 	}
 
-	protected abstract Mono<Long> resolveLiveId();
+	protected abstract Flux<Long> liveIdChange();
 
 	@Override
 	public final long getUserId() {
@@ -150,5 +165,12 @@ abstract class BaseAtomixReactiveApiClient implements ReactiveApiClient {
 			case 0x06 -> new OnPasswordRequested(liveId, userId, is.readUTF(), is.readBoolean(), is.readUTF());
 			default -> throw new IllegalStateException("Unexpected value: " + is.readByte());
 		};
+	}
+
+	@Override
+	public void close() {
+		if (liveIdChangeSubscription != null) {
+			liveIdChangeSubscription.dispose();
+		}
 	}
 }
