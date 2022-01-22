@@ -16,6 +16,7 @@ import java.time.Instant;
 import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentHashMap.KeySetView;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
@@ -52,6 +53,12 @@ public class PeriodicRestarter {
 	 * Live id -> x
 	 */
 	private final ConcurrentMap<Long, Boolean> sessionAuthReady = new ConcurrentHashMap<>();
+
+	/**
+	 * Useful to register sessions at startup
+	 * User id -> x
+	 */
+	private final KeySetView<Long, Object> seenUsers = new ConcurrentHashMap<Long, Object>().keySet(new Object());
 
 	public PeriodicRestarter(ReactiveApi api, Duration interval, Set<Long> restartUserIds) {
 		this.api = api;
@@ -113,9 +120,12 @@ public class PeriodicRestarter {
 								}
 							}
 						} else if (event.update() instanceof UpdateNewMessage) {
-							var wasReady = requireNonNullElse(this.sessionAuthReady.put(event.liveId(), true), false);
-							if (!wasReady) {
-								onSessionReady(event.liveId(), event.userId());
+							if (seenUsers.add(event.userId())) {
+								LOG.info("Found a running bot that wasn't registered: {} (liveId: {})", event.userId(), event.liveId());
+								var wasReady = requireNonNullElse(this.sessionAuthReady.put(event.liveId(), true), false);
+								if (!wasReady) {
+									onSessionReady(event.liveId(), event.userId());
+								}
 							}
 						}
 					})
