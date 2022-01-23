@@ -75,6 +75,7 @@ public abstract class ReactiveApiPublisher {
 
 	private final AtomicReference<State> state = new AtomicReference<>(new State(LOGGED_OUT));
 	protected final long userId;
+	protected final UserTopic userTopic;
 	protected final long liveId;
 	private final String dynamicIdResolveSubject;
 
@@ -90,6 +91,7 @@ public abstract class ReactiveApiPublisher {
 		this.eventService = atomix.getEventService();
 		this.resultingEventTransformerSet = resultingEventTransformerSet;
 		this.userId = userId;
+		this.userTopic = new UserTopic(userId);
 		this.liveId = liveId;
 		this.dynamicIdResolveSubject = SubjectNaming.getDynamicIdResolveSubject(userId);
 		this.rawTelegramClient = ClientManager.createReactive();
@@ -197,7 +199,7 @@ public abstract class ReactiveApiPublisher {
 				// Buffer requests to avoid halting the event loop
 				.onBackpressureBuffer();
 
-		kafkaProducer.sendMessages(userId, messagesToSend).subscribeOn(Schedulers.parallel()).subscribe();
+		kafkaProducer.sendMessages(userTopic, messagesToSend).subscribeOn(Schedulers.parallel()).subscribe();
 
 		publishedResultingEvents
 				// Obtain only cluster-bound events
