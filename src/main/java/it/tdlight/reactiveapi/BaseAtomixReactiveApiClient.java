@@ -17,6 +17,7 @@ import java.io.ByteArrayOutputStream;
 import java.io.DataInputStream;
 import java.io.DataOutputStream;
 import java.io.IOException;
+import java.net.ConnectException;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -74,9 +75,7 @@ abstract class BaseAtomixReactiveApiClient implements ReactiveApiClient, AutoClo
 						.onErrorMap(ex -> {
 							if (ex instanceof MessagingException.NoRemoteHandler) {
 								return new TdError(404, "Bot #IDU" + this.userId + " (liveId: " + liveId + ") is not found on the cluster");
-							} else if (ex instanceof CompletionException && ex.getCause() instanceof TimeoutException) {
-								return new TdError(408, "Request Timeout", ex);
-							} else if (ex instanceof TimeoutException) {
+							} else if (ex instanceof TimeoutException || ex instanceof ConnectException) {
 								return new TdError(408, "Request Timeout", ex);
 							} else {
 								return ex;
@@ -94,9 +93,7 @@ abstract class BaseAtomixReactiveApiClient implements ReactiveApiClient, AutoClo
 				.onErrorMap(ex -> {
 					if (ex instanceof MessagingException.NoRemoteHandler) {
 						return new TdError(404, "Bot #IDU" + this.userId + " is not found on the cluster");
-					} else if (ex instanceof CompletionException && ex.getCause() instanceof TimeoutException) {
-						return new TdError(408, "Request Timeout", ex);
-					} else if (ex instanceof TimeoutException) {
+					} else if (ex instanceof TimeoutException || ex instanceof ConnectException) {
 						return new TdError(408, "Request Timeout", ex);
 					} else {
 						return ex;

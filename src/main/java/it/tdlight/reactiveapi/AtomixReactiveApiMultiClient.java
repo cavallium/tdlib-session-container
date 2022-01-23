@@ -7,6 +7,7 @@ import io.atomix.cluster.messaging.MessagingException;
 import it.tdlight.jni.TdApi;
 import it.tdlight.reactiveapi.Event.ClientBoundEvent;
 import it.tdlight.reactiveapi.Event.Request;
+import java.net.ConnectException;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.concurrent.CompletableFuture;
@@ -60,9 +61,7 @@ public class AtomixReactiveApiMultiClient implements ReactiveApiMultiClient, Aut
 		}).onErrorMap(ex -> {
 			if (ex instanceof MessagingException.NoRemoteHandler) {
 				return new TdError(404, "Bot #IDU" + userId + " (live id: " + liveId + ") is not found on the cluster");
-			} else if (ex instanceof CompletionException && ex.getCause() instanceof TimeoutException) {
-				return new TdError(408, "Request Timeout", ex);
-			} else if (ex instanceof TimeoutException) {
+			} else if (ex instanceof TimeoutException || ex instanceof ConnectException) {
 				return new TdError(408, "Request Timeout", ex);
 			} else {
 				return ex;
