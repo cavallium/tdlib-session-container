@@ -21,6 +21,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.CompletionException;
 import java.util.concurrent.TimeoutException;
 import org.apache.commons.lang3.SerializationException;
 import org.slf4j.Logger;
@@ -62,8 +63,8 @@ abstract class BaseAtomixReactiveApiClient implements ReactiveApiClient, AutoClo
 				.take(1, true)
 				.singleOrEmpty()
 				.switchIfEmpty(emptyIdErrorMono)
-				.flatMap(liveId -> Mono
-						.fromCompletionStage(() -> eventService.send("session-" + liveId + "-requests",
+				.flatMap(liveId -> AtomixUtils
+						.fromCf(() -> eventService.send("session-" + liveId + "-requests",
 								new Request<>(liveId, request, timeout),
 								LiveAtomixReactiveApiClient::serializeRequest,
 								LiveAtomixReactiveApiClient::deserializeResponse,
@@ -73,6 +74,8 @@ abstract class BaseAtomixReactiveApiClient implements ReactiveApiClient, AutoClo
 						.onErrorMap(ex -> {
 							if (ex instanceof MessagingException.NoRemoteHandler) {
 								return new TdError(404, "Bot #IDU" + this.userId + " (liveId: " + liveId + ") is not found on the cluster");
+							} else if (ex instanceof CompletionException && ex.getCause() instanceof TimeoutException) {
+								return new TdError(408, "Request Timeout", ex);
 							} else if (ex instanceof TimeoutException) {
 								return new TdError(408, "Request Timeout", ex);
 							} else {
@@ -80,12 +83,23 @@ abstract class BaseAtomixReactiveApiClient implements ReactiveApiClient, AutoClo
 							}
 						})
 				)
-				.handle((item, sink) -> {
+				.<T>handle((item, sink) -> {
 					if (item instanceof TdApi.Error error) {
 						sink.error(new TdError(error.code, error.message));
 					} else {
 						//noinspection unchecked
 						sink.next((T) item);
+					}
+				})
+				.onErrorMap(ex -> {
+					if (ex instanceof MessagingException.NoRemoteHandler) {
+						return new TdError(404, "Bot #IDU" + this.userId + " is not found on the cluster");
+					} else if (ex instanceof CompletionException && ex.getCause() instanceof TimeoutException) {
+						return new TdError(408, "Request Timeout", ex);
+					} else if (ex instanceof TimeoutException) {
+						return new TdError(408, "Request Timeout", ex);
+					} else {
+						return ex;
 					}
 				});
 	}

@@ -1,9 +1,9 @@
 package it.tdlight.reactiveapi;
 
+import static it.tdlight.reactiveapi.AtomixUtils.fromCf;
 import static java.util.Collections.unmodifiableSet;
 import static java.util.Objects.requireNonNull;
 import static java.util.concurrent.CompletableFuture.failedFuture;
-import static reactor.core.publisher.Mono.fromCompletionStage;
 
 import com.google.common.primitives.Longs;
 import io.atomix.cluster.messaging.MessagingException;
@@ -163,7 +163,7 @@ public class AtomixReactiveApi implements ReactiveApi {
 
 		var removeObsoleteDiskSessions = diskChangesMono
 				.flatMapIterable(diskChanges -> diskChanges.removedIds)
-				.concatMap(removedIds -> fromCompletionStage(() -> destroySession(removedIds, nodeId)))
+				.concatMap(removedIds -> fromCf(() -> destroySession(removedIds, nodeId)))
 				.then();
 
 		var addedDiskSessionsFlux = diskChangesMono
@@ -200,7 +200,7 @@ public class AtomixReactiveApi implements ReactiveApi {
 		// Listen for create-session signals
 		Mono<Subscription> createSessionSubscriptionMono;
 		if (nodeId != null) {
-			createSessionSubscriptionMono = fromCompletionStage(() -> atomix
+			createSessionSubscriptionMono = fromCf(() -> atomix
 					.getEventService()
 					.subscribe("create-session", CreateSessionRequest::deserializeBytes, req -> {
 						if (req instanceof LoadSessionFromDiskRequest) {
@@ -216,7 +216,7 @@ public class AtomixReactiveApi implements ReactiveApi {
 		// Listen for revive-session signals
 		Mono<Subscription> reviveSessionSubscriptionMono;
 		if (nodeId != null) {
-			reviveSessionSubscriptionMono = fromCompletionStage(() -> atomix
+			reviveSessionSubscriptionMono = fromCf(() -> atomix
 					.getEventService()
 					.subscribe("revive-session", (Long userId) -> this.getLocalDiskSession(userId).flatMap(sessionAndId -> {
 						var diskSession = sessionAndId.diskSession();
@@ -325,8 +325,8 @@ public class AtomixReactiveApi implements ReactiveApi {
 						}
 
 						// Register the session instance to the distributed nodes map
-						return Mono
-								.fromCompletionStage(() -> userIdToNodeId.put(userId, nodeId).thenApply(Optional::ofNullable))
+						return AtomixUtils
+								.fromCf(() -> userIdToNodeId.put(userId, nodeId).thenApply(Optional::ofNullable))
 								.flatMap(prevDistributed -> {
 									if (prevDistributed.isPresent() && prevDistributed.get().value() != null &&
 											!Objects.equals(this.nodeId, prevDistributed.get().value())) {
@@ -388,10 +388,10 @@ public class AtomixReactiveApi implements ReactiveApi {
 
 		// Lock sessions creation
 		return Mono
-				.usingWhen(Mono.fromCompletionStage(sessionModificationLock::lock),
+				.usingWhen(AtomixUtils.fromCf(sessionModificationLock::lock),
 						lockVersion -> unlockedSessionCreationMono,
-						lockVersion -> Mono
-								.fromCompletionStage(sessionModificationLock::unlock)
+						lockVersion -> AtomixUtils
+								.fromCf(sessionModificationLock::unlock)
 								.doOnTerminate(() -> LOG.trace("Released session modification lock for session request: {}", req))
 				)
 				.doOnNext(resp -> LOG.debug("Handled session request {}, the response is: {}", req, resp))
@@ -410,7 +410,7 @@ public class AtomixReactiveApi implements ReactiveApi {
 	}
 
 	private Mono<Long> nextFreeLiveId() {
-		return Mono.fromCompletionStage(nextSessionLiveId::nextId);
+		return fromCf(nextSessionLiveId::nextId);
 	}
 
 	public Atomix getAtomix() {
@@ -425,8 +425,8 @@ public class AtomixReactiveApi implements ReactiveApi {
 	public Mono<Map<Long, String>> getAllUsers() {
 		return Flux.defer(() -> {
 			var it = userIdToNodeId.entrySet().iterator();
-			var hasNextMono = fromCompletionStage(it::hasNext);
-			var strictNextMono = fromCompletionStage(it::next)
+			var hasNextMono = fromCf(it::hasNext);
+			var strictNextMono = fromCf(it::next)
 					.map(elem -> Map.entry(elem.getKey(), elem.getValue().value()));
 
 			var nextOrNothingMono = hasNextMono.flatMap(hasNext -> {
@@ -459,8 +459,8 @@ public class AtomixReactiveApi implements ReactiveApi {
 
 	@Override
 	public Mono<Long> resolveUserLiveId(long userId) {
-		return Mono
-				.fromCompletionStage(() -> atomix
+		return AtomixUtils
+				.fromCf(() -> atomix
 						.getEventService()
 						.send(SubjectNaming.getDynamicIdResolveSubject(userId),
 								userId,
@@ -494,7 +494,7 @@ public class AtomixReactiveApi implements ReactiveApi {
 
 	@Override
 	public Mono<Void> close() {
-		var atomixStopper = Mono.fromCompletionStage(this.atomix::stop).timeout(Duration.ofSeconds(8), Mono.empty());
+		var atomixStopper = fromCf(this.atomix::stop).timeout(Duration.ofSeconds(8), Mono.empty());
 		var kafkaStopper = Mono.fromRunnable(kafkaProducer::close).subscribeOn(Schedulers.boundedElastic());
 		return Mono.when(atomixStopper, kafkaStopper);
 	}

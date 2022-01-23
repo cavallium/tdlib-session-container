@@ -1,5 +1,7 @@
 package it.tdlight.reactiveapi;
 
+import static it.tdlight.reactiveapi.AtomixUtils.fromCf;
+
 import io.atomix.cluster.messaging.ClusterEventService;
 import io.atomix.cluster.messaging.MessagingException;
 import it.tdlight.jni.TdApi;
@@ -8,6 +10,8 @@ import it.tdlight.reactiveapi.Event.Request;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
+import java.util.concurrent.TimeoutException;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Schedulers;
@@ -36,7 +40,7 @@ public class AtomixReactiveApiMultiClient implements ReactiveApiMultiClient, Aut
 
 	@Override
 	public <T extends TdApi.Object> Mono<T> request(long userId, long liveId, TdApi.Function<T> request, Instant timeout) {
-		return Mono.fromCompletionStage(() -> {
+		return fromCf(() -> {
 			if (closed) {
 				return CompletableFuture.failedFuture(new TdError(500, "Session is closed"));
 			}
@@ -56,6 +60,10 @@ public class AtomixReactiveApiMultiClient implements ReactiveApiMultiClient, Aut
 		}).onErrorMap(ex -> {
 			if (ex instanceof MessagingException.NoRemoteHandler) {
 				return new TdError(404, "Bot #IDU" + userId + " (live id: " + liveId + ") is not found on the cluster");
+			} else if (ex instanceof CompletionException && ex.getCause() instanceof TimeoutException) {
+				return new TdError(408, "Request Timeout", ex);
+			} else if (ex instanceof TimeoutException) {
+				return new TdError(408, "Request Timeout", ex);
 			} else {
 				return ex;
 			}
