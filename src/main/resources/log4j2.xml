@@ -17,8 +17,6 @@
 		<Logger name="io.atomix" level="INFO" additivity="false"/>
 		<!-- log only INFO, WARN, ERROR and FATAL logging by classes in this package -->
 		<Logger name="io.netty" level="INFO" additivity="false"/>
-		<!-- log only INFO, WARN, ERROR and FATAL logging by classes in this package -->
-		<Logger name="io.net5" level="INFO" additivity="false"/>
 
     <Root level="INFO">
       <filters>
