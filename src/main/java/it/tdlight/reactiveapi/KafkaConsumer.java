@@ -33,7 +33,7 @@ public class KafkaConsumer {
 	public KafkaReceiver<Integer, ClientBoundEvent> createReceiver(@NotNull String groupId, @Nullable Long userId) {
 		Map<String, Object> props = new HashMap<>();
 		props.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, kafkaParameters.bootstrapServers());
-		props.put(ConsumerConfig.CLIENT_ID_CONFIG, kafkaParameters.clientId());
+		props.put(ConsumerConfig.CLIENT_ID_CONFIG, kafkaParameters.clientId() + (userId != null ? ("_" + userId) : ""));
 		props.put(ConsumerConfig.GROUP_ID_CONFIG, groupId);
 		props.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, IntegerDeserializer.class);
 		props.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, ClientBoundEventDeserializer.class);

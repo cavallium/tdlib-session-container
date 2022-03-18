@@ -2,6 +2,7 @@ package it.tdlight.reactiveapi;
 
 import it.tdlight.reactiveapi.Event.ClientBoundEvent;
 import java.time.Duration;
+import java.util.concurrent.CancellationException;
 import java.util.concurrent.atomic.AtomicReference;
 import org.jetbrains.annotations.NotNull;
 import org.slf4j.Logger;
@@ -94,8 +95,12 @@ public class DynamicAtomixReactiveApiClient extends BaseAtomixReactiveApiClient 
 	public void close() {
 		this.closed = true;
 		var clientBoundEventsSubscription = this.clientBoundEventsSubscription.get();
-		if (clientBoundEventsSubscription != null) {
-			clientBoundEventsSubscription.dispose();
+		if (clientBoundEventsSubscription != null && !clientBoundEventsSubscription.isDisposed()) {
+			try {
+				clientBoundEventsSubscription.dispose();
+			} catch (CancellationException ignored) {
+				LOG.debug("Reactive api client for user {} has been cancelled", userId);
+			}
 		}
 		super.close();
 	}

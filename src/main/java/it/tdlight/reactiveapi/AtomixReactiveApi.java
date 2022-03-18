@@ -26,6 +26,7 @@ import java.util.Map.Entry;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.ConcurrentHashMap;
@@ -469,7 +470,7 @@ public class AtomixReactiveApi implements ReactiveApi {
 								Duration.ofSeconds(1)
 						))
 				.onErrorResume(ex -> {
-					if (ex instanceof MessagingException.NoRemoteHandler) {
+					if (ex instanceof MessagingException.NoRemoteHandler || ex instanceof CancellationException) {
 						return Mono.empty();
 					} else {
 						return Mono.error(ex);
