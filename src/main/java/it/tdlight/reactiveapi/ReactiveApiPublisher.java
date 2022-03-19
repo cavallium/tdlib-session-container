@@ -9,9 +9,11 @@ import com.google.common.primitives.Longs;
 import io.atomix.cluster.messaging.ClusterEventService;
 import io.atomix.cluster.messaging.Subscription;
 import io.atomix.core.Atomix;
+import it.tdlight.common.Init;
 import it.tdlight.common.ReactiveTelegramClient;
 import it.tdlight.common.Response;
 import it.tdlight.common.Signal;
+import it.tdlight.common.utils.CantLoadLibrary;
 import it.tdlight.jni.TdApi;
 import it.tdlight.jni.TdApi.AuthorizationStateClosed;
 import it.tdlight.jni.TdApi.AuthorizationStateWaitOtherDeviceConfirmation;
@@ -95,8 +97,18 @@ public abstract class ReactiveApiPublisher {
 		this.liveId = liveId;
 		this.dynamicIdResolveSubject = SubjectNaming.getDynamicIdResolveSubject(userId);
 		this.rawTelegramClient = ClientManager.createReactive();
+		try {
+			Init.start();
+		} catch (CantLoadLibrary e) {
+			throw new RuntimeException("Can't load TDLight", e);
+		}
 		this.telegramClient = Flux.<Signal>create(sink -> this.registerTopics().thenAccept(subscription -> {
-			rawTelegramClient.createAndRegisterClient();
+			try {
+				rawTelegramClient.createAndRegisterClient();
+			} catch (Throwable ex) {
+				LOG.error("Failed to initialize client {}", userId, ex);
+				sink.error(ex);
+			}
 			rawTelegramClient.setListener(sink::next);
 			sink.onCancel(rawTelegramClient::cancel);
 			sink.onDispose(() -> {
