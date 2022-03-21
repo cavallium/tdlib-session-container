@@ -4,6 +4,7 @@ import it.tdlight.reactiveapi.Event.ClientBoundEvent;
 import java.time.Duration;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.logging.Level;
 import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.common.serialization.IntegerSerializer;
@@ -11,6 +12,7 @@ import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
+import reactor.core.publisher.SignalType;
 import reactor.kafka.sender.KafkaSender;
 import reactor.kafka.sender.SenderOptions;
 import reactor.kafka.sender.SenderRecord;
@@ -40,6 +42,13 @@ public class KafkaProducer {
 						userId.getTopic(),
 						event
 				), null))
+				.log("produce-messages-" + userId,
+						Level.FINEST,
+						SignalType.REQUEST,
+						SignalType.ON_NEXT,
+						SignalType.ON_ERROR,
+						SignalType.ON_COMPLETE
+				)
 				.transform(sender::send)
 				.doOnError(e -> LOG.error("Send failed", e))
 				.then();

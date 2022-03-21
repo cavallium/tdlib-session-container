@@ -41,7 +41,15 @@ public class DynamicAtomixReactiveApiClient extends BaseAtomixReactiveApiClient 
 				.consumeMessages(subGroupId, userId)
 				.takeWhile(n -> !closed)
 				.publish()
-				.autoConnect(3, clientBoundEventsSubscription::set);
+				.autoConnect(3, clientBoundEventsSubscription::set)
+				.onErrorResume(CancellationException.class, ex -> {
+					if ("Disconnected".equals(ex.getMessage())) {
+						LOG.debug("Disconnected client {}", userId, ex);
+						return Mono.empty();
+					} else {
+						return Mono.error(ex);
+					}
+				});
 
 		var firstLiveId = clientBoundEvents
 				.take(1, true)

@@ -1,5 +1,7 @@
 package it.tdlight.reactiveapi;
 
+import it.tdlight.common.Init;
+import it.tdlight.common.utils.CantLoadLibrary;
 import it.tdlight.reactiveapi.Event.ClientBoundEvent;
 import java.time.Duration;
 import java.util.HashMap;
@@ -31,6 +33,12 @@ public class KafkaConsumer {
 	}
 
 	public KafkaReceiver<Integer, ClientBoundEvent> createReceiver(@NotNull String groupId, @Nullable Long userId) {
+		try {
+			Init.start();
+		} catch (CantLoadLibrary e) {
+			LOG.error("Can't load TDLight library", e);
+			throw new RuntimeException(e);
+		}
 		Map<String, Object> props = new HashMap<>();
 		props.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, kafkaParameters.bootstrapServers());
 		props.put(ConsumerConfig.CLIENT_ID_CONFIG, kafkaParameters.clientId() + (userId != null ? ("_" + userId) : ""));
@@ -80,7 +88,13 @@ public class KafkaConsumer {
 	private Flux<TimestampedClientBoundEvent> consumeMessagesInternal(@NotNull String subGroupId, @Nullable Long userId) {
 		return createReceiver(kafkaParameters.groupId() + "-" + subGroupId, userId)
 				.receive()
-				.log("consume-messages", Level.FINEST, SignalType.REQUEST)
+				.log("consume-messages" + (userId != null ? "-" + userId : ""),
+						Level.FINEST,
+						SignalType.REQUEST,
+						SignalType.ON_NEXT,
+						SignalType.ON_ERROR,
+						SignalType.ON_COMPLETE
+				)
 				.doOnNext(result -> result.receiverOffset().acknowledge())
 				.map(record -> {
 					if (record.timestampType() == TimestampType.CREATE_TIME) {
