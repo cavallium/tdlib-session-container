@@ -39,7 +39,7 @@ public class Entrypoint {
 				|| !Files.isRegularFile(Paths.get(args[0]))
 				|| !Files.isRegularFile(Paths.get(args[1]))
 				|| !Files.isRegularFile(Paths.get(args[2]))) {
-			System.err.println("Syntax: executable <path/to/cluster.yaml> <path/to/instance.yaml> <path/to/disk-sessions.yaml");
+			System.err.println("Syntax: executable <path/to/cluster.yaml> <path/to/instance.yaml> <path/to/disk-sessions.yaml>");
 			System.exit(1);
 		}
 		return new ValidEntrypointArgs(args[0], args[1], args[2]);
