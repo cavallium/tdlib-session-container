@@ -20,7 +20,7 @@ module tdlib.reactive.api {
 	requires atomix.utils;
 	requires com.fasterxml.jackson.databind;
 	requires com.fasterxml.jackson.dataformat.yaml;
-	requires io.soabase.recordbuilder.core;
+	requires static io.soabase.recordbuilder.core;
 	requires kryo;
 	requires atomix.primitive;
 	requires java.compiler;
