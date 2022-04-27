@@ -1,50 +1,48 @@
-<project xmlns="http://maven.apache.org/POM/4.0.0"
-  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-  xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
-  <modelVersion>4.0.0</modelVersion>
-  <groupId>it.tdlight</groupId>
-  <artifactId>tdlib-reactive-api</artifactId>
-  <version>6.0.${revision}</version>
-  <name>TDLib Reactive API</name>
-  <properties>
-    <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-    <revision>0-SNAPSHOT</revision>
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+	<modelVersion>4.0.0</modelVersion>
+	<groupId>it.tdlight</groupId>
+	<artifactId>tdlib-reactive-api</artifactId>
+	<version>6.0.${revision}</version>
+	<name>TDLib Reactive API</name>
+	<properties>
+		<project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+		<revision>0-SNAPSHOT</revision>
 
-    <atomix.version>3.1.10</atomix.version>
+		<atomix.version>3.1.10</atomix.version>
 		<record.builder.version>33</record.builder.version>
-  </properties>
-  <repositories>
-    <repository>
-      <id>mchv-release</id>
-      <name>MCHV Release Apache Maven Packages</name>
-      <url>https://mvn.mchv.eu/repository/mchv</url>
-    </repository>
-    <repository>
-      <id>mchv-snapshot</id>
-      <name>MCHV Snapshot Apache Maven Packages</name>
-      <url>https://mvn.mchv.eu/repository/mchv-snapshot</url>
-    </repository>
-  </repositories>
-  <distributionManagement>
-    <repository>
-      <id>mchv-release-distribution</id>
-      <name>MCHV Release Apache Maven Packages Distribution</name>
-      <url>https://mvn.mchv.eu/repository/mchv</url>
-    </repository>
-    <snapshotRepository>
-      <id>mchv-snapshot-distribution</id>
-      <name>MCHV Snapshot Apache Maven Packages Distribution</name>
-      <url>https://mvn.mchv.eu/repository/mchv-snapshot</url>
-    </snapshotRepository>
-  </distributionManagement>
-  <scm>
-    <connection>scm:git:https://git.ignuranza.net/tdlight-team/tdlib-session-container.git</connection>
-    <developerConnection>scm:git:https://git.ignuranza.net/tdlight-team/tdlib-session-container.git
+	</properties>
+	<repositories>
+		<repository>
+			<id>mchv-release</id>
+			<name>MCHV Release Apache Maven Packages</name>
+			<url>https://mvn.mchv.eu/repository/mchv</url>
+		</repository>
+		<repository>
+			<id>mchv-snapshot</id>
+			<name>MCHV Snapshot Apache Maven Packages</name>
+			<url>https://mvn.mchv.eu/repository/mchv-snapshot</url>
+		</repository>
+	</repositories>
+	<distributionManagement>
+		<repository>
+			<id>mchv-release-distribution</id>
+			<name>MCHV Release Apache Maven Packages Distribution</name>
+			<url>https://mvn.mchv.eu/repository/mchv</url>
+		</repository>
+		<snapshotRepository>
+			<id>mchv-snapshot-distribution</id>
+			<name>MCHV Snapshot Apache Maven Packages Distribution</name>
+			<url>https://mvn.mchv.eu/repository/mchv-snapshot</url>
+		</snapshotRepository>
+	</distributionManagement>
+	<scm>
+		<connection>scm:git:https://git.ignuranza.net/tdlight-team/tdlib-session-container.git</connection>
+		<developerConnection>scm:git:https://git.ignuranza.net/tdlight-team/tdlib-session-container.git
     </developerConnection>
-    <tag>HEAD</tag>
-  </scm>
-  <dependencyManagement>
-    <dependencies>
+		<tag>HEAD</tag>
+	</scm>
+	<dependencyManagement>
+		<dependencies>
 			<dependency>
 				<groupId>it.tdlight</groupId>
 				<artifactId>tdlight-java-bom</artifactId>
@@ -59,42 +57,42 @@
 				<type>pom</type>
 				<scope>import</scope>
 			</dependency>
-    </dependencies>
-  </dependencyManagement>
-  <dependencies>
-    <dependency>
-      <groupId>org.junit.jupiter</groupId>
-      <artifactId>junit-jupiter-api</artifactId>
-      <version>5.8.2</version>
-      <scope>test</scope>
-      <exclusions>
-        <exclusion>
-          <groupId>org.hamcrest</groupId>
-          <artifactId>hamcrest-core</artifactId>
-        </exclusion>
-      </exclusions>
-    </dependency>
-    <dependency>
-      <groupId>org.junit.jupiter</groupId>
-      <artifactId>junit-jupiter-engine</artifactId>
-      <version>5.8.2</version>
-      <scope>test</scope>
-    </dependency>
-    <dependency>
-      <groupId>org.warp</groupId>
-      <artifactId>common-utils</artifactId>
-      <version>1.1.8</version>
-    </dependency>
-    <dependency>
-      <groupId>io.netty</groupId>
-      <artifactId>netty-tcnative-boringssl-static</artifactId>
-      <version>2.0.48.Final</version>
-    </dependency>
+		</dependencies>
+	</dependencyManagement>
+	<dependencies>
+		<dependency>
+			<groupId>org.junit.jupiter</groupId>
+			<artifactId>junit-jupiter-api</artifactId>
+			<version>5.8.2</version>
+			<scope>test</scope>
+			<exclusions>
+				<exclusion>
+					<groupId>org.hamcrest</groupId>
+					<artifactId>hamcrest-core</artifactId>
+				</exclusion>
+			</exclusions>
+		</dependency>
+		<dependency>
+			<groupId>org.junit.jupiter</groupId>
+			<artifactId>junit-jupiter-engine</artifactId>
+			<version>5.8.2</version>
+			<scope>test</scope>
+		</dependency>
+		<dependency>
+			<groupId>org.warp</groupId>
+			<artifactId>common-utils</artifactId>
+			<version>1.1.8</version>
+		</dependency>
+		<dependency>
+			<groupId>io.netty</groupId>
+			<artifactId>netty-tcnative-boringssl-static</artifactId>
+			<version>2.0.48.Final</version>
+		</dependency>
 
-    <dependency>
-      <groupId>it.tdlight</groupId>
-      <artifactId>tdlight-java</artifactId>
-    </dependency>
+		<dependency>
+			<groupId>it.tdlight</groupId>
+			<artifactId>tdlight-java</artifactId>
+		</dependency>
 		<dependency>
 			<groupId>it.tdlight</groupId>
 			<artifactId>tdlight-natives-linux-amd64</artifactId>
@@ -103,7 +101,6 @@
 		<dependency>
 			<groupId>it.unimi.dsi</groupId>
 			<artifactId>fastutil</artifactId>
-			<version>8.5.8</version>
 		</dependency>
 		<dependency>
 			<groupId>io.atomix</groupId>
@@ -174,39 +171,39 @@
 			<version>${record.builder.version}</version>
 			<scope>provided</scope>
 		</dependency>
-  </dependencies>
-  <build>
-    <resources>
-      <resource>
-        <directory>../src/main/libs</directory>
-        <excludes>
-          <exclude>**/*.jar</exclude>
-        </excludes>
-      </resource>
-      <resource>
-        <directory>src/main/resources</directory>
-        <excludes>
-          <exclude>**/*.jar</exclude>
-        </excludes>
-      </resource>
-    </resources>
-    <extensions>
-      <extension>
-        <groupId>kr.motd.maven</groupId>
-        <artifactId>os-maven-plugin</artifactId>
-        <version>1.5.0.Final</version>
-      </extension>
-    </extensions>
-    <plugins>
-      <plugin>
-        <groupId>org.apache.maven.plugins</groupId>
-        <artifactId>maven-install-plugin</artifactId>
-        <version>3.0.0-M1</version>
-      </plugin>
-      <plugin>
-        <groupId>org.apache.maven.plugins</groupId>
-        <artifactId>maven-compiler-plugin</artifactId>
-        <version>3.8.1</version>
+	</dependencies>
+	<build>
+		<resources>
+			<resource>
+				<directory>../src/main/libs</directory>
+				<excludes>
+					<exclude>**/*.jar</exclude>
+				</excludes>
+			</resource>
+			<resource>
+				<directory>src/main/resources</directory>
+				<excludes>
+					<exclude>**/*.jar</exclude>
+				</excludes>
+			</resource>
+		</resources>
+		<extensions>
+			<extension>
+				<groupId>kr.motd.maven</groupId>
+				<artifactId>os-maven-plugin</artifactId>
+				<version>1.5.0.Final</version>
+			</extension>
+		</extensions>
+		<plugins>
+			<plugin>
+				<groupId>org.apache.maven.plugins</groupId>
+				<artifactId>maven-install-plugin</artifactId>
+				<version>3.0.0-M1</version>
+			</plugin>
+			<plugin>
+				<groupId>org.apache.maven.plugins</groupId>
+				<artifactId>maven-compiler-plugin</artifactId>
+				<version>3.8.1</version>
 				<configuration>
 					<source>17</source>
 					<target>17</target>
@@ -221,62 +218,97 @@
 						<annotationProcessor>io.soabase.recordbuilder.processor.RecordBuilderProcessor</annotationProcessor>
 					</annotationProcessors>
 				</configuration>
-      </plugin>
-      <plugin>
-        <groupId>org.apache.maven.plugins</groupId>
-        <artifactId>maven-deploy-plugin</artifactId>
-        <version>2.8.2</version>
-      </plugin>
-      <plugin>
-        <groupId>org.codehaus.mojo</groupId>
-        <artifactId>flatten-maven-plugin</artifactId>
-        <version>1.1.0</version>
-        <configuration>
-          <updatePomFile>true</updatePomFile>
-          <flattenMode>resolveCiFriendliesOnly</flattenMode>
-        </configuration>
-        <executions>
-          <execution>
-            <id>flatten</id>
-            <phase>process-resources</phase>
-            <goals>
-              <goal>flatten</goal>
-            </goals>
-          </execution>
-          <execution>
-            <id>flatten.clean</id>
-            <phase>clean</phase>
-            <goals>
-              <goal>clean</goal>
-            </goals>
-          </execution>
-        </executions>
-      </plugin>
-      <plugin>
-        <groupId>org.codehaus.mojo</groupId>
-        <artifactId>templating-maven-plugin</artifactId>
-        <version>1.0.0</version>
-        <executions>
-          <execution>
-            <id>filtering-java-templates</id>
-            <goals>
-              <goal>filter-sources</goal>
-            </goals>
-          </execution>
-        </executions>
-      </plugin>
-      <plugin>
-        <groupId>org.apache.maven.plugins</groupId>
-        <artifactId>maven-surefire-plugin</artifactId>
-        <version>3.0.0-M5</version>
-        <dependencies>
-          <dependency>
-            <groupId>org.junit.jupiter</groupId>
-            <artifactId>junit-jupiter-engine</artifactId>
-            <version>5.8.2</version>
-          </dependency>
-        </dependencies>
-      </plugin>
-    </plugins>
-  </build>
+			</plugin>
+			<plugin>
+				<groupId>org.apache.maven.plugins</groupId>
+				<artifactId>maven-deploy-plugin</artifactId>
+				<version>2.8.2</version>
+			</plugin>
+			<plugin>
+				<groupId>org.codehaus.mojo</groupId>
+				<artifactId>flatten-maven-plugin</artifactId>
+				<version>1.1.0</version>
+				<configuration>
+					<updatePomFile>true</updatePomFile>
+					<flattenMode>resolveCiFriendliesOnly</flattenMode>
+				</configuration>
+				<executions>
+					<execution>
+						<id>flatten</id>
+						<phase>process-resources</phase>
+						<goals>
+							<goal>flatten</goal>
+						</goals>
+					</execution>
+					<execution>
+						<id>flatten.clean</id>
+						<phase>clean</phase>
+						<goals>
+							<goal>clean</goal>
+						</goals>
+					</execution>
+				</executions>
+			</plugin>
+			<plugin>
+				<groupId>org.codehaus.mojo</groupId>
+				<artifactId>templating-maven-plugin</artifactId>
+				<version>1.0.0</version>
+				<executions>
+					<execution>
+						<id>filtering-java-templates</id>
+						<goals>
+							<goal>filter-sources</goal>
+						</goals>
+					</execution>
+				</executions>
+			</plugin>
+			<plugin>
+				<groupId>org.apache.maven.plugins</groupId>
+				<artifactId>maven-surefire-plugin</artifactId>
+				<version>3.0.0-M5</version>
+				<dependencies>
+					<dependency>
+						<groupId>org.junit.jupiter</groupId>
+						<artifactId>junit-jupiter-engine</artifactId>
+						<version>5.8.2</version>
+					</dependency>
+				</dependencies>
+			</plugin>
+		</plugins>
+		<pluginManagement>
+			<plugins>
+				<!--This plugin's configuration is used to store Eclipse m2e settings only. It has no influence on the Maven build itself.-->
+				<plugin>
+					<groupId>org.eclipse.m2e</groupId>
+					<artifactId>lifecycle-mapping</artifactId>
+					<version>1.0.0</version>
+					<configuration>
+						<lifecycleMappingMetadata>
+							<pluginExecutions>
+								<pluginExecution>
+									<pluginExecutionFilter>
+										<groupId>
+											org.codehaus.mojo
+										</groupId>
+										<artifactId>
+											flatten-maven-plugin
+										</artifactId>
+										<versionRange>
+											[1.1.0,)
+										</versionRange>
+										<goals>
+											<goal>flatten</goal>
+										</goals>
+									</pluginExecutionFilter>
+									<action>
+										<ignore></ignore>
+									</action>
+								</pluginExecution>
+							</pluginExecutions>
+						</lifecycleMappingMetadata>
+					</configuration>
+				</plugin>
+			</plugins>
+		</pluginManagement>
+	</build>
 </project>
