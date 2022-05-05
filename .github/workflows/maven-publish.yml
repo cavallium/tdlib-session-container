@@ -27,11 +27,11 @@ jobs:
           export REVISION=${{ github.run_number }}
 
           echo "REVISION=$REVISION" >> $GITHUB_ENV
-      - name: Set up JDK 15
+      - name: Set up JDK 17
         if: github.ref == 'refs/heads/master'
         uses: actions/setup-java@v1
         with:
-          java-version: 15
+          java-version: 17
           server-id: mchv-release-distribution
           server-username: MAVEN_USERNAME
           server-password: MAVEN_PASSWORD

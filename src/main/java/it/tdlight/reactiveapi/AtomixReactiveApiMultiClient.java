@@ -6,7 +6,7 @@ import io.atomix.cluster.messaging.ClusterEventService;
 import io.atomix.cluster.messaging.MessagingException;
 import it.tdlight.jni.TdApi;
 import it.tdlight.reactiveapi.Event.ClientBoundEvent;
-import it.tdlight.reactiveapi.Event.Request;
+import it.tdlight.reactiveapi.Event.OnRequest.Request;
 import java.net.ConnectException;
 import java.time.Duration;
 import java.time.Instant;

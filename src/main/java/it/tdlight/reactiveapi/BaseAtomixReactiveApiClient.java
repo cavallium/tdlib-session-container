@@ -1,30 +1,39 @@
 package it.tdlight.reactiveapi;
 
+import static it.tdlight.reactiveapi.Event.SERIAL_VERSION;
+
 import io.atomix.cluster.messaging.ClusterEventService;
 import io.atomix.cluster.messaging.MessagingException;
 import io.atomix.core.Atomix;
+import it.tdlight.common.utils.LibraryVersion;
 import it.tdlight.jni.TdApi;
 import it.tdlight.reactiveapi.Event.ClientBoundEvent;
+import it.tdlight.reactiveapi.Event.Ignored;
 import it.tdlight.reactiveapi.Event.OnBotLoginCodeRequested;
 import it.tdlight.reactiveapi.Event.OnOtherDeviceLoginRequested;
 import it.tdlight.reactiveapi.Event.OnPasswordRequested;
+import it.tdlight.reactiveapi.Event.OnRequest.Request;
 import it.tdlight.reactiveapi.Event.OnUpdateData;
 import it.tdlight.reactiveapi.Event.OnUpdateError;
 import it.tdlight.reactiveapi.Event.OnUserLoginCodeRequested;
-import it.tdlight.reactiveapi.Event.Request;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.DataInputStream;
 import java.io.DataOutputStream;
 import java.io.IOException;
 import java.net.ConnectException;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.TimeoutException;
+import org.apache.commons.lang3.ArrayUtils;
 import org.apache.commons.lang3.SerializationException;
+import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import reactor.core.Disposable;
@@ -119,7 +128,12 @@ abstract class BaseAtomixReactiveApiClient implements ReactiveApiClient, AutoClo
 			if (bytes == null || bytes.length == 0) {
 				return null;
 			}
-			return TdApi.Deserializer.deserialize(new DataInputStream(new ByteArrayInputStream(bytes)));
+			var dis = new DataInputStream(new ByteArrayInputStream(bytes));
+			var serialVersion = dis.readInt();
+			if (serialVersion != SERIAL_VERSION) {
+				return new TdApi.Error(400, "Conflicting protocol version");
+			}
+			return TdApi.Deserializer.deserialize(dis);
 		} catch (IOException ex) {
 			throw new SerializationException(ex);
 		}
@@ -129,6 +143,7 @@ abstract class BaseAtomixReactiveApiClient implements ReactiveApiClient, AutoClo
 		try (var byteArrayOutputStream = new ByteArrayOutputStream()) {
 			try (var dataOutputStream = new DataOutputStream(byteArrayOutputStream)) {
 				dataOutputStream.writeLong(request.liveId());
+				dataOutputStream.writeInt(SERIAL_VERSION);
 				dataOutputStream.writeLong(request.timeout().toEpochMilli());
 				request.request().serialize(dataOutputStream);
 				dataOutputStream.flush();
@@ -164,9 +179,13 @@ abstract class BaseAtomixReactiveApiClient implements ReactiveApiClient, AutoClo
 		}
 	}
 
-	static ClientBoundEvent deserializeEvent(DataInputStream is) throws IOException {
+	static @NotNull ClientBoundEvent deserializeEvent(DataInputStream is) throws IOException {
 		var liveId = is.readLong();
 		var userId = is.readLong();
+		var dataVersion = is.readInt();
+		if (dataVersion != SERIAL_VERSION) {
+			return new Ignored(liveId, userId);
+		}
 		return switch (is.readByte()) {
 			case 0x01 -> new OnUpdateData(liveId, userId, (TdApi.Update) TdApi.Deserializer.deserialize(is));
 			case 0x02 -> new OnUpdateError(liveId, userId, (TdApi.Error) TdApi.Deserializer.deserialize(is));

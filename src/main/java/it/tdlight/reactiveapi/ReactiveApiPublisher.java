@@ -2,6 +2,7 @@ package it.tdlight.reactiveapi;
 
 import static it.tdlight.reactiveapi.AuthPhase.LOGGED_IN;
 import static it.tdlight.reactiveapi.AuthPhase.LOGGED_OUT;
+import static it.tdlight.reactiveapi.Event.SERIAL_VERSION;
 import static java.util.Objects.requireNonNull;
 import static java.util.concurrent.CompletableFuture.completedFuture;
 
@@ -30,10 +31,12 @@ import it.tdlight.reactiveapi.Event.ClientBoundEvent;
 import it.tdlight.reactiveapi.Event.OnBotLoginCodeRequested;
 import it.tdlight.reactiveapi.Event.OnOtherDeviceLoginRequested;
 import it.tdlight.reactiveapi.Event.OnPasswordRequested;
+import it.tdlight.reactiveapi.Event.OnRequest;
+import it.tdlight.reactiveapi.Event.OnRequest.InvalidRequest;
+import it.tdlight.reactiveapi.Event.OnRequest.Request;
 import it.tdlight.reactiveapi.Event.OnUpdateData;
 import it.tdlight.reactiveapi.Event.OnUpdateError;
 import it.tdlight.reactiveapi.Event.OnUserLoginCodeRequested;
-import it.tdlight.reactiveapi.Event.Request;
 import it.tdlight.reactiveapi.ResultingEvent.ClientBoundResultingEvent;
 import it.tdlight.reactiveapi.ResultingEvent.ClusterBoundResultingEvent;
 import it.tdlight.reactiveapi.ResultingEvent.ResultingEventPublisherClosed;
@@ -439,6 +442,7 @@ public abstract class ReactiveApiPublisher {
 			throws IOException {
 		dataOutputStream.writeLong(clientBoundEvent.liveId());
 		dataOutputStream.writeLong(clientBoundEvent.userId());
+		dataOutputStream.writeInt(SERIAL_VERSION);
 		if (clientBoundEvent instanceof OnUpdateData onUpdateData) {
 			dataOutputStream.writeByte(0x1);
 			onUpdateData.update().serialize(dataOutputStream);
@@ -485,6 +489,7 @@ public abstract class ReactiveApiPublisher {
 		var object = response.getObject();
 		try (var byteArrayOutputStream = new ByteArrayOutputStream()) {
 			try (var dataOutputStream = new DataOutputStream(byteArrayOutputStream)) {
+				dataOutputStream.writeInt(SERIAL_VERSION);
 				//dataOutputStream.writeLong(id);
 				object.serialize(dataOutputStream);
 				return byteArrayOutputStream.toByteArray();
@@ -494,7 +499,11 @@ public abstract class ReactiveApiPublisher {
 		}
 	}
 
-	private CompletableFuture<Response> handleRequest(Request<Object> requestObj) {
+	private CompletableFuture<Response> handleRequest(OnRequest<Object> onRequestObj) {
+		if (onRequestObj instanceof OnRequest.InvalidRequest invalidRequest) {
+			return completedFuture(new Response(invalidRequest.liveId(), new TdApi.Error(400, "Conflicting protocol version")));
+		}
+		var requestObj = (Request<Object>) onRequestObj;
 		if (liveId != requestObj.liveId()) {
 			LOG.error("Received a request for another session!");
 			return completedFuture(new Response(liveId,
@@ -522,8 +531,8 @@ public abstract class ReactiveApiPublisher {
 		}
 	}
 
-	private static <T extends TdApi.Object> Request<T> deserializeRequest(byte[] bytes) {
-		return Request.deserialize(new DataInputStream(new ByteArrayInputStream(bytes)));
+	private static <T extends TdApi.Object> OnRequest<T> deserializeRequest(byte[] bytes) {
+		return OnRequest.deserialize(new DataInputStream(new ByteArrayInputStream(bytes)));
 	}
 
 	@Override

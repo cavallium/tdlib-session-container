@@ -27,4 +27,6 @@ module tdlib.reactive.api {
 	requires it.unimi.dsi.fastutil;
 	requires net.minecrell.terminalconsole;
 	requires org.jline.reader;
+	requires jdk.unsupported;
+	requires jakarta.xml.bind;
 }
