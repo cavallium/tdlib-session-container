@@ -236,25 +236,13 @@
 			</plugin>
 			<plugin>
 				<groupId>org.codehaus.mojo</groupId>
-				<artifactId>flatten-maven-plugin</artifactId>
-				<version>1.1.0</version>
-				<configuration>
-					<updatePomFile>true</updatePomFile>
-					<flattenMode>oss</flattenMode>
-				</configuration>
+				<artifactId>templating-maven-plugin</artifactId>
+				<version>1.0.0</version>
 				<executions>
 					<execution>
-						<id>flatten</id>
-						<phase>process-resources</phase>
+						<id>filtering-java-templates</id>
 						<goals>
-							<goal>flatten</goal>
-						</goals>
-					</execution>
-					<execution>
-						<id>flatten.clean</id>
-						<phase>clean</phase>
-						<goals>
-							<goal>clean</goal>
+							<goal>filter-sources</goal>
 						</goals>
 					</execution>
 				</executions>
