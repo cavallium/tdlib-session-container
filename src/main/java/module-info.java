@@ -4,11 +4,7 @@ module tdlib.reactive.api {
 	requires com.fasterxml.jackson.annotation;
 	requires org.jetbrains.annotations;
 	requires org.slf4j;
-	requires atomix.cluster;
 	requires tdlight.java;
-	requires reactor.core;
-	requires atomix;
-	requires org.apache.commons.lang3;
 	requires org.reactivestreams;
 	requires tdlight.api;
 	requires com.google.common;
@@ -16,17 +12,14 @@ module tdlib.reactive.api {
 	requires kafka.clients;
 	requires org.apache.logging.log4j;
 	requires reactor.kafka;
-	requires atomix.raft;
-	requires atomix.utils;
 	requires com.fasterxml.jackson.databind;
 	requires com.fasterxml.jackson.dataformat.yaml;
 	requires static io.soabase.recordbuilder.core;
-	requires kryo;
-	requires atomix.primitive;
 	requires java.compiler;
 	requires it.unimi.dsi.fastutil;
 	requires net.minecrell.terminalconsole;
 	requires org.jline.reader;
 	requires jdk.unsupported;
 	requires jakarta.xml.bind;
+	requires reactor.core;
 }

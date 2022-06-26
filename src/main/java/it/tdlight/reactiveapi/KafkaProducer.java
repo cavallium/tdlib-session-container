@@ -1,6 +1,5 @@
 package it.tdlight.reactiveapi;
 
-import it.tdlight.reactiveapi.Event.ClientBoundEvent;
 import java.time.Duration;
 import java.util.HashMap;
 import java.util.Map;
@@ -17,12 +16,11 @@ import reactor.kafka.sender.KafkaSender;
 import reactor.kafka.sender.SenderOptions;
 import reactor.kafka.sender.SenderRecord;
 
-public class KafkaProducer {
+public abstract class KafkaProducer<K> {
 
 	private static final Logger LOG = LogManager.getLogger(KafkaProducer.class);
 
-	private final KafkaSender<Integer, ClientBoundEvent> sender;
-
+	private final KafkaSender<Integer, K> sender;
 
 	public KafkaProducer(KafkaParameters kafkaParameters) {
 		Map<String, Object> props = new HashMap<>();
@@ -30,19 +28,22 @@ public class KafkaProducer {
 		props.put(ProducerConfig.CLIENT_ID_CONFIG, kafkaParameters.clientId());
 		props.put(ProducerConfig.ACKS_CONFIG, "all");
 		props.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, IntegerSerializer.class);
-		props.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, ClientBoundEventSerializer.class);
-		SenderOptions<Integer, ClientBoundEvent> senderOptions = SenderOptions.create(props);
+		props.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, getChannelName().getSerializerClass());
+		SenderOptions<Integer, K> senderOptions = SenderOptions.create(props);
 
 		sender = KafkaSender.create(senderOptions.maxInFlight(1024));
 	}
 
-	public Mono<Void> sendMessages(UserTopic userId, Flux<ClientBoundEvent> eventsFlux) {
+	public abstract KafkaChannelName getChannelName();
+
+	public Mono<Void> sendMessages(long userId, Flux<K> eventsFlux) {
+		var userTopic = new UserTopic(getChannelName(), userId);
 		return eventsFlux
-				.<SenderRecord<Integer, ClientBoundEvent, Integer>>map(event -> SenderRecord.create(new ProducerRecord<>(
-						userId.getTopic(),
+				.<SenderRecord<Integer, K, Integer>>map(event -> SenderRecord.create(new ProducerRecord<>(
+						userTopic.getTopic(),
 						event
 				), null))
-				.log("produce-messages-" + userId,
+				.log("produce-messages-" + userTopic,
 						Level.FINEST,
 						SignalType.REQUEST,
 						SignalType.ON_NEXT,

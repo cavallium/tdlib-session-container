@@ -14,11 +14,9 @@
 		<AsyncLogger name="reactor.kafka" level="WARN" additivity="false"/>
 		<AsyncLogger name="org.apache.kafka" level="WARN" additivity="false"/>
 		<!-- log only INFO, WARN, ERROR and FATAL logging by classes in this package -->
-		<Logger name="io.atomix" level="INFO" additivity="false"/>
-		<!-- log only INFO, WARN, ERROR and FATAL logging by classes in this package -->
 		<Logger name="io.netty" level="INFO" additivity="false"/>
 
-    <Root level="INFO">
+    <Root level="DEBUG">
       <filters>
         <MarkerFilter marker="NETWORK_PACKETS" onMatch="DENY" onMismatch="NEUTRAL"/>
       </filters>

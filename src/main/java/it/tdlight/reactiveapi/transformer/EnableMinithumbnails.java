@@ -29,7 +29,7 @@ public class EnableMinithumbnails implements ResultingEventTransformer {
 				resultingEvent.add(event);
 				// Enable minithumbnails
 				resultingEvent.add(new TDLibBoundResultingEvent<>(new TdApi.SetOption("disable_minithumbnails",
-						new OptionValueBoolean(false))));
+						new OptionValueBoolean(false)), true));
 				return resultingEvent;
 			} else {
 				// Return just the intercepted event as-is

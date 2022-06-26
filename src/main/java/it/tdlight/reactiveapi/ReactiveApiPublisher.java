@@ -7,9 +7,6 @@ import static java.util.Objects.requireNonNull;
 import static java.util.concurrent.CompletableFuture.completedFuture;
 
 import com.google.common.primitives.Longs;
-import io.atomix.cluster.messaging.ClusterEventService;
-import io.atomix.cluster.messaging.Subscription;
-import io.atomix.core.Atomix;
 import it.tdlight.common.Init;
 import it.tdlight.common.ReactiveTelegramClient;
 import it.tdlight.common.Response;
@@ -32,8 +29,8 @@ import it.tdlight.reactiveapi.Event.OnBotLoginCodeRequested;
 import it.tdlight.reactiveapi.Event.OnOtherDeviceLoginRequested;
 import it.tdlight.reactiveapi.Event.OnPasswordRequested;
 import it.tdlight.reactiveapi.Event.OnRequest;
-import it.tdlight.reactiveapi.Event.OnRequest.InvalidRequest;
 import it.tdlight.reactiveapi.Event.OnRequest.Request;
+import it.tdlight.reactiveapi.Event.OnResponse;
 import it.tdlight.reactiveapi.Event.OnUpdateData;
 import it.tdlight.reactiveapi.Event.OnUpdateError;
 import it.tdlight.reactiveapi.Event.OnUserLoginCodeRequested;
@@ -57,7 +54,7 @@ import java.util.Set;
 import java.util.StringJoiner;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicReference;
-import org.apache.commons.lang3.SerializationException;
+import org.apache.kafka.common.errors.SerializationException;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.slf4j.Logger;
@@ -65,47 +62,47 @@ import org.slf4j.LoggerFactory;
 import reactor.core.Disposable;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
+import reactor.core.publisher.Sinks;
+import reactor.core.publisher.Sinks.EmitFailureHandler;
+import reactor.core.publisher.Sinks.Many;
 import reactor.core.scheduler.Schedulers;
+import reactor.util.concurrent.Queues;
 
 public abstract class ReactiveApiPublisher {
 
 	private static final Logger LOG = LoggerFactory.getLogger(ReactiveApiPublisher.class);
 	private static final Duration SPECIAL_RAW_TIMEOUT_DURATION = Duration.ofMinutes(5);
 
-	private final KafkaProducer kafkaProducer;
-	private final ClusterEventService eventService;
+	private static final Duration TEN_MS = Duration.ofMillis(10);
+
+	private final KafkaTdlibServer kafkaTdlibServer;
 	private final Set<ResultingEventTransformer> resultingEventTransformerSet;
 	private final ReactiveTelegramClient rawTelegramClient;
 	private final Flux<Signal> telegramClient;
 
 	private final AtomicReference<State> state = new AtomicReference<>(new State(LOGGED_OUT));
 	protected final long userId;
-	protected final UserTopic userTopic;
-	protected final long liveId;
-	private final String dynamicIdResolveSubject;
+
+	private final Many<OnResponse<TdApi.Object>> responses
+			= Sinks.many().unicast().onBackpressureBuffer(Queues.<OnResponse<TdApi.Object>>small().get());
 
 	private final AtomicReference<Disposable> disposable = new AtomicReference<>();
 	private final AtomicReference<Path> path = new AtomicReference<>();
 
-	private ReactiveApiPublisher(Atomix atomix,
-			KafkaProducer kafkaProducer,
+	private ReactiveApiPublisher(KafkaTdlibServer kafkaTdlibServer,
 			Set<ResultingEventTransformer> resultingEventTransformerSet,
-			long liveId,
 			long userId) {
-		this.kafkaProducer = kafkaProducer;
-		this.eventService = atomix.getEventService();
+		this.kafkaTdlibServer = kafkaTdlibServer;
 		this.resultingEventTransformerSet = resultingEventTransformerSet;
 		this.userId = userId;
-		this.userTopic = new UserTopic(userId);
-		this.liveId = liveId;
-		this.dynamicIdResolveSubject = SubjectNaming.getDynamicIdResolveSubject(userId);
 		this.rawTelegramClient = ClientManager.createReactive();
 		try {
 			Init.start();
 		} catch (CantLoadLibrary e) {
 			throw new RuntimeException("Can't load TDLight", e);
 		}
-		this.telegramClient = Flux.<Signal>create(sink -> this.registerTopics().thenAccept(subscription -> {
+		this.telegramClient = Flux.<Signal>create(sink -> {
+			var subscription = this.registerTopics();
 			try {
 				rawTelegramClient.createAndRegisterClient();
 			} catch (Throwable ex) {
@@ -115,31 +112,25 @@ public abstract class ReactiveApiPublisher {
 			rawTelegramClient.setListener(sink::next);
 			sink.onCancel(rawTelegramClient::cancel);
 			sink.onDispose(() -> {
-				subscription.close();
+				subscription.dispose();
 				rawTelegramClient.dispose();
 			});
-		}));
+		});
 	}
 
-	public static ReactiveApiPublisher fromToken(Atomix atomix,
-			KafkaProducer kafkaProducer,
+	public static ReactiveApiPublisher fromToken(KafkaTdlibServer kafkaTdlibServer,
 			Set<ResultingEventTransformer> resultingEventTransformerSet,
-			Long liveId,
 			long userId,
 			String token) {
-		return new ReactiveApiPublisherToken(atomix, kafkaProducer, resultingEventTransformerSet, liveId, userId, token);
+		return new ReactiveApiPublisherToken(kafkaTdlibServer, resultingEventTransformerSet, userId, token);
 	}
 
-	public static ReactiveApiPublisher fromPhoneNumber(Atomix atomix,
-			KafkaProducer kafkaProducer,
+	public static ReactiveApiPublisher fromPhoneNumber(KafkaTdlibServer kafkaTdlibServer,
 			Set<ResultingEventTransformer> resultingEventTransformerSet,
-			Long liveId,
 			long userId,
 			long phoneNumber) {
-		return new ReactiveApiPublisherPhoneNumber(atomix,
-				kafkaProducer,
+		return new ReactiveApiPublisherPhoneNumber(kafkaTdlibServer,
 				resultingEventTransformerSet,
-				liveId,
 				userId,
 				phoneNumber
 		);
@@ -168,33 +159,38 @@ public abstract class ReactiveApiPublisher {
 		publishedResultingEvents
 				// Obtain only TDLib-bound events
 				.filter(s -> s instanceof TDLibBoundResultingEvent<?>)
-				.map(s -> ((TDLibBoundResultingEvent<?>) s).action())
+				.map(s -> ((TDLibBoundResultingEvent<?>) s))
 
 				// Buffer requests to avoid halting the event loop
 				.onBackpressureBuffer()
 
 				// Send requests to tdlib
-				.flatMap(function -> Mono
-						.from(rawTelegramClient.send(function, SPECIAL_RAW_TIMEOUT_DURATION))
-						.flatMap(result -> fixBrokenKey(function, result))
+				.flatMap(req -> Mono
+						.from(rawTelegramClient.send(req.action(), SPECIAL_RAW_TIMEOUT_DURATION))
+						.flatMap(result -> fixBrokenKey(req.action(), result))
 						.mapNotNull(resp -> {
 							if (resp.getConstructor() == TdApi.Error.CONSTRUCTOR) {
-								LOG.error("Received error for special request {}: {}\nThe instance will be closed", function, resp);
-								return new OnUpdateError(liveId, userId, (TdApi.Error) resp);
+								if (req.ignoreFailure()) {
+									LOG.debug("Received error for special request {}", req.action());
+									return null;
+								} else {
+									LOG.error("Received error for special request {}: {}\nThe instance will be closed", req.action(), resp);
+									return new OnUpdateError(userId, (TdApi.Error) resp);
+								}
 							} else {
 								return null;
 							}
 						})
 						.doOnError(ex -> LOG.error("Failed to receive the response for special request {}\n"
-								+ " The instance will be closed", function, ex))
-						.onErrorResume(ex -> Mono.just(new OnUpdateError(liveId, userId, new TdApi.Error(500, ex.getMessage()))))
+								+ " The instance will be closed", req.action(), ex))
+						.onErrorResume(ex -> Mono.just(new OnUpdateError(userId, new TdApi.Error(500, ex.getMessage()))))
 				, Integer.MAX_VALUE)
 
 				// Buffer requests to avoid halting the event loop
 				.onBackpressureBuffer()
 
 				.doOnError(ex -> LOG.error("Failed to receive resulting events. The instance will be closed", ex))
-				.onErrorResume(ex -> Mono.just(new OnUpdateError(liveId, userId, new TdApi.Error(500, ex.getMessage()))))
+				.onErrorResume(ex -> Mono.just(new OnUpdateError(userId, new TdApi.Error(500, ex.getMessage()))))
 
 				// when an error arrives, close the session
 				.take(1, true)
@@ -214,7 +210,7 @@ public abstract class ReactiveApiPublisher {
 				// Buffer requests to avoid halting the event loop
 				.onBackpressureBuffer();
 
-		kafkaProducer.sendMessages(userTopic, messagesToSend).subscribeOn(Schedulers.parallel()).subscribe();
+		kafkaTdlibServer.events().sendMessages(userId, messagesToSend).subscribeOn(Schedulers.parallel()).subscribe();
 
 		publishedResultingEvents
 				// Obtain only cluster-bound events
@@ -272,7 +268,7 @@ public abstract class ReactiveApiPublisher {
 
 	private ResultingEvent wrapUpdateSignal(Signal signal) {
 		var update = (TdApi.Update) signal.getUpdate();
-		return new ClientBoundResultingEvent(new OnUpdateData(liveId, userId, update));
+		return new ClientBoundResultingEvent(new OnUpdateData(userId, update));
 	}
 
 	private List<ResultingEvent> withUpdateSignal(Signal signal, List<ResultingEvent> list) {
@@ -306,8 +302,7 @@ public abstract class ReactiveApiPublisher {
 		if (signal.isClosed()) {
 			signal.getClosed();
 			LOG.info("Received a closed signal");
-			return List.of(new ClientBoundResultingEvent(new OnUpdateData(liveId,
-					userId,
+			return List.of(new ClientBoundResultingEvent(new OnUpdateData(userId,
 					new TdApi.UpdateAuthorizationState(new AuthorizationStateClosed())
 			)), new ResultingEventPublisherClosed());
 		}
@@ -360,13 +355,12 @@ public abstract class ReactiveApiPublisher {
 							case TdApi.AuthorizationStateWaitOtherDeviceConfirmation.CONSTRUCTOR -> {
 								var link = ((AuthorizationStateWaitOtherDeviceConfirmation) updateAuthorizationState.authorizationState).link;
 								return List.of(updateResult,
-										new ClientBoundResultingEvent(new OnOtherDeviceLoginRequested(liveId, userId, link)));
+										new ClientBoundResultingEvent(new OnOtherDeviceLoginRequested(userId, link)));
 							}
 							case TdApi.AuthorizationStateWaitPassword.CONSTRUCTOR -> {
 								var authorizationStateWaitPassword = ((AuthorizationStateWaitPassword) updateAuthorizationState.authorizationState);
 								return List.of(updateResult,
-										new ClientBoundResultingEvent(new OnPasswordRequested(liveId,
-												userId,
+										new ClientBoundResultingEvent(new OnPasswordRequested(userId,
 												authorizationStateWaitPassword.passwordHint,
 												authorizationStateWaitPassword.hasRecoveryEmailAddress,
 												authorizationStateWaitPassword.recoveryEmailAddressPattern
@@ -440,7 +434,6 @@ public abstract class ReactiveApiPublisher {
 
 	private static void writeClientBoundEvent(ClientBoundEvent clientBoundEvent, DataOutputStream dataOutputStream)
 			throws IOException {
-		dataOutputStream.writeLong(clientBoundEvent.liveId());
 		dataOutputStream.writeLong(clientBoundEvent.userId());
 		dataOutputStream.writeInt(SERIAL_VERSION);
 		if (clientBoundEvent instanceof OnUpdateData onUpdateData) {
@@ -468,19 +461,25 @@ public abstract class ReactiveApiPublisher {
 		}
 	}
 
-	private CompletableFuture<Subscription> registerTopics() {
-		// Start receiving requests
-		eventService.subscribe("session-" + liveId + "-requests",
-				ReactiveApiPublisher::deserializeRequest,
-				this::handleRequest,
-				ReactiveApiPublisher::serializeResponse);
-
-		// Start receiving request
-		return eventService.subscribe(dynamicIdResolveSubject,
-				b -> null,
-				r -> completedFuture(liveId),
-				Longs::toByteArray
-		);
+	@SuppressWarnings("unchecked")
+	private Disposable registerTopics() {
+		var subscription1 = kafkaTdlibServer.request().consumeMessages("td-requests-handler", userId)
+				.flatMapSequential(req -> this
+						.handleRequest(req.data())
+						.doOnNext(response -> this.responses.emitNext(response, EmitFailureHandler.busyLooping(TEN_MS)))
+						.then()
+				)
+				.subscribeOn(Schedulers.parallel())
+				.subscribe();
+		var subscription2 = this.kafkaTdlibServer
+				.response()
+				.sendMessages(userId, responses.asFlux())
+				.subscribeOn(Schedulers.parallel())
+				.subscribe();
+		return () -> {
+			subscription1.dispose();
+			subscription2.dispose();
+		};
 	}
 
 	private static byte[] serializeResponse(Response response) {
@@ -499,47 +498,42 @@ public abstract class ReactiveApiPublisher {
 		}
 	}
 
-	private CompletableFuture<Response> handleRequest(OnRequest<Object> onRequestObj) {
+	private Mono<Event.OnResponse.Response<TdApi.Object>> handleRequest(OnRequest<TdApi.Object> onRequestObj) {
 		if (onRequestObj instanceof OnRequest.InvalidRequest invalidRequest) {
-			return completedFuture(new Response(invalidRequest.liveId(), new TdApi.Error(400, "Conflicting protocol version")));
+			return Mono.just(new Event.OnResponse.Response<>(invalidRequest.clientId(),
+					invalidRequest.requestId(),
+					userId,
+					new TdApi.Error(400, "Conflicting protocol version")
+			));
 		}
 		var requestObj = (Request<Object>) onRequestObj;
-		if (liveId != requestObj.liveId()) {
-			LOG.error("Received a request for another session!");
-			return completedFuture(new Response(liveId,
-					new TdApi.Error(400, "The request live id is different than the current live id")
-			));
-		} else {
-			var requestWithTimeoutInstant = new RequestWithTimeoutInstant<>(requestObj.request(), requestObj.timeout());
-			var state = this.state.get();
-			if (state.authPhase() == LOGGED_IN) {
-				var request = requestWithTimeoutInstant.request();
-				var timeoutDuration = Duration.between(Instant.now(), requestWithTimeoutInstant.timeout());
-				if (timeoutDuration.isZero() || timeoutDuration.isNegative()) {
-					LOG.error("Received an expired request. Expiration: {}", requestWithTimeoutInstant.timeout());
-				}
-
-				return Mono
-						.from(rawTelegramClient.send(request, timeoutDuration))
-						.map(responseObj -> new Response(liveId, responseObj))
-						.publishOn(Schedulers.boundedElastic())
-						.toFuture();
-			} else {
-				LOG.error("Ignored a request because the current state is {}. Request: {}", state, requestObj);
-				return completedFuture(new Response(liveId, new TdApi.Error(503, "Service Unavailable: " + state)));
+		var requestWithTimeoutInstant = new RequestWithTimeoutInstant<>(requestObj.request(), requestObj.timeout());
+		var state = this.state.get();
+		if (state.authPhase() == LOGGED_IN) {
+			var request = requestWithTimeoutInstant.request();
+			var timeoutDuration = Duration.between(Instant.now(), requestWithTimeoutInstant.timeout());
+			if (timeoutDuration.isZero() || timeoutDuration.isNegative()) {
+				LOG.warn("Received an expired request. Expiration: {}", requestWithTimeoutInstant.timeout());
 			}
-		}
-	}
 
-	private static <T extends TdApi.Object> OnRequest<T> deserializeRequest(byte[] bytes) {
-		return OnRequest.deserialize(new DataInputStream(new ByteArrayInputStream(bytes)));
+			return Mono
+					.from(rawTelegramClient.send(request, timeoutDuration))
+					.map(responseObj -> new Event.OnResponse.Response<>(onRequestObj.clientId(),
+							onRequestObj.requestId(),
+							userId, responseObj))
+					.publishOn(Schedulers.parallel());
+		} else {
+			LOG.error("Ignored a request because the current state is {}. Request: {}", state, requestObj);
+			return Mono.just(new Event.OnResponse.Response<>(onRequestObj.clientId(),
+					onRequestObj.requestId(),
+					userId, new TdApi.Error(503, "Service Unavailable: " + state)));
+		}
 	}
 
 	@Override
 	public String toString() {
 		return new StringJoiner(", ", ReactiveApiPublisher.class.getSimpleName() + "[", "]")
 				.add("userId=" + userId)
-				.add("liveId=" + liveId)
 				.toString();
 	}
 
@@ -549,13 +543,11 @@ public abstract class ReactiveApiPublisher {
 
 		private final String botToken;
 
-		public ReactiveApiPublisherToken(Atomix atomix,
-				KafkaProducer kafkaProducer,
+		public ReactiveApiPublisherToken(KafkaTdlibServer kafkaTdlibServer,
 				Set<ResultingEventTransformer> resultingEventTransformerSet,
-				Long liveId,
 				long userId,
 				String botToken) {
-			super(atomix, kafkaProducer, resultingEventTransformerSet, liveId, userId);
+			super(kafkaTdlibServer, resultingEventTransformerSet, userId);
 			this.botToken = botToken;
 		}
 
@@ -573,7 +565,6 @@ public abstract class ReactiveApiPublisher {
 		public String toString() {
 			return new StringJoiner(", ", ReactiveApiPublisherToken.class.getSimpleName() + "[", "]")
 					.add("userId=" + userId)
-					.add("liveId=" + liveId)
 					.add("token='" + botToken + "'")
 					.toString();
 		}
@@ -583,13 +574,11 @@ public abstract class ReactiveApiPublisher {
 
 		private final long phoneNumber;
 
-		public ReactiveApiPublisherPhoneNumber(Atomix atomix,
-				KafkaProducer kafkaProducer,
+		public ReactiveApiPublisherPhoneNumber(KafkaTdlibServer kafkaTdlibServer,
 				Set<ResultingEventTransformer> resultingEventTransformerSet,
-				Long liveId,
 				long userId,
 				long phoneNumber) {
-			super(atomix, kafkaProducer, resultingEventTransformerSet, liveId, userId);
+			super(kafkaTdlibServer, resultingEventTransformerSet, userId);
 			this.phoneNumber = phoneNumber;
 		}
 
@@ -611,14 +600,13 @@ public abstract class ReactiveApiPublisher {
 
 		@Override
 		public List<ResultingEvent> onWaitCode() {
-			return List.of(new ClientBoundResultingEvent(new OnUserLoginCodeRequested(liveId, userId, phoneNumber)));
+			return List.of(new ClientBoundResultingEvent(new OnUserLoginCodeRequested(userId, phoneNumber)));
 		}
 
 		@Override
 		public String toString() {
 			return new StringJoiner(", ", ReactiveApiPublisherPhoneNumber.class.getSimpleName() + "[", "]")
 					.add("userId=" + userId)
-					.add("liveId=" + liveId)
 					.add("phoneNumber=" + phoneNumber)
 					.toString();
 		}

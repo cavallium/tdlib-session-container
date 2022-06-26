@@ -1,8 +1,9 @@
 package it.tdlight.reactiveapi;
 
+import static java.lang.Math.toIntExact;
+
 import it.tdlight.common.Init;
 import it.tdlight.common.utils.CantLoadLibrary;
-import it.tdlight.reactiveapi.Event.ClientBoundEvent;
 import java.time.Duration;
 import java.util.HashMap;
 import java.util.Map;
@@ -22,7 +23,7 @@ import reactor.kafka.receiver.KafkaReceiver;
 import reactor.kafka.receiver.ReceiverOptions;
 import reactor.util.retry.Retry;
 
-public class KafkaConsumer {
+public abstract class KafkaConsumer<K> {
 
 	private static final Logger LOG = LogManager.getLogger(KafkaConsumer.class);
 
@@ -32,7 +33,7 @@ public class KafkaConsumer {
 		this.kafkaParameters = kafkaParameters;
 	}
 
-	public KafkaReceiver<Integer, ClientBoundEvent> createReceiver(@NotNull String groupId, @Nullable Long userId) {
+	public KafkaReceiver<Integer, K> createReceiver(@NotNull String groupId, @Nullable Long userId) {
 		try {
 			Init.start();
 		} catch (CantLoadLibrary e) {
@@ -44,48 +45,47 @@ public class KafkaConsumer {
 		props.put(ConsumerConfig.CLIENT_ID_CONFIG, kafkaParameters.clientId() + (userId != null ? ("_" + userId) : ""));
 		props.put(ConsumerConfig.GROUP_ID_CONFIG, groupId);
 		props.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, IntegerDeserializer.class);
-		props.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, ClientBoundEventDeserializer.class);
+		props.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, getChannelName().getDeserializerClass());
 		props.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "latest");
-		ReceiverOptions<Integer, ClientBoundEvent> receiverOptions = ReceiverOptions
-				.<Integer, ClientBoundEvent>create(props)
+		props.put(ConsumerConfig.MAX_POLL_INTERVAL_MS_CONFIG, toIntExact(Duration.ofMinutes(5).toMillis()));
+		ReceiverOptions<Integer, K> receiverOptions = ReceiverOptions
+				.<Integer, K>create(props)
 				.commitInterval(Duration.ofSeconds(10))
 				.commitBatchSize(64)
 				.maxCommitAttempts(100)
 				.maxDeferredCommits(100);
 		Pattern pattern;
 		if (userId == null) {
-			pattern = Pattern.compile("tdlib\\.event\\.[0-9]+");
+			pattern = Pattern.compile("tdlib\\." + getChannelName() + "\\.\\d+");
 		} else {
-			pattern = Pattern.compile("tdlib\\.event\\." + userId);
+			pattern = Pattern.compile("tdlib\\." + getChannelName() + "\\." + userId);
 		}
-		ReceiverOptions<Integer, ClientBoundEvent> options = receiverOptions
+		ReceiverOptions<Integer, K> options = receiverOptions
 				.subscription(pattern)
 				.addAssignListener(partitions -> LOG.debug("onPartitionsAssigned {}", partitions))
 				.addRevokeListener(partitions -> LOG.debug("onPartitionsRevoked {}", partitions));
 		return KafkaReceiver.create(options);
 	}
 
-	private Flux<TimestampedClientBoundEvent> retryIfCleanup(Flux<TimestampedClientBoundEvent> clientBoundEventFlux) {
-		return clientBoundEventFlux.retryWhen(Retry
+	public abstract KafkaChannelName getChannelName();
+
+	protected Flux<Timestamped<K>> retryIfCleanup(Flux<Timestamped<K>> eventFlux) {
+		return eventFlux.retryWhen(Retry
 				.backoff(Long.MAX_VALUE, Duration.ofMillis(100))
 				.maxBackoff(Duration.ofSeconds(5))
 				.filter(ex -> ex instanceof RebalanceInProgressException)
 				.doBeforeRetry(s -> LOG.warn("Rebalancing in progress")));
 	}
 
-	public Flux<TimestampedClientBoundEvent> consumeMessages(@NotNull String subGroupId, long userId, long liveId) {
-		return consumeMessagesInternal(subGroupId, userId).filter(e -> e.event().liveId() == liveId);
-	}
-
-	public Flux<TimestampedClientBoundEvent> consumeMessages(@NotNull String subGroupId, long userId) {
+	public Flux<Timestamped<K>> consumeMessages(@NotNull String subGroupId, long userId) {
 		return consumeMessagesInternal(subGroupId, userId);
 	}
 
-	public Flux<TimestampedClientBoundEvent> consumeMessages(@NotNull String subGroupId) {
+	public Flux<Timestamped<K>> consumeMessages(@NotNull String subGroupId) {
 		return consumeMessagesInternal(subGroupId, null);
 	}
 
-	private Flux<TimestampedClientBoundEvent> consumeMessagesInternal(@NotNull String subGroupId, @Nullable Long userId) {
+	private Flux<Timestamped<K>> consumeMessagesInternal(@NotNull String subGroupId, @Nullable Long userId) {
 		return createReceiver(kafkaParameters.groupId() + "-" + subGroupId, userId)
 				.receive()
 				.log("consume-messages" + (userId != null ? "-" + userId : ""),
@@ -98,9 +98,9 @@ public class KafkaConsumer {
 				.doOnNext(result -> result.receiverOffset().acknowledge())
 				.map(record -> {
 					if (record.timestampType() == TimestampType.CREATE_TIME) {
-						return new TimestampedClientBoundEvent(record.timestamp(), record.value());
+						return new Timestamped<>(record.timestamp(), record.value());
 					} else {
-						return new TimestampedClientBoundEvent(1, record.value());
+						return new Timestamped<>(1, record.value());
 					}
 				})
 				.transform(this::retryIfCleanup);

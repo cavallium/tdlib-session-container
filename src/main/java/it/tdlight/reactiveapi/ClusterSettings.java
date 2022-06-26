@@ -11,14 +11,11 @@ public class ClusterSettings {
 
 	public String id;
 	public List<String> kafkaBootstrapServers;
-	public List<NodeSettings> nodes;
 
 	@JsonCreator
 	public ClusterSettings(@JsonProperty(required = true, value = "id") String id,
-			@JsonProperty(required = true, value = "kafkaBootstrapServers") List<String> kafkaBootstrapServers,
-			@JsonProperty(required = true, value = "nodes") List<NodeSettings> nodes) {
+			@JsonProperty(required = true, value = "kafkaBootstrapServers") List<String> kafkaBootstrapServers) {
 		this.id = id;
 		this.kafkaBootstrapServers = kafkaBootstrapServers;
-		this.nodes = nodes;
 	}
 }

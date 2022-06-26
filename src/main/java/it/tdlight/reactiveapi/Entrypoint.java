@@ -4,13 +4,6 @@ import static java.util.Collections.unmodifiableSet;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.dataformat.yaml.YAMLFactory;
-import io.atomix.cluster.Node;
-import io.atomix.cluster.discovery.BootstrapDiscoveryProvider;
-import io.atomix.core.Atomix;
-import io.atomix.core.AtomixBuilder;
-import io.atomix.core.profile.ConsensusProfileConfig;
-import io.atomix.core.profile.Profile;
-import io.atomix.protocols.raft.partition.RaftPartitionGroup;
 import java.io.IOException;
 import java.lang.reflect.InvocationTargetException;
 import java.nio.file.Files;
@@ -45,7 +38,7 @@ public class Entrypoint {
 		return new ValidEntrypointArgs(args[0], args[1], args[2]);
 	}
 
-	public static ReactiveApi start(ValidEntrypointArgs args, AtomixBuilder atomixBuilder) throws IOException {
+	public static ReactiveApi start(ValidEntrypointArgs args) throws IOException {
 		// Read settings
 		ClusterSettings clusterSettings;
 		InstanceSettings instanceSettings;
@@ -65,19 +58,15 @@ public class Entrypoint {
 			}
 		}
 
-		return start(clusterSettings, instanceSettings, diskSessions, atomixBuilder);
+		return start(clusterSettings, instanceSettings, diskSessions);
 	}
 
 	public static ReactiveApi start(ClusterSettings clusterSettings,
 			InstanceSettings instanceSettings,
-			@Nullable DiskSessionsManager diskSessions,
-			AtomixBuilder atomixBuilder) {
-
-		atomixBuilder.withCompatibleSerialization(false);
-		atomixBuilder.withClusterId(clusterSettings.id);
+			@Nullable DiskSessionsManager diskSessions) {
 
 		Set<ResultingEventTransformer> resultingEventTransformerSet;
-		String nodeId;
+		boolean clientOnly = false;
 		if (instanceSettings.client) {
 			if (diskSessions != null) {
 				throw new IllegalArgumentException("A client instance can't have a session manager!");
@@ -85,31 +74,12 @@ public class Entrypoint {
 			if (instanceSettings.clientAddress == null) {
 				throw new IllegalArgumentException("A client instance must have an address (host:port)");
 			}
-			var randomizedClientId = instanceSettings.id + "-" + ThreadLocalRandom.current().nextLong(0, Long.MAX_VALUE);
-			var address = Address.fromString(instanceSettings.clientAddress);
-			atomixBuilder.withMemberId(randomizedClientId).withHost(address.host()).withPort(address.port());
-			nodeId = null;
+			clientOnly = true;
 			resultingEventTransformerSet = Set.of();
 		} else {
 			if (diskSessions == null) {
 				throw new IllegalArgumentException("A full instance must have a session manager!");
 			}
-			// Find node settings
-			var nodeSettingsOptional = clusterSettings.nodes
-					.stream()
-					.filter(node -> node.id.equals(instanceSettings.id))
-					.findAny();
-
-			// Check node settings presence
-			if (nodeSettingsOptional.isEmpty()) {
-				System.err.printf("Node id \"%s\" has not been described in cluster.yaml nodes list%n", instanceSettings.id);
-				System.exit(2);
-			}
-
-			var nodeSettings = nodeSettingsOptional.get();
-
-			var address = Address.fromString(nodeSettings.address);
-			atomixBuilder.withMemberId(instanceSettings.id).withHost(address.host()).withPort(address.port());
 
 			resultingEventTransformerSet = new HashSet<>();
 			if (instanceSettings.resultingEventTransformers != null) {
@@ -128,59 +98,12 @@ public class Entrypoint {
 				}
 			}
 
-			nodeId = nodeSettings.id;
 			resultingEventTransformerSet = unmodifiableSet(resultingEventTransformerSet);
 		}
 
-		var bootstrapDiscoveryProviderNodes = new ArrayList<Node>();
-		List<String> systemPartitionGroupMembers = new ArrayList<>();
-		for (NodeSettings node : clusterSettings.nodes) {
-			var address = Address.fromString(node.address);
-			bootstrapDiscoveryProviderNodes.add(Node
-					.builder()
-					.withId(node.id)
-					.withHost(address.host())
-					.withPort(address.port())
-					.build());
-			systemPartitionGroupMembers.add(node.id);
-		}
-
-		var bootstrapDiscoveryProviderBuilder = BootstrapDiscoveryProvider.builder();
-		bootstrapDiscoveryProviderBuilder.withNodes(bootstrapDiscoveryProviderNodes).build();
-
-		atomixBuilder.withMembershipProvider(bootstrapDiscoveryProviderBuilder.build());
-
-		atomixBuilder.withManagementGroup(RaftPartitionGroup
-				.builder("system")
-				.withNumPartitions(1)
-				.withMembers(systemPartitionGroupMembers)
-				.withDataDirectory(Paths.get(".data-" + instanceSettings.id).toFile())
-				.build());
-
-		atomixBuilder.withShutdownHook(false);
-		atomixBuilder.withTypeRegistrationRequired();
-
-		if (instanceSettings.client) {
-			atomixBuilder.addProfile(Profile.client());
-		} else {
-			var prof = Profile.consensus(systemPartitionGroupMembers);
-			var profCfg = (ConsensusProfileConfig) prof.config();
-			//profCfg.setDataGroup("raft");
-			profCfg.setDataPath(".data-" + instanceSettings.id);
-			profCfg.setPartitions(3);
-			atomixBuilder.addProfile(prof);
-			//atomixBuilder.addProfile(Profile.dataGrid(32));
-		}
-
-		var atomix = atomixBuilder.build();
-
-		TdSerializer.register(atomix.getSerializationService());
-
-		atomix.start().join();
-
 		var kafkaParameters = new KafkaParameters(clusterSettings, instanceSettings.id);
 
-		var api = new AtomixReactiveApi(nodeId, atomix, kafkaParameters, diskSessions, resultingEventTransformerSet);
+		var api = new AtomixReactiveApi(clientOnly, kafkaParameters, diskSessions, resultingEventTransformerSet);
 
 		LOG.info("Starting ReactiveApi...");
 
@@ -193,7 +116,7 @@ public class Entrypoint {
 
 	public static void main(String[] args) throws IOException {
 		var validArgs = parseArguments(args);
-		var atomixBuilder = Atomix.builder().withShutdownHookEnabled();
-		start(validArgs, atomixBuilder);
+		var api = start(validArgs);
+		api.waitForExit();
 	}
 }

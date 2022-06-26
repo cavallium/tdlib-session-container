@@ -11,7 +11,13 @@ public sealed interface ResultingEvent permits ClientBoundResultingEvent, TDLibB
 
 	record ClientBoundResultingEvent(ClientBoundEvent event) implements ResultingEvent {}
 
-	record TDLibBoundResultingEvent<T extends TdApi.Object>(TdApi.Function<T> action) implements ResultingEvent {}
+	record TDLibBoundResultingEvent<T extends TdApi.Object>(TdApi.Function<T> action, boolean ignoreFailure) implements
+			ResultingEvent {
+
+		public TDLibBoundResultingEvent(TdApi.Function<T> action) {
+			this(action, false);
+		}
+	}
 
 	sealed interface ClusterBoundResultingEvent extends ResultingEvent permits ResultingEventPublisherClosed {}
 

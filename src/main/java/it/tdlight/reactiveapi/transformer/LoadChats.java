@@ -26,8 +26,8 @@ public class LoadChats implements ResultingEventTransformer {
 					&& onUpdate.update() instanceof TdApi.UpdateAuthorizationState authorizationState
 					&& authorizationState.authorizationState instanceof TdApi.AuthorizationStateReady) {
 				return List.of(event,
-						new TDLibBoundResultingEvent<>(new TdApi.LoadChats(new ChatListMain(), 500)),
-						new TDLibBoundResultingEvent<>(new TdApi.LoadChats(new ChatListArchive(), 500))
+						new TDLibBoundResultingEvent<>(new TdApi.LoadChats(new ChatListMain(), 500), true),
+						new TDLibBoundResultingEvent<>(new TdApi.LoadChats(new ChatListArchive(), 500), true)
 				);
 			}
 

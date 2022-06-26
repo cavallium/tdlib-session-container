@@ -2,7 +2,6 @@ package it.tdlight.reactiveapi;
 
 import static java.util.Collections.unmodifiableSet;
 
-import io.atomix.core.Atomix;
 import it.tdlight.reactiveapi.CreateSessionRequest.CreateBotSessionRequest;
 import it.tdlight.reactiveapi.CreateSessionRequest.CreateUserSessionRequest;
 import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
@@ -16,6 +15,7 @@ import org.jline.reader.LineReader;
 import org.jline.reader.LineReaderBuilder;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import reactor.core.scheduler.Schedulers;
 
 public class Cli {
 
@@ -27,8 +27,7 @@ public class Cli {
 
 	public static void main(String[] args) throws IOException {
 		var validArgs = Entrypoint.parseArguments(args);
-		var atomixBuilder = Atomix.builder();
-		var api = (AtomixReactiveApi) Entrypoint.start(validArgs, atomixBuilder);
+		var api = (AtomixReactiveApi) Entrypoint.start(validArgs);
 
 		AtomicBoolean alreadyShutDown = new AtomicBoolean(false);
 		AtomicBoolean acceptInputs = new AtomicBoolean(true);
@@ -36,7 +35,7 @@ public class Cli {
 		Runtime.getRuntime().addShutdownHook(new Thread(() -> {
 			acceptInputs.set(false);
 			if (alreadyShutDown.compareAndSet(false, true)) {
-				api.getAtomix().stop().join();
+				api.close().subscribeOn(Schedulers.immediate()).subscribe();
 			}
 		}));
 
@@ -92,52 +91,19 @@ public class Cli {
 			}
 
 			private void printSessions(ReactiveApi api, boolean onlyLocal) {
-				api.getAllUsers().subscribe(sessions -> {
-					var userIdToLiveId = api
-							.getLocalLiveSessionIds()
-							.stream()
-							.collect(Collectors.toMap(UserIdAndLiveId::userId, k -> Set.of(k.liveId()), (a, b) -> {
-								var r = new LongOpenHashSet(a.size() + b.size());
-								r.addAll(a);
-								r.addAll(b);
-								return unmodifiableSet(r);
-							}));
-
-					StringBuilder sb = new StringBuilder();
-					sb.append("Sessions:\n");
-					for (var userEntry : sessions.entrySet()) {
-						var userId = userEntry.getKey();
-						var nodeId = userEntry.getValue();
-						if (!onlyLocal || api.is(nodeId)) {
-							sb.append(" - session #IDU").append(userId);
-							if (!onlyLocal) {
-								sb.append(": ").append(nodeId);
-							} else {
-								sb
-										.append(": liveId=")
-										.append(userIdToLiveId
-												.get(userId)
-												.stream()
-												.map(Object::toString)
-												.collect(Collectors.joining(", ", "(", ")")));
-							}
-							sb.append("\n");
-						}
-					}
-					LOG.info(sb.toString());
-				});
+				LOG.info("Not implemented");
 			}
 
 			@Override
 			protected void shutdown() {
 				acceptInputs.set(false);
 				if (alreadyShutDown.compareAndSet(false, true)) {
-					api.getAtomix().stop().join();
-					System.exit(0);
+					Runtime.getRuntime().exit(0);
 				}
 			}
 		};
 		console.start();
+		api.waitForExit();
 	}
 
 	private static void createSession(ReactiveApi api, String commandArgs) {
