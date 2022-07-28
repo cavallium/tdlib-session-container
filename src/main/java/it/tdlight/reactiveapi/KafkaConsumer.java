@@ -52,7 +52,7 @@ public abstract class KafkaConsumer<K> {
 		ReceiverOptions<Integer, K> receiverOptions = ReceiverOptions
 				.<Integer, K>create(props)
 				.commitInterval(Duration.ofSeconds(10))
-				.commitBatchSize(64)
+				.commitBatchSize(65535)
 				.maxCommitAttempts(100)
 				.maxDeferredCommits(100);
 		Pattern pattern;
