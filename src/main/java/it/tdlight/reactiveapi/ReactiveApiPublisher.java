@@ -523,7 +523,7 @@ public abstract class ReactiveApiPublisher {
 							userId, responseObj))
 					.publishOn(Schedulers.parallel());
 		} else {
-			LOG.error("Ignored a request because the current state is {}. Request: {}", state, requestObj);
+			LOG.error("Ignored a request to {} because the current state is {}. Request: {}", userId, state, requestObj);
 			return Mono.just(new Event.OnResponse.Response<>(onRequestObj.clientId(),
 					onRequestObj.requestId(),
 					userId, new TdApi.Error(503, "Service Unavailable: " + state)));
