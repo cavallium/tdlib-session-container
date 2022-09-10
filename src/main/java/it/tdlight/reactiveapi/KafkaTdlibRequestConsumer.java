@@ -16,4 +16,9 @@ public class KafkaTdlibRequestConsumer extends KafkaConsumer<OnRequest<TdApi.Obj
 		return KafkaChannelName.TDLIB_REQUEST;
 	}
 
+	@Override
+	public boolean isQuickResponse() {
+		return true;
+	}
+
 }

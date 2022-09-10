@@ -15,4 +15,9 @@ public class KafkaTdlibResponseConsumer extends KafkaConsumer<OnResponse<TdApi.O
 		return KafkaChannelName.TDLIB_RESPONSE;
 	}
 
+	@Override
+	public boolean isQuickResponse() {
+		return true;
+	}
+
 }

@@ -13,4 +13,9 @@ public class KafkaClientBoundConsumer extends KafkaConsumer<ClientBoundEvent> {
 		return KafkaChannelName.CLIENT_BOUND_EVENT;
 	}
 
+	@Override
+	public boolean isQuickResponse() {
+		return false;
+	}
+
 }

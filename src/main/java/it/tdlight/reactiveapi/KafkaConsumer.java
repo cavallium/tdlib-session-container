@@ -49,15 +49,16 @@ public abstract class KafkaConsumer<K> {
 		props.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, getChannelName().getDeserializerClass());
 		props.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "latest");
 		props.put(ConsumerConfig.MAX_POLL_INTERVAL_MS_CONFIG, toIntExact(Duration.ofMinutes(5).toMillis()));
-		props.put(ConsumerConfig.FETCH_MIN_BYTES_CONFIG, "1048576");
-		props.put(ConsumerConfig.FETCH_MAX_WAIT_MS_CONFIG, "100");
-		props.put(ConsumerConfig.HEARTBEAT_INTERVAL_MS_CONFIG, "10000");
-		ReceiverOptions<Integer, K> receiverOptions = ReceiverOptions
-				.<Integer, K>create(props)
-				.commitInterval(Duration.ofSeconds(10))
-				.commitBatchSize(65535)
-				.maxCommitAttempts(100)
-				.maxDeferredCommits(100);
+		if (isQuickResponse()) {
+			props.put(ConsumerConfig.HEARTBEAT_INTERVAL_MS_CONFIG, "5000");
+			props.put(ConsumerConfig.SESSION_TIMEOUT_MS_CONFIG, "10000");
+		} else {
+			props.put(ConsumerConfig.HEARTBEAT_INTERVAL_MS_CONFIG, "10000");
+			props.put(ConsumerConfig.SESSION_TIMEOUT_MS_CONFIG, "30000");
+			props.put(ConsumerConfig.FETCH_MIN_BYTES_CONFIG, "1048576");
+			props.put(ConsumerConfig.FETCH_MAX_WAIT_MS_CONFIG, "100");
+		}
+		ReceiverOptions<Integer, K> receiverOptions = ReceiverOptions.create(props);
 		Pattern pattern;
 		if (userId == null) {
 			pattern = Pattern.compile("tdlib\\." + getChannelName() + "\\.\\d+");
@@ -72,6 +73,8 @@ public abstract class KafkaConsumer<K> {
 	}
 
 	public abstract KafkaChannelName getChannelName();
+
+	public abstract boolean isQuickResponse();
 
 	protected Flux<Timestamped<K>> retryIfCleanup(Flux<Timestamped<K>> eventFlux) {
 		return eventFlux.retryWhen(Retry
@@ -114,7 +117,7 @@ public abstract class KafkaConsumer<K> {
 						SignalType.ON_ERROR,
 						SignalType.ON_COMPLETE
 				)
-				.doOnNext(result -> result.receiverOffset().acknowledge())
+				//.doOnNext(result -> result.receiverOffset().acknowledge())
 				.map(record -> {
 					if (record.timestampType() == TimestampType.CREATE_TIME) {
 						return new Timestamped<>(record.timestamp(), record.value());
