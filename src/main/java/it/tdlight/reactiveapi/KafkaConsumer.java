@@ -49,6 +49,8 @@ public abstract class KafkaConsumer<K> {
 		props.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, getChannelName().getDeserializerClass());
 		props.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "latest");
 		props.put(ConsumerConfig.MAX_POLL_INTERVAL_MS_CONFIG, toIntExact(Duration.ofMinutes(5).toMillis()));
+		props.put(ConsumerConfig.FETCH_MIN_BYTES_CONFIG, "1048576");
+		props.put(ConsumerConfig.FETCH_MAX_WAIT_MS_CONFIG, "100");
 		ReceiverOptions<Integer, K> receiverOptions = ReceiverOptions
 				.<Integer, K>create(props)
 				.commitInterval(Duration.ofSeconds(10))
