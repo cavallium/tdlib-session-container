@@ -27,11 +27,12 @@ public class TdlibRequestDeserializer<T extends TdApi.Object> implements Deseria
 		try {
 			var bais = new ByteArrayInputStream(data);
 			var dais = new DataInputStream(bais);
+			var userId = dais.readLong();
 			var clientId = dais.readLong();
 			var requestId = dais.readLong();
 			if (dais.readInt() != SERIAL_VERSION) {
 				// Deprecated request
-				return new InvalidRequest<>(clientId, requestId);
+				return new InvalidRequest<>(userId, clientId, requestId);
 			} else {
 				long millis = dais.readLong();
 				Instant timeout;
@@ -42,7 +43,7 @@ public class TdlibRequestDeserializer<T extends TdApi.Object> implements Deseria
 				}
 				@SuppressWarnings("unchecked")
 				TdApi.Function<T> request = (TdApi.Function<T>) TdApi.Deserializer.deserialize(dais);
-				return new Request<>(clientId, requestId, request, timeout);
+				return new Request<>(userId, clientId, requestId, request, timeout);
 			}
 		} catch (UnsupportedOperationException | IOException e) {
 			throw new SerializationException(e);

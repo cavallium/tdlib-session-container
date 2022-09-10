@@ -2,10 +2,8 @@ package it.tdlight.reactiveapi;
 
 import static it.tdlight.reactiveapi.Event.SERIAL_VERSION;
 
-import it.tdlight.common.utils.LibraryVersion;
 import it.tdlight.jni.TdApi;
 import it.tdlight.jni.TdApi.Error;
-import it.tdlight.jni.TdApi.Object;
 import it.tdlight.reactiveapi.Event.ClientBoundEvent;
 import it.tdlight.reactiveapi.Event.Ignored;
 import it.tdlight.reactiveapi.Event.OnBotLoginCodeRequested;
@@ -14,40 +12,25 @@ import it.tdlight.reactiveapi.Event.OnPasswordRequested;
 import it.tdlight.reactiveapi.Event.OnRequest;
 import it.tdlight.reactiveapi.Event.OnRequest.Request;
 import it.tdlight.reactiveapi.Event.OnResponse;
-import it.tdlight.reactiveapi.Event.OnResponse.InvalidResponse;
 import it.tdlight.reactiveapi.Event.OnResponse.Response;
 import it.tdlight.reactiveapi.Event.OnUpdateData;
 import it.tdlight.reactiveapi.Event.OnUpdateError;
 import it.tdlight.reactiveapi.Event.OnUserLoginCodeRequested;
 import java.io.ByteArrayInputStream;
-import java.io.ByteArrayOutputStream;
 import java.io.DataInputStream;
-import java.io.DataOutputStream;
 import java.io.IOException;
-import java.net.ConnectException;
-import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.CompletionException;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.Future;
-import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicLong;
 import org.apache.kafka.common.errors.SerializationException;
 import org.jetbrains.annotations.NotNull;
-import org.jetbrains.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import reactor.core.Disposable;
-import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
-import reactor.core.publisher.MonoSink;
-import reactor.core.publisher.SignalType;
 import reactor.core.publisher.Sinks;
 import reactor.core.publisher.Sinks.EmitFailureHandler;
 import reactor.core.publisher.Sinks.Many;
@@ -63,23 +46,18 @@ abstract class BaseAtomixReactiveApiClient implements ReactiveApiClient, AutoClo
 	protected final long userId;
 	// Temporary id used to make requests
 	private final long clientId;
-	private final Many<OnRequest<?>> requests
-			= Sinks.many().unicast().onBackpressureBuffer(Queues.<Event.OnRequest<?>>small().get());
+	private final Many<OnRequest<?>> requests;
 	private final Map<Long, CompletableFuture<Timestamped<OnResponse<TdApi.Object>>>> responses
 			= new ConcurrentHashMap<>();
 	private final AtomicLong requestId = new AtomicLong(0);
 	private final Disposable subscription;
 
-	public BaseAtomixReactiveApiClient(KafkaTdlibClient kafkaTdlibClient, long userId) {
+	public BaseAtomixReactiveApiClient(KafkaSharedTdlibClients kafkaSharedTdlibClients, long userId) {
 		this.userId = userId;
 		this.clientId = System.nanoTime();
-		var subscription1 = kafkaTdlibClient.request().sendMessages(userId, requests.asFlux())
-				.subscribeOn(Schedulers.boundedElastic())
-				.subscribe(v -> {}, ex -> LOG.error("Failed to send requests", ex));
+		this.requests = kafkaSharedTdlibClients.requests();
 
-		var subscription2 = kafkaTdlibClient.response()
-				.consumeMessages("td-responses", userId)
-				.filter(response -> response.data().clientId() == clientId)
+		var disposable2 = kafkaSharedTdlibClients.responses(clientId)
 				.doOnNext(response -> {
 					var responseSink = responses.get(response.data().requestId());
 					if (responseSink == null) {
@@ -92,8 +70,7 @@ abstract class BaseAtomixReactiveApiClient implements ReactiveApiClient, AutoClo
 				.subscribeOn(Schedulers.parallel())
 				.subscribe();
 		this.subscription = () -> {
-			subscription1.dispose();
-			subscription2.dispose();
+			disposable2.dispose();
 		};
 	}
 
@@ -131,7 +108,7 @@ abstract class BaseAtomixReactiveApiClient implements ReactiveApiClient, AutoClo
 						}
 					})
 					.doFinally(s -> this.responses.remove(requestId));
-			requests.emitNext(new Request<>(clientId, requestId, request, timeout), EmitFailureHandler.busyLooping(TEN_MS));
+			requests.emitNext(new Request<>(userId, clientId, requestId, request, timeout), EmitFailureHandler.busyLooping(TEN_MS));
 			return response;
 		});
 	}

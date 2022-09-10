@@ -54,10 +54,12 @@ public sealed interface Event {
 
 	sealed interface OnRequest<T extends TdApi.Object> extends ServerBoundEvent {
 
-		record Request<T extends TdApi.Object>(long clientId, long requestId, TdApi.Function<T> request,
+		record Request<T extends TdApi.Object>(long userId, long clientId, long requestId, TdApi.Function<T> request,
 																					 Instant timeout) implements OnRequest<T> {}
 
-		record InvalidRequest<T extends TdApi.Object>(long clientId, long requestId) implements OnRequest<T> {}
+		record InvalidRequest<T extends TdApi.Object>(long userId, long clientId, long requestId) implements OnRequest<T> {}
+
+		long userId();
 
 		long clientId();
 

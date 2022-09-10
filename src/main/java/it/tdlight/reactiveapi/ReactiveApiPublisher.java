@@ -4,9 +4,7 @@ import static it.tdlight.reactiveapi.AuthPhase.LOGGED_IN;
 import static it.tdlight.reactiveapi.AuthPhase.LOGGED_OUT;
 import static it.tdlight.reactiveapi.Event.SERIAL_VERSION;
 import static java.util.Objects.requireNonNull;
-import static java.util.concurrent.CompletableFuture.completedFuture;
 
-import com.google.common.primitives.Longs;
 import it.tdlight.common.Init;
 import it.tdlight.common.ReactiveTelegramClient;
 import it.tdlight.common.Response;
@@ -39,9 +37,7 @@ import it.tdlight.reactiveapi.ResultingEvent.ClusterBoundResultingEvent;
 import it.tdlight.reactiveapi.ResultingEvent.ResultingEventPublisherClosed;
 import it.tdlight.reactiveapi.ResultingEvent.TDLibBoundResultingEvent;
 import it.tdlight.tdlight.ClientManager;
-import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
-import java.io.DataInputStream;
 import java.io.DataOutputStream;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -52,7 +48,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 import java.util.StringJoiner;
-import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicReference;
 import org.apache.kafka.common.errors.SerializationException;
 import org.jetbrains.annotations.NotNull;
@@ -74,8 +69,7 @@ public abstract class ReactiveApiPublisher {
 	private static final Duration SPECIAL_RAW_TIMEOUT_DURATION = Duration.ofMinutes(5);
 
 	private static final Duration TEN_MS = Duration.ofMillis(10);
-
-	private final KafkaTdlibServer kafkaTdlibServer;
+	private final KafkaSharedTdlibServers kafkaSharedTdlibServers;
 	private final Set<ResultingEventTransformer> resultingEventTransformerSet;
 	private final ReactiveTelegramClient rawTelegramClient;
 	private final Flux<Signal> telegramClient;
@@ -83,18 +77,18 @@ public abstract class ReactiveApiPublisher {
 	private final AtomicReference<State> state = new AtomicReference<>(new State(LOGGED_OUT));
 	protected final long userId;
 
-	private final Many<OnResponse<TdApi.Object>> responses
-			= Sinks.many().unicast().onBackpressureBuffer(Queues.<OnResponse<TdApi.Object>>small().get());
+	private final Many<OnResponse<TdApi.Object>> responses;
 
 	private final AtomicReference<Disposable> disposable = new AtomicReference<>();
 	private final AtomicReference<Path> path = new AtomicReference<>();
 
-	private ReactiveApiPublisher(KafkaTdlibServer kafkaTdlibServer,
+	private ReactiveApiPublisher(KafkaSharedTdlibServers kafkaSharedTdlibServers,
 			Set<ResultingEventTransformer> resultingEventTransformerSet,
 			long userId) {
-		this.kafkaTdlibServer = kafkaTdlibServer;
+		this.kafkaSharedTdlibServers = kafkaSharedTdlibServers;
 		this.resultingEventTransformerSet = resultingEventTransformerSet;
 		this.userId = userId;
+		this.responses = this.kafkaSharedTdlibServers.responses();
 		this.rawTelegramClient = ClientManager.createReactive();
 		try {
 			Init.start();
@@ -118,18 +112,18 @@ public abstract class ReactiveApiPublisher {
 		});
 	}
 
-	public static ReactiveApiPublisher fromToken(KafkaTdlibServer kafkaTdlibServer,
+	public static ReactiveApiPublisher fromToken(KafkaSharedTdlibServers kafkaSharedTdlibServers,
 			Set<ResultingEventTransformer> resultingEventTransformerSet,
 			long userId,
 			String token) {
-		return new ReactiveApiPublisherToken(kafkaTdlibServer, resultingEventTransformerSet, userId, token);
+		return new ReactiveApiPublisherToken(kafkaSharedTdlibServers, resultingEventTransformerSet, userId, token);
 	}
 
-	public static ReactiveApiPublisher fromPhoneNumber(KafkaTdlibServer kafkaTdlibServer,
+	public static ReactiveApiPublisher fromPhoneNumber(KafkaSharedTdlibServers kafkaSharedTdlibServers,
 			Set<ResultingEventTransformer> resultingEventTransformerSet,
 			long userId,
 			long phoneNumber) {
-		return new ReactiveApiPublisherPhoneNumber(kafkaTdlibServer,
+		return new ReactiveApiPublisherPhoneNumber(kafkaSharedTdlibServers,
 				resultingEventTransformerSet,
 				userId,
 				phoneNumber
@@ -210,7 +204,7 @@ public abstract class ReactiveApiPublisher {
 				// Buffer requests to avoid halting the event loop
 				.onBackpressureBuffer();
 
-		kafkaTdlibServer.events().sendMessages(userId, messagesToSend).subscribeOn(Schedulers.parallel()).subscribe();
+		kafkaSharedTdlibServers.events(messagesToSend);
 
 		publishedResultingEvents
 				// Obtain only cluster-bound events
@@ -463,7 +457,7 @@ public abstract class ReactiveApiPublisher {
 
 	@SuppressWarnings("unchecked")
 	private Disposable registerTopics() {
-		var subscription1 = kafkaTdlibServer.request().consumeMessages("td-requests-handler", userId)
+		var subscription1 = kafkaSharedTdlibServers.requests(userId)
 				.flatMapSequential(req -> this
 						.handleRequest(req.data())
 						.doOnNext(response -> this.responses.emitNext(response, EmitFailureHandler.busyLooping(TEN_MS)))
@@ -471,14 +465,8 @@ public abstract class ReactiveApiPublisher {
 				)
 				.subscribeOn(Schedulers.parallel())
 				.subscribe();
-		var subscription2 = this.kafkaTdlibServer
-				.response()
-				.sendMessages(userId, responses.asFlux())
-				.subscribeOn(Schedulers.parallel())
-				.subscribe();
 		return () -> {
 			subscription1.dispose();
-			subscription2.dispose();
 		};
 	}
 
@@ -543,11 +531,11 @@ public abstract class ReactiveApiPublisher {
 
 		private final String botToken;
 
-		public ReactiveApiPublisherToken(KafkaTdlibServer kafkaTdlibServer,
+		public ReactiveApiPublisherToken(KafkaSharedTdlibServers kafkaSharedTdlibServers,
 				Set<ResultingEventTransformer> resultingEventTransformerSet,
 				long userId,
 				String botToken) {
-			super(kafkaTdlibServer, resultingEventTransformerSet, userId);
+			super(kafkaSharedTdlibServers, resultingEventTransformerSet, userId);
 			this.botToken = botToken;
 		}
 
@@ -574,11 +562,11 @@ public abstract class ReactiveApiPublisher {
 
 		private final long phoneNumber;
 
-		public ReactiveApiPublisherPhoneNumber(KafkaTdlibServer kafkaTdlibServer,
+		public ReactiveApiPublisherPhoneNumber(KafkaSharedTdlibServers kafkaSharedTdlibServers,
 				Set<ResultingEventTransformer> resultingEventTransformerSet,
 				long userId,
 				long phoneNumber) {
-			super(kafkaTdlibServer, resultingEventTransformerSet, userId);
+			super(kafkaSharedTdlibServers, resultingEventTransformerSet, userId);
 			this.phoneNumber = phoneNumber;
 		}
 

@@ -25,6 +25,7 @@ public class TdlibRequestSerializer<T extends TdApi.Object> implements Serialize
 			} else {
 				try(var baos = new ByteArrayOutputStream()) {
 					try (var daos = new DataOutputStream(baos)) {
+						daos.writeLong(data.userId());
 						daos.writeLong(data.clientId());
 						daos.writeLong(data.requestId());
 						daos.writeInt(SERIAL_VERSION);
