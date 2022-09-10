@@ -9,7 +9,7 @@
 		<project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
 		<revision>0-SNAPSHOT</revision>
 
-		<record.builder.version>33</record.builder.version>
+		<record.builder.version>34</record.builder.version>
 	</properties>
 	<pluginRepositories>
 		<pluginRepository>
@@ -129,7 +129,7 @@
 		</dependency>
 		<dependency>
 			<groupId>org.apache.logging.log4j</groupId>
-			<artifactId>log4j-core</artifactId>
+			<artifactId>log4j-api</artifactId>
 			<version>2.18.0</version>
 		</dependency>
 		<dependency>
