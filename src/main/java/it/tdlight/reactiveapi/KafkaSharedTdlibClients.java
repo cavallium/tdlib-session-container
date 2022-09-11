@@ -40,10 +40,10 @@ public class KafkaSharedTdlibClients implements Closeable {
 	public KafkaSharedTdlibClients(KafkaTdlibClientsChannels kafkaTdlibClientsChannels) {
 		this.kafkaTdlibClientsChannels = kafkaTdlibClientsChannels;
 		this.responses = kafkaTdlibClientsChannels.response().consumeMessages("td-responses")
-				.publish()
+				.publish(65535)
 				.autoConnect(1, this.responsesSub::set);
 		this.events = kafkaTdlibClientsChannels.events().consumeMessages("td-handler")
-				.publish()
+				.publish(65535)
 				.autoConnect(1, this.eventsSub::set);
 		this.requestsSub = kafkaTdlibClientsChannels.request()
 				.sendMessages(0L, requests.asFlux())
@@ -82,5 +82,9 @@ public class KafkaSharedTdlibClients implements Closeable {
 			eventsSub.dispose();
 		}
 		kafkaTdlibClientsChannels.close();
+	}
+
+	public boolean canRequestsWait() {
+		return false;
 	}
 }

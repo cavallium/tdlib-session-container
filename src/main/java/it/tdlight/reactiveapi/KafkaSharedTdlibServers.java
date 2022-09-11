@@ -40,7 +40,7 @@ public class KafkaSharedTdlibServers implements Closeable {
 				.subscribe();
 		this.requests = kafkaTdlibServersChannels.request()
 				.consumeMessages("td-requests")
-				.publish()
+				.publish(65535)
 				.autoConnect(1, this.requestsSub::set);
 	}
 

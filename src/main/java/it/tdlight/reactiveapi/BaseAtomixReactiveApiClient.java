@@ -51,11 +51,13 @@ abstract class BaseAtomixReactiveApiClient implements ReactiveApiClient, AutoClo
 			= new ConcurrentHashMap<>();
 	private final AtomicLong requestId = new AtomicLong(0);
 	private final Disposable subscription;
+	private final boolean pullMode;
 
 	public BaseAtomixReactiveApiClient(KafkaSharedTdlibClients kafkaSharedTdlibClients, long userId) {
 		this.userId = userId;
 		this.clientId = System.nanoTime();
 		this.requests = kafkaSharedTdlibClients.requests();
+		this.pullMode = kafkaSharedTdlibClients.canRequestsWait();
 
 		var disposable2 = kafkaSharedTdlibClients.responses(clientId)
 				.doOnNext(response -> {
@@ -120,7 +122,7 @@ abstract class BaseAtomixReactiveApiClient implements ReactiveApiClient, AutoClo
 
 	@Override
 	public final boolean isPullMode() {
-		return true;
+		return pullMode;
 	}
 
 
