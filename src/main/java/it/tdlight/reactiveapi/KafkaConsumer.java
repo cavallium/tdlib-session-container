@@ -7,6 +7,7 @@ import it.tdlight.common.utils.CantLoadLibrary;
 import java.time.Duration;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.function.Function;
 import java.util.logging.Level;
 import java.util.regex.Pattern;
 import org.apache.kafka.clients.consumer.CommitFailedException;
@@ -49,16 +50,16 @@ public abstract class KafkaConsumer<K> {
 		props.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, getChannelName().getDeserializerClass());
 		props.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "latest");
 		props.put(ConsumerConfig.MAX_POLL_INTERVAL_MS_CONFIG, toIntExact(Duration.ofMinutes(5).toMillis()));
-		if (isQuickResponse()) {
-			props.put(ConsumerConfig.HEARTBEAT_INTERVAL_MS_CONFIG, "5000");
-			props.put(ConsumerConfig.SESSION_TIMEOUT_MS_CONFIG, "10000");
-		} else {
+		if (!isQuickResponse()) {
 			props.put(ConsumerConfig.HEARTBEAT_INTERVAL_MS_CONFIG, "10000");
 			props.put(ConsumerConfig.SESSION_TIMEOUT_MS_CONFIG, "30000");
 			props.put(ConsumerConfig.FETCH_MIN_BYTES_CONFIG, "1048576");
 			props.put(ConsumerConfig.FETCH_MAX_WAIT_MS_CONFIG, "100");
 		}
-		ReceiverOptions<Integer, K> receiverOptions = ReceiverOptions.create(props);
+		ReceiverOptions<Integer, K> receiverOptions = ReceiverOptions.<Integer, K>create(props)
+				.commitInterval(Duration.ofSeconds(10))
+				.commitBatchSize(65535)
+				.maxCommitAttempts(100);
 		Pattern pattern;
 		if (userId == null) {
 			pattern = Pattern.compile("tdlib\\." + getChannelName() + "\\.\\d+");
@@ -109,7 +110,9 @@ public abstract class KafkaConsumer<K> {
 
 	private Flux<Timestamped<K>> consumeMessagesInternal(@NotNull String subGroupId, @Nullable Long userId) {
 		return createReceiver(kafkaParameters.groupId() + "-" + subGroupId, userId)
-				.receive()
+				.receiveAutoAck(isQuickResponse() ? null : 32)
+				.concatMap(Flux::collectList)
+				.flatMapIterable(Function.identity())
 				.log("consume-messages" + (userId != null ? "-" + userId : ""),
 						Level.FINEST,
 						SignalType.REQUEST,
@@ -117,7 +120,6 @@ public abstract class KafkaConsumer<K> {
 						SignalType.ON_ERROR,
 						SignalType.ON_COMPLETE
 				)
-				//.doOnNext(result -> result.receiverOffset().acknowledge())
 				.map(record -> {
 					if (record.timestampType() == TimestampType.CREATE_TIME) {
 						return new Timestamped<>(record.timestamp(), record.value());

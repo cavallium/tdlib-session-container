@@ -49,26 +49,27 @@ import java.util.List;
 import java.util.Set;
 import java.util.StringJoiner;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Consumer;
 import org.apache.kafka.common.errors.SerializationException;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
+import org.reactivestreams.Subscriber;
+import org.reactivestreams.Subscription;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import reactor.core.Disposable;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
-import reactor.core.publisher.Sinks;
 import reactor.core.publisher.Sinks.EmitFailureHandler;
 import reactor.core.publisher.Sinks.Many;
 import reactor.core.scheduler.Schedulers;
-import reactor.util.concurrent.Queues;
 
 public abstract class ReactiveApiPublisher {
 
 	private static final Logger LOG = LoggerFactory.getLogger(ReactiveApiPublisher.class);
 	private static final Duration SPECIAL_RAW_TIMEOUT_DURATION = Duration.ofMinutes(5);
 
-	private static final Duration TEN_MS = Duration.ofMillis(10);
+	private static final Duration HUNDRED_MS = Duration.ofMillis(100);
 	private final KafkaSharedTdlibServers kafkaSharedTdlibServers;
 	private final Set<ResultingEventTransformer> resultingEventTransformerSet;
 	private final ReactiveTelegramClient rawTelegramClient;
@@ -96,7 +97,6 @@ public abstract class ReactiveApiPublisher {
 			throw new RuntimeException("Can't load TDLight", e);
 		}
 		this.telegramClient = Flux.<Signal>create(sink -> {
-			var subscription = this.registerTopics();
 			try {
 				rawTelegramClient.createAndRegisterClient();
 			} catch (Throwable ex) {
@@ -106,7 +106,6 @@ public abstract class ReactiveApiPublisher {
 			rawTelegramClient.setListener(sink::next);
 			sink.onCancel(rawTelegramClient::cancel);
 			sink.onDispose(() -> {
-				subscription.dispose();
 				rawTelegramClient.dispose();
 			});
 		});
@@ -455,21 +454,6 @@ public abstract class ReactiveApiPublisher {
 		}
 	}
 
-	@SuppressWarnings("unchecked")
-	private Disposable registerTopics() {
-		var subscription1 = kafkaSharedTdlibServers.requests(userId)
-				.flatMapSequential(req -> this
-						.handleRequest(req.data())
-						.doOnNext(response -> this.responses.emitNext(response, EmitFailureHandler.busyLooping(TEN_MS)))
-						.then()
-				)
-				.subscribeOn(Schedulers.parallel())
-				.subscribe();
-		return () -> {
-			subscription1.dispose();
-		};
-	}
-
 	private static byte[] serializeResponse(Response response) {
 		if (response == null) return null;
 		var id = response.getId();
@@ -486,13 +470,19 @@ public abstract class ReactiveApiPublisher {
 		}
 	}
 
-	private Mono<Event.OnResponse.Response<TdApi.Object>> handleRequest(OnRequest<TdApi.Object> onRequestObj) {
+	public void handleRequest(OnRequest<TdApi.Object> onRequestObj) {
+		handleRequestInternal(onRequestObj,
+				response -> this.responses.emitNext(response, EmitFailureHandler.busyLooping(HUNDRED_MS)));
+	}
+
+	private void handleRequestInternal(OnRequest<TdApi.Object> onRequestObj, Consumer<Event.OnResponse.Response<TdApi.Object>> r) {
 		if (onRequestObj instanceof OnRequest.InvalidRequest invalidRequest) {
-			return Mono.just(new Event.OnResponse.Response<>(invalidRequest.clientId(),
+			r.accept(new Event.OnResponse.Response<>(invalidRequest.clientId(),
 					invalidRequest.requestId(),
 					userId,
 					new TdApi.Error(400, "Conflicting protocol version")
 			));
+			return;
 		}
 		var requestObj = (Request<Object>) onRequestObj;
 		var requestWithTimeoutInstant = new RequestWithTimeoutInstant<>(requestObj.request(), requestObj.timeout());
@@ -504,15 +494,36 @@ public abstract class ReactiveApiPublisher {
 				LOG.warn("Received an expired request. Expiration: {}", requestWithTimeoutInstant.timeout());
 			}
 
-			return Mono
-					.from(rawTelegramClient.send(request, timeoutDuration))
-					.map(responseObj -> new Event.OnResponse.Response<>(onRequestObj.clientId(),
+			rawTelegramClient.send(request, timeoutDuration).subscribe(new Subscriber<Object>() {
+				@Override
+				public void onSubscribe(Subscription subscription) {
+					subscription.request(1);
+				}
+
+				@Override
+				public void onNext(Object responseObj) {
+					r.accept(new Event.OnResponse.Response<>(onRequestObj.clientId(),
 							onRequestObj.requestId(),
-							userId, responseObj))
-					.publishOn(Schedulers.parallel());
+							userId, responseObj));
+				}
+
+				@Override
+				public void onError(Throwable throwable) {
+					LOG.error("Unexpected error while processing response for update {}, user {}, client {}",
+							onRequestObj.requestId(),
+							onRequestObj.userId(),
+							onRequestObj.clientId()
+					);
+				}
+
+				@Override
+				public void onComplete() {
+
+				}
+			});
 		} else {
 			LOG.error("Ignored a request to {} because the current state is {}. Request: {}", userId, state, requestObj);
-			return Mono.just(new Event.OnResponse.Response<>(onRequestObj.clientId(),
+			r.accept(new Event.OnResponse.Response<>(onRequestObj.clientId(),
 					onRequestObj.requestId(),
 					userId, new TdApi.Error(503, "Service Unavailable: " + state)));
 		}

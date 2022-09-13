@@ -1,7 +1,6 @@
 package it.tdlight.reactiveapi;
 
 import static java.util.Objects.requireNonNullElse;
-import static reactor.core.publisher.Sinks.EmitFailureHandler.busyLooping;
 
 import it.tdlight.jni.TdApi.Object;
 import it.tdlight.reactiveapi.Event.ClientBoundEvent;
@@ -39,31 +38,20 @@ public class KafkaSharedTdlibClients implements Closeable {
 
 	public KafkaSharedTdlibClients(KafkaTdlibClientsChannels kafkaTdlibClientsChannels) {
 		this.kafkaTdlibClientsChannels = kafkaTdlibClientsChannels;
-		this.responses = kafkaTdlibClientsChannels.response().consumeMessages("td-responses")
-				.publish(65535)
-				.autoConnect(1, this.responsesSub::set);
-		this.events = kafkaTdlibClientsChannels.events().consumeMessages("td-handler")
-				.publish(65535)
-				.autoConnect(1, this.eventsSub::set);
+		this.responses = kafkaTdlibClientsChannels.response().consumeMessages("td-responses");
+		this.events = kafkaTdlibClientsChannels.events().consumeMessages("td-handler");
 		this.requestsSub = kafkaTdlibClientsChannels.request()
 				.sendMessages(0L, requests.asFlux())
 				.subscribeOn(Schedulers.parallel())
 				.subscribe();
 	}
 
-	public Flux<Timestamped<OnResponse<Object>>> responses(long clientId) {
-		return responses
-				.filter(group -> group.data().clientId() == clientId)
-				//.onBackpressureBuffer(8192, BufferOverflowStrategy.DROP_OLDEST)
-				.log("req-" + clientId, Level.FINEST, SignalType.REQUEST);
+	public Flux<Timestamped<OnResponse<Object>>> responses() {
+		return responses;
 	}
 
-	public Flux<Timestamped<ClientBoundEvent>> events(long userId) {
-		return events
-				.filter(group -> group.data().userId() == userId)
-				//.onBackpressureBuffer(8192, BufferOverflowStrategy.DROP_OLDEST)
-				.doOnSubscribe(s -> LOG.info("Reading updates of client: {}", userId))
-				.log("event-" + userId, Level.FINEST, SignalType.REQUEST);
+	public Flux<Timestamped<ClientBoundEvent>> events() {
+		return events;
 	}
 
 	public Many<OnRequest<?>> requests() {
@@ -82,9 +70,5 @@ public class KafkaSharedTdlibClients implements Closeable {
 			eventsSub.dispose();
 		}
 		kafkaTdlibClientsChannels.close();
-	}
-
-	public boolean canRequestsWait() {
-		return false;
 	}
 }

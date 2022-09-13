@@ -4,6 +4,8 @@ import static it.tdlight.reactiveapi.Event.SERIAL_VERSION;
 
 import it.tdlight.jni.TdApi;
 import it.tdlight.jni.TdApi.Error;
+import it.tdlight.jni.TdApi.Function;
+import it.tdlight.jni.TdApi.Object;
 import it.tdlight.reactiveapi.Event.ClientBoundEvent;
 import it.tdlight.reactiveapi.Event.Ignored;
 import it.tdlight.reactiveapi.Event.OnBotLoginCodeRequested;
@@ -31,19 +33,17 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import reactor.core.Disposable;
 import reactor.core.publisher.Mono;
-import reactor.core.publisher.Sinks;
 import reactor.core.publisher.Sinks.EmitFailureHandler;
 import reactor.core.publisher.Sinks.Many;
 import reactor.core.scheduler.Schedulers;
-import reactor.util.concurrent.Queues;
 
-abstract class BaseAtomixReactiveApiClient implements ReactiveApiClient, AutoCloseable {
+abstract class BaseAtomixReactiveApiClient implements ReactiveApiMultiClient {
 
 	private static final Logger LOG = LoggerFactory.getLogger(BaseAtomixReactiveApiClient.class);
 
-	private static final Duration TEN_MS = Duration.ofMillis(10);
+	private static final Duration HUNDRED_MS = Duration.ofMillis(100);
+	private static final long EMPTY_USER_ID = 0;
 
-	protected final long userId;
 	// Temporary id used to make requests
 	private final long clientId;
 	private final Many<OnRequest<?>> requests;
@@ -51,33 +51,23 @@ abstract class BaseAtomixReactiveApiClient implements ReactiveApiClient, AutoClo
 			= new ConcurrentHashMap<>();
 	private final AtomicLong requestId = new AtomicLong(0);
 	private final Disposable subscription;
-	private final boolean pullMode;
 
-	public BaseAtomixReactiveApiClient(KafkaSharedTdlibClients kafkaSharedTdlibClients, long userId) {
-		this.userId = userId;
+	public BaseAtomixReactiveApiClient(KafkaSharedTdlibClients kafkaSharedTdlibClients) {
 		this.clientId = System.nanoTime();
 		this.requests = kafkaSharedTdlibClients.requests();
-		this.pullMode = kafkaSharedTdlibClients.canRequestsWait();
 
-		var disposable2 = kafkaSharedTdlibClients.responses(clientId)
-				.doOnNext(response -> {
-					var responseSink = responses.get(response.data().requestId());
-					if (responseSink == null) {
-						LOG.debug("Bot #IDU{} received a response for an unknown request id: {}",
-								userId, response.data().requestId());
-						return;
-					}
-					responseSink.complete(response);
-				})
-				.subscribeOn(Schedulers.parallel())
-				.subscribe();
-		this.subscription = () -> {
-			disposable2.dispose();
-		};
+		this.subscription = kafkaSharedTdlibClients.responses().doOnNext(response -> {
+			var responseSink = responses.get(response.data().requestId());
+			if (responseSink == null) {
+				LOG.debug("Bot received a response for an unknown request id: {}", response.data().requestId());
+				return;
+			}
+			responseSink.complete(response);
+		}).subscribeOn(Schedulers.parallel()).subscribe();
 	}
 
 	@Override
-	public final <T extends TdApi.Object> Mono<T> request(TdApi.Function<T> request, Instant timeout) {
+	public <T extends Object> Mono<T> request(long userId, Function<T> request, Instant timeout) {
 		return Mono.defer(() -> {
 			var requestId = this.requestId.getAndIncrement();
 			var timeoutError = new TdError(408, "Request Timeout");
@@ -110,21 +100,11 @@ abstract class BaseAtomixReactiveApiClient implements ReactiveApiClient, AutoClo
 						}
 					})
 					.doFinally(s -> this.responses.remove(requestId));
-			requests.emitNext(new Request<>(userId, clientId, requestId, request, timeout), EmitFailureHandler.busyLooping(TEN_MS));
+			requests.emitNext(new Request<>(userId, clientId, requestId, request, timeout), EmitFailureHandler.busyLooping(
+					HUNDRED_MS));
 			return response;
 		});
 	}
-
-	@Override
-	public final long getUserId() {
-		return userId;
-	}
-
-	@Override
-	public final boolean isPullMode() {
-		return pullMode;
-	}
-
 
 	static ClientBoundEvent deserializeEvent(byte[] bytes) {
 		try (var byteArrayInputStream = new ByteArrayInputStream(bytes)) {
@@ -154,12 +134,14 @@ abstract class BaseAtomixReactiveApiClient implements ReactiveApiClient, AutoClo
 	}
 
 	@Override
-	public void close() {
-		subscription.dispose();
-		long now = System.currentTimeMillis();
-		responses.forEach((requestId, cf) -> cf.complete(new Timestamped<>(now,
-				new Response<>(clientId, requestId, userId, new Error(408, "Request Timeout"))
-		)));
-		responses.clear();
+	public Mono<Void> close() {
+		return Mono.fromRunnable(() -> {
+			subscription.dispose();
+			long now = System.currentTimeMillis();
+			responses.forEach((requestId, cf) -> cf.complete(new Timestamped<>(now,
+					new Response<>(clientId, requestId, EMPTY_USER_ID, new Error(408, "Request Timeout"))
+			)));
+			responses.clear();
+		});
 	}
 }

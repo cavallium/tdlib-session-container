@@ -6,9 +6,9 @@ import java.time.Instant;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
-public interface ReactiveApiClient extends ReactiveApiThinClient {
+public interface ReactiveApiThinClient {
 
-	Flux<ClientBoundEvent> clientBoundEvents();
+	<T extends TdApi.Object> Mono<T> request(TdApi.Function<T> request, Instant timeout);
 
-	boolean isPullMode();
+	long getUserId();
 }

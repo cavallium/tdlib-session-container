@@ -1,7 +1,6 @@
 package it.tdlight.reactiveapi;
 
 import static java.util.Objects.requireNonNullElse;
-import static reactor.core.publisher.Sinks.EmitFailureHandler.busyLooping;
 
 import it.tdlight.jni.TdApi;
 import it.tdlight.jni.TdApi.Object;
@@ -39,16 +38,13 @@ public class KafkaSharedTdlibServers implements Closeable {
 				.subscribeOn(Schedulers.parallel())
 				.subscribe();
 		this.requests = kafkaTdlibServersChannels.request()
-				.consumeMessages("td-requests")
-				.publish(65535)
-				.autoConnect(1, this.requestsSub::set);
+				.consumeMessages("td-requests");
 	}
 
-	public Flux<Timestamped<OnRequest<Object>>> requests(long userId) {
+	public Flux<Timestamped<OnRequest<Object>>> requests() {
 		return requests
-				.filter(group -> group.data().userId() == userId)
 				//.onBackpressureBuffer(8192, BufferOverflowStrategy.DROP_OLDEST)
-				.log("requests-" + userId, Level.FINEST, SignalType.REQUEST, SignalType.ON_NEXT);
+				.log("requests", Level.FINEST, SignalType.REQUEST, SignalType.ON_NEXT);
 	}
 
 	public Disposable events(Flux<ClientBoundEvent> eventFlux) {

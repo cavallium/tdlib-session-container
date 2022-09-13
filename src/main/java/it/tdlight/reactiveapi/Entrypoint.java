@@ -4,6 +4,7 @@ import static java.util.Collections.unmodifiableSet;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.dataformat.yaml.YAMLFactory;
+import it.tdlight.reactiveapi.AtomixReactiveApi.AtomixReactiveApiMode;
 import java.io.IOException;
 import java.lang.reflect.InvocationTargetException;
 import java.nio.file.Files;
@@ -66,7 +67,7 @@ public class Entrypoint {
 			@Nullable DiskSessionsManager diskSessions) {
 
 		Set<ResultingEventTransformer> resultingEventTransformerSet;
-		boolean clientOnly = false;
+		AtomixReactiveApiMode mode = AtomixReactiveApiMode.SERVER;
 		if (instanceSettings.client) {
 			if (diskSessions != null) {
 				throw new IllegalArgumentException("A client instance can't have a session manager!");
@@ -74,7 +75,7 @@ public class Entrypoint {
 			if (instanceSettings.clientAddress == null) {
 				throw new IllegalArgumentException("A client instance must have an address (host:port)");
 			}
-			clientOnly = true;
+			mode = AtomixReactiveApiMode.CLIENT;
 			resultingEventTransformerSet = Set.of();
 		} else {
 			if (diskSessions == null) {
@@ -103,7 +104,7 @@ public class Entrypoint {
 
 		var kafkaParameters = new KafkaParameters(clusterSettings, instanceSettings.id);
 
-		var api = new AtomixReactiveApi(clientOnly, kafkaParameters, diskSessions, resultingEventTransformerSet);
+		var api = new AtomixReactiveApi(mode, kafkaParameters, diskSessions, resultingEventTransformerSet);
 
 		LOG.info("Starting ReactiveApi...");
 

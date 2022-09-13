@@ -20,18 +20,21 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import reactor.core.Disposable;
 import reactor.core.publisher.Mono;
+import reactor.core.publisher.Sinks.EmitFailureHandler;
 import reactor.core.scheduler.Schedulers;
 
 public class AtomixReactiveApi implements ReactiveApi {
 
 	private static final Logger LOG = LoggerFactory.getLogger(AtomixReactiveApi.class);
 
-	private final boolean clientOnly;
+	private final AtomixReactiveApiMode mode;
 
 	private final KafkaSharedTdlibClients kafkaSharedTdlibClients;
 	@Nullable
 	private final KafkaSharedTdlibServers kafkaSharedTdlibServers;
+	private final ReactiveApiMultiClient client;
 
 	private final Set<ResultingEventTransformer> resultingEventTransformerSet;
 	/**
@@ -44,12 +47,19 @@ public class AtomixReactiveApi implements ReactiveApi {
 	@Nullable
 	private final DiskSessionsManager diskSessions;
 	private volatile boolean closeRequested;
+	private volatile Disposable requestsSub;
 
-	public AtomixReactiveApi(boolean clientOnly,
+	public enum AtomixReactiveApiMode {
+		CLIENT,
+		SERVER,
+		FULL
+	}
+
+	public AtomixReactiveApi(AtomixReactiveApiMode mode,
 			KafkaParameters kafkaParameters,
 			@Nullable DiskSessionsManager diskSessions,
 			@NotNull Set<ResultingEventTransformer> resultingEventTransformerSet) {
-		this.clientOnly = clientOnly;
+		this.mode = mode;
 		var kafkaTDLibRequestProducer = new KafkaTdlibRequestProducer(kafkaParameters);
 		var kafkaTDLibResponseConsumer = new KafkaTdlibResponseConsumer(kafkaParameters);
 		var kafkaClientBoundConsumer = new KafkaClientBoundConsumer(kafkaParameters);
@@ -57,10 +67,14 @@ public class AtomixReactiveApi implements ReactiveApi {
 				kafkaTDLibResponseConsumer,
 				kafkaClientBoundConsumer
 		);
-		this.kafkaSharedTdlibClients = new KafkaSharedTdlibClients(kafkaTdlibClientsChannels);
-		if (clientOnly) {
-			this.kafkaSharedTdlibServers = null;
+		if (mode != AtomixReactiveApiMode.SERVER) {
+			this.kafkaSharedTdlibClients = new KafkaSharedTdlibClients(kafkaTdlibClientsChannels);
+			this.client = new LiveAtomixReactiveApiClient(kafkaSharedTdlibClients);
 		} else {
+			this.kafkaSharedTdlibClients = null;
+			this.client = null;
+		}
+		if (mode != AtomixReactiveApiMode.CLIENT) {
 			var kafkaTDLibRequestConsumer = new KafkaTdlibRequestConsumer(kafkaParameters);
 			var kafkaTDLibResponseProducer = new KafkaTdlibResponseProducer(kafkaParameters);
 			var kafkaClientBoundProducer = new KafkaClientBoundProducer(kafkaParameters);
@@ -69,6 +83,8 @@ public class AtomixReactiveApi implements ReactiveApi {
 					kafkaClientBoundProducer
 			);
 			this.kafkaSharedTdlibServers = new KafkaSharedTdlibServers(kafkaTDLibServer);
+		} else {
+			this.kafkaSharedTdlibServers = null;
 		}
 		this.resultingEventTransformerSet = resultingEventTransformerSet;
 
@@ -90,7 +106,7 @@ public class AtomixReactiveApi implements ReactiveApi {
 				.flatMapIterable(a -> a)
 				.map(a -> new DiskSessionAndId(a.getValue(), a.getKey()));
 
-		return idsSavedIntoLocalConfiguration
+		var loadSessions = idsSavedIntoLocalConfiguration
 				.filter(diskSessionAndId -> {
 					try {
 						diskSessionAndId.diskSession().validate();
@@ -111,13 +127,22 @@ public class AtomixReactiveApi implements ReactiveApi {
 				})
 				.then()
 				.doOnTerminate(() -> LOG.info("Loaded all saved sessions from disk"));
+
+		return loadSessions.then(Mono.fromRunnable(() -> {
+			if (kafkaSharedTdlibServers != null) {
+				requestsSub = kafkaSharedTdlibServers.requests()
+						.doOnNext(req -> localSessions.get(req.data().userId()).handleRequest(req.data()))
+						.subscribeOn(Schedulers.parallel())
+						.subscribe();
+			}
+			}));
 	}
 
 	@Override
 	public Mono<CreateSessionResponse> createSession(CreateSessionRequest req) {
 		LOG.debug("Received create session request: {}", req);
 
-		if (clientOnly) {
+		if (mode == AtomixReactiveApiMode.CLIENT) {
 			return Mono.error(new UnsupportedOperationException("This is a client, it can't have own sessions"));
 		}
 
@@ -225,8 +250,8 @@ public class AtomixReactiveApi implements ReactiveApi {
 	}
 
 	@Override
-	public ReactiveApiClient client(long userId) {
-		return new LiveAtomixReactiveApiClient(kafkaSharedTdlibClients, userId);
+	public ReactiveApiMultiClient client() {
+		return client;
 	}
 
 	@Override
@@ -238,9 +263,17 @@ public class AtomixReactiveApi implements ReactiveApi {
 		} else {
 			kafkaServerProducersStopper = Mono.empty();
 		}
-		Mono<?> kafkaClientProducersStopper = Mono
-				.fromRunnable(kafkaSharedTdlibClients::close)
-				.subscribeOn(Schedulers.boundedElastic());
+		Mono<?> kafkaClientProducersStopper;
+		if (kafkaSharedTdlibClients != null) {
+			kafkaClientProducersStopper = Mono
+					.fromRunnable(kafkaSharedTdlibClients::close)
+					.subscribeOn(Schedulers.boundedElastic());
+		} else {
+			kafkaClientProducersStopper = Mono.empty();
+		}
+		if (requestsSub != null) {
+			requestsSub.dispose();
+		}
 		return Mono.when(kafkaServerProducersStopper, kafkaClientProducersStopper);
 	}
 

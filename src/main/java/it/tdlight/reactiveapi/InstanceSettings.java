@@ -13,9 +13,7 @@ public class InstanceSettings {
 	public String id;
 
 	/**
-	 * True if this is just a client, false if this is a complete node
-	 * <p>
-	 * A client is a lightweight node
+	 * True if this is just a client, false if this is a server
 	 */
 	public boolean client;
 

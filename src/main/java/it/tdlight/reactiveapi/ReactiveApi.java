@@ -11,7 +11,7 @@ public interface ReactiveApi {
 
 	Mono<CreateSessionResponse> createSession(CreateSessionRequest req);
 
-	ReactiveApiClient client(long userId);
+	ReactiveApiMultiClient client();
 
 	Mono<Void> close();
 

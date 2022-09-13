@@ -26,9 +26,9 @@ public abstract class KafkaProducer<K> {
 		Map<String, Object> props = new HashMap<>();
 		props.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, kafkaParameters.bootstrapServers());
 		props.put(ProducerConfig.CLIENT_ID_CONFIG, kafkaParameters.clientId());
-		//props.put(ProducerConfig.ACKS_CONFIG, "1");
-		props.put(ProducerConfig.ACKS_CONFIG, "0");
-		props.put(ProducerConfig.BATCH_SIZE_CONFIG, 16384);
+		props.put(ProducerConfig.ACKS_CONFIG, "1");
+		props.put(ProducerConfig.BATCH_SIZE_CONFIG, Integer.toString(32 * 1024));
+		props.put(ProducerConfig.LINGER_MS_CONFIG, "20");
 		props.put(ProducerConfig.COMPRESSION_TYPE_CONFIG, "snappy");
 		props.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, IntegerSerializer.class);
 		props.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, getChannelName().getSerializerClass());
