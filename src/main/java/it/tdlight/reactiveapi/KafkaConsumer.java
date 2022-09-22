@@ -129,9 +129,8 @@ public abstract class KafkaConsumer<K> {
 						return new Timestamped<>(1, record.value());
 					}
 				})
-				.transform(ReactorUtils::subscribeOnce);
-				//todo: check if they must be re-enabled
-				//.transform(this::retryIfCleanup)
-				//.transform(this::retryIfCommitFailed);
+				.transform(ReactorUtils::subscribeOnce)
+				.transform(this::retryIfCleanup)
+				.transform(this::retryIfCommitFailed);
 	}
 }
