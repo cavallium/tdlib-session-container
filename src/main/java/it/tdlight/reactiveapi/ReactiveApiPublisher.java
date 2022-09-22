@@ -471,8 +471,11 @@ public abstract class ReactiveApiPublisher {
 	}
 
 	public void handleRequest(OnRequest<TdApi.Object> onRequestObj) {
-		handleRequestInternal(onRequestObj,
-				response -> this.responses.emitNext(response, EmitFailureHandler.busyLooping(HUNDRED_MS)));
+		handleRequestInternal(onRequestObj, response -> {
+			synchronized (this.responses) {
+				this.responses.emitNext(response, EmitFailureHandler.FAIL_FAST);
+			}
+		});
 	}
 
 	private void handleRequestInternal(OnRequest<TdApi.Object> onRequestObj, Consumer<Event.OnResponse.Response<TdApi.Object>> r) {

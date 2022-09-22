@@ -7,6 +7,7 @@ import it.tdlight.common.utils.CantLoadLibrary;
 import java.time.Duration;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Function;
 import java.util.logging.Level;
 import java.util.regex.Pattern;
@@ -19,6 +20,7 @@ import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
+import org.reactivestreams.Publisher;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.SignalType;
 import reactor.kafka.receiver.KafkaReceiver;
@@ -58,8 +60,9 @@ public abstract class KafkaConsumer<K> {
 		}
 		ReceiverOptions<Integer, K> receiverOptions = ReceiverOptions.<Integer, K>create(props)
 				.commitInterval(Duration.ofSeconds(10))
-				.commitBatchSize(65535)
-				.maxCommitAttempts(100);
+				.commitBatchSize(isQuickResponse() ? 64 : 1024)
+				.maxCommitAttempts(5)
+				.maxDeferredCommits((isQuickResponse() ? 64 : 1024) * 5);
 		Pattern pattern;
 		if (userId == null) {
 			pattern = Pattern.compile("tdlib\\." + getChannelName() + "\\.\\d+");
@@ -110,9 +113,8 @@ public abstract class KafkaConsumer<K> {
 
 	private Flux<Timestamped<K>> consumeMessagesInternal(@NotNull String subGroupId, @Nullable Long userId) {
 		return createReceiver(kafkaParameters.groupId() + "-" + subGroupId, userId)
-				.receiveAutoAck(isQuickResponse() ? null : 32)
-				.concatMap(Flux::collectList)
-				.flatMapIterable(Function.identity())
+				.receiveAutoAck(isQuickResponse() ? 1 : 4)
+				.concatMap(Function.identity())
 				.log("consume-messages" + (userId != null ? "-" + userId : ""),
 						Level.FINEST,
 						SignalType.REQUEST,
@@ -127,7 +129,9 @@ public abstract class KafkaConsumer<K> {
 						return new Timestamped<>(1, record.value());
 					}
 				})
-				.transform(this::retryIfCleanup)
-				.transform(this::retryIfCommitFailed);
+				.transform(ReactorUtils::subscribeOnce);
+				//todo: check if they must be re-enabled
+				//.transform(this::retryIfCleanup)
+				//.transform(this::retryIfCommitFailed);
 	}
 }

@@ -100,8 +100,9 @@ abstract class BaseAtomixReactiveApiClient implements ReactiveApiMultiClient {
 						}
 					})
 					.doFinally(s -> this.responses.remove(requestId));
-			requests.emitNext(new Request<>(userId, clientId, requestId, request, timeout), EmitFailureHandler.busyLooping(
-					HUNDRED_MS));
+			synchronized (requests) {
+				requests.emitNext(new Request<>(userId, clientId, requestId, request, timeout), EmitFailureHandler.FAIL_FAST);
+			}
 			return response;
 		});
 	}

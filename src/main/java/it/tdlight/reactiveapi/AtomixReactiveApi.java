@@ -128,14 +128,15 @@ public class AtomixReactiveApi implements ReactiveApi {
 				.then()
 				.doOnTerminate(() -> LOG.info("Loaded all saved sessions from disk"));
 
-		return loadSessions.then(Mono.fromRunnable(() -> {
+		return loadSessions.<Void>then(Mono.fromRunnable(() -> {
 			if (kafkaSharedTdlibServers != null) {
 				requestsSub = kafkaSharedTdlibServers.requests()
+						.onBackpressureError()
 						.doOnNext(req -> localSessions.get(req.data().userId()).handleRequest(req.data()))
 						.subscribeOn(Schedulers.parallel())
 						.subscribe();
 			}
-			}));
+			})).transform(ReactorUtils::subscribeOnce);
 	}
 
 	@Override
