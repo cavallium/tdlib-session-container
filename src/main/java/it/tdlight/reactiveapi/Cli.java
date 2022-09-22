@@ -1,5 +1,6 @@
 package it.tdlight.reactiveapi;
 
+import static it.tdlight.reactiveapi.Lanes.MAIN_LANE;
 import static java.util.Collections.unmodifiableSet;
 
 import it.tdlight.reactiveapi.CreateSessionRequest.CreateBotSessionRequest;
@@ -114,7 +115,7 @@ public class Cli {
 			if (parts.length == 4) {
 				lane = parts[3];
 			} else {
-				lane = "";
+				lane = MAIN_LANE;
 			}
 			CreateSessionRequest request = switch (parts[0]) {
 				case "bot" -> new CreateBotSessionRequest(Long.parseLong(parts[1]), parts[2], lane);

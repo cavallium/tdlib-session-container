@@ -16,7 +16,7 @@ public record KafkaParameters(String groupId, String clientId, String bootstrapS
 
 	public Set<String> getAllLanes() {
 		var lanes = new LinkedHashSet<String>(this.lanes.size() + 1);
-		lanes.add("");
+		lanes.add("main");
 		lanes.addAll(this.lanes);
 		return lanes;
 	}

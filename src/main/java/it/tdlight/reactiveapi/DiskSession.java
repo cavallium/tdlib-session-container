@@ -1,5 +1,7 @@
 package it.tdlight.reactiveapi;
 
+import static it.tdlight.reactiveapi.Lanes.MAIN_LANE;
+
 import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonInclude.Include;
@@ -23,7 +25,7 @@ public class DiskSession {
 			@JsonProperty("lane") @Nullable String lane) {
 		this.token = token;
 		this.phoneNumber = phoneNumber;
-		this.lane = Objects.requireNonNullElse(lane, "");
+		this.lane = Objects.requireNonNullElse(lane, MAIN_LANE);
 		this.validate();
 	}
 
