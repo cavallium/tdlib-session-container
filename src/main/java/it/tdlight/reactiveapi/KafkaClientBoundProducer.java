@@ -1,16 +1,27 @@
 package it.tdlight.reactiveapi;
 
 import it.tdlight.reactiveapi.Event.ClientBoundEvent;
-import it.tdlight.reactiveapi.Event.OnRequest;
 
 public class KafkaClientBoundProducer extends KafkaProducer<ClientBoundEvent> {
 
-	public KafkaClientBoundProducer(KafkaParameters kafkaParameters) {
+	private final String name;
+
+	public KafkaClientBoundProducer(KafkaParameters kafkaParameters, String lane) {
 		super(kafkaParameters);
+		if (lane.isBlank()) {
+			this.name = KafkaChannelCodec.CLIENT_BOUND_EVENT.getKafkaName();
+		} else {
+			this.name = KafkaChannelCodec.CLIENT_BOUND_EVENT.getKafkaName() + "-" + lane;
+		}
 	}
 
 	@Override
-	public KafkaChannelName getChannelName() {
-		return KafkaChannelName.CLIENT_BOUND_EVENT;
+	public KafkaChannelCodec getChannelCodec() {
+		return KafkaChannelCodec.CLIENT_BOUND_EVENT;
+	}
+
+	@Override
+	public String getChannelName() {
+		return name;
 	}
 }

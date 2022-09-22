@@ -9,7 +9,12 @@ public class KafkaTdlibRequestProducer extends KafkaProducer<OnRequest<?>> {
 	}
 
 	@Override
-	public KafkaChannelName getChannelName() {
-		return KafkaChannelName.TDLIB_REQUEST;
+	public KafkaChannelCodec getChannelCodec() {
+		return KafkaChannelCodec.TDLIB_REQUEST;
+	}
+
+	@Override
+	public String getChannelName() {
+		return getChannelCodec().getKafkaName();
 	}
 }

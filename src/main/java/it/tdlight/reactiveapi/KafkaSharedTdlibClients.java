@@ -8,9 +8,12 @@ import it.tdlight.reactiveapi.Event.OnRequest;
 import it.tdlight.reactiveapi.Event.OnResponse;
 import java.io.Closeable;
 import java.time.Duration;
+import java.util.Map;
+import java.util.Map.Entry;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Function;
 import java.util.logging.Level;
+import java.util.stream.Collectors;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import reactor.core.Disposable;
@@ -32,16 +35,17 @@ public class KafkaSharedTdlibClients implements Closeable {
 	private final Disposable requestsSub;
 	private final AtomicReference<Disposable> eventsSub = new AtomicReference<>();
 	private final Flux<Timestamped<OnResponse<Object>>> responses;
-	private final Flux<Timestamped<ClientBoundEvent>> events;
+	private final Map<String, Flux<Timestamped<ClientBoundEvent>>> events;
 	private final Many<OnRequest<?>> requests = Sinks.many().unicast()
 			.onBackpressureBuffer(Queues.<OnRequest<?>>get(65535).get());
 
 	public KafkaSharedTdlibClients(KafkaTdlibClientsChannels kafkaTdlibClientsChannels) {
 		this.kafkaTdlibClientsChannels = kafkaTdlibClientsChannels;
 		this.responses = kafkaTdlibClientsChannels.response().consumeMessages("td-responses");
-		this.events = kafkaTdlibClientsChannels.events().consumeMessages("td-handler");
+		this.events = kafkaTdlibClientsChannels.events().entrySet().stream()
+				.collect(Collectors.toUnmodifiableMap(Entry::getKey, e -> e.getValue().consumeMessages(e.getKey())));
 		this.requestsSub = kafkaTdlibClientsChannels.request()
-				.sendMessages(0L, requests.asFlux())
+				.sendMessages(requests.asFlux())
 				.subscribeOn(Schedulers.parallel())
 				.subscribe();
 	}
@@ -50,7 +54,15 @@ public class KafkaSharedTdlibClients implements Closeable {
 		return responses;
 	}
 
-	public Flux<Timestamped<ClientBoundEvent>> events() {
+	public Flux<Timestamped<ClientBoundEvent>> events(String lane) {
+		var result = events.get(lane);
+		if (result == null) {
+			throw new IllegalArgumentException("No lane " + lane);
+		}
+		return result;
+	}
+
+	public Map<String, Flux<Timestamped<ClientBoundEvent>>> events() {
 		return events;
 	}
 

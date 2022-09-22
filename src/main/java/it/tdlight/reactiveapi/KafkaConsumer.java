@@ -6,8 +6,8 @@ import it.tdlight.common.Init;
 import it.tdlight.common.utils.CantLoadLibrary;
 import java.time.Duration;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
-import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Function;
 import java.util.logging.Level;
 import java.util.regex.Pattern;
@@ -20,7 +20,6 @@ import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
-import org.reactivestreams.Publisher;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.SignalType;
 import reactor.kafka.receiver.KafkaReceiver;
@@ -37,7 +36,7 @@ public abstract class KafkaConsumer<K> {
 		this.kafkaParameters = kafkaParameters;
 	}
 
-	public KafkaReceiver<Integer, K> createReceiver(@NotNull String groupId, @Nullable Long userId) {
+	public KafkaReceiver<Integer, K> createReceiver(@NotNull String kafkaGroupId) {
 		try {
 			Init.start();
 		} catch (CantLoadLibrary e) {
@@ -46,10 +45,10 @@ public abstract class KafkaConsumer<K> {
 		}
 		Map<String, Object> props = new HashMap<>();
 		props.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, kafkaParameters.bootstrapServers());
-		props.put(ConsumerConfig.CLIENT_ID_CONFIG, kafkaParameters.clientId() + (userId != null ? ("_" + userId) : ""));
-		props.put(ConsumerConfig.GROUP_ID_CONFIG, groupId);
+		props.put(ConsumerConfig.CLIENT_ID_CONFIG, kafkaParameters.clientId());
+		props.put(ConsumerConfig.GROUP_ID_CONFIG, kafkaGroupId);
 		props.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, IntegerDeserializer.class);
-		props.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, getChannelName().getDeserializerClass());
+		props.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, getChannelCodec().getDeserializerClass());
 		props.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "latest");
 		props.put(ConsumerConfig.MAX_POLL_INTERVAL_MS_CONFIG, toIntExact(Duration.ofMinutes(5).toMillis()));
 		if (!isQuickResponse()) {
@@ -63,20 +62,16 @@ public abstract class KafkaConsumer<K> {
 				.commitBatchSize(isQuickResponse() ? 64 : 1024)
 				.maxCommitAttempts(5)
 				.maxDeferredCommits((isQuickResponse() ? 64 : 1024) * 5);
-		Pattern pattern;
-		if (userId == null) {
-			pattern = Pattern.compile("tdlib\\." + getChannelName() + "\\.\\d+");
-		} else {
-			pattern = Pattern.compile("tdlib\\." + getChannelName() + "\\." + userId);
-		}
 		ReceiverOptions<Integer, K> options = receiverOptions
-				.subscription(pattern)
+				.subscription(List.of("tdlib." + getChannelName()))
 				.addAssignListener(partitions -> LOG.debug("onPartitionsAssigned {}", partitions))
 				.addRevokeListener(partitions -> LOG.debug("onPartitionsRevoked {}", partitions));
 		return KafkaReceiver.create(options);
 	}
 
-	public abstract KafkaChannelName getChannelName();
+	public abstract KafkaChannelCodec getChannelCodec();
+
+	public abstract String getChannelName();
 
 	public abstract boolean isQuickResponse();
 
@@ -103,19 +98,15 @@ public abstract class KafkaConsumer<K> {
 						+ " with max.poll.records.")));
 	}
 
-	public Flux<Timestamped<K>> consumeMessages(@NotNull String subGroupId, long userId) {
-		return consumeMessagesInternal(subGroupId, userId);
-	}
-
 	public Flux<Timestamped<K>> consumeMessages(@NotNull String subGroupId) {
-		return consumeMessagesInternal(subGroupId, null);
+		return consumeMessagesInternal(subGroupId);
 	}
 
-	private Flux<Timestamped<K>> consumeMessagesInternal(@NotNull String subGroupId, @Nullable Long userId) {
-		return createReceiver(kafkaParameters.groupId() + "-" + subGroupId, userId)
+	private Flux<Timestamped<K>> consumeMessagesInternal(@NotNull String subGroupId) {
+		return createReceiver(kafkaParameters.groupId() + (subGroupId.isBlank() ? "" : ("-" + subGroupId)))
 				.receiveAutoAck(isQuickResponse() ? 1 : 4)
 				.concatMap(Function.identity())
-				.log("consume-messages" + (userId != null ? "-" + userId : ""),
+				.log("consume-messages",
 						Level.FINEST,
 						SignalType.REQUEST,
 						SignalType.ON_NEXT,

@@ -1,10 +1,11 @@
 package it.tdlight.reactiveapi;
 
 import java.io.Closeable;
+import java.util.Map;
 
 public record KafkaTdlibClientsChannels(KafkaTdlibRequestProducer request,
 																				KafkaTdlibResponseConsumer response,
-																				KafkaClientBoundConsumer events) implements Closeable {
+																				Map<String, KafkaClientBoundConsumer> events) implements Closeable {
 
 	@Override
 	public void close() {

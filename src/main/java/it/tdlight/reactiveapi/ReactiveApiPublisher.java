@@ -46,6 +46,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 import java.util.Set;
 import java.util.StringJoiner;
 import java.util.concurrent.atomic.AtomicReference;
@@ -77,6 +78,7 @@ public abstract class ReactiveApiPublisher {
 
 	private final AtomicReference<State> state = new AtomicReference<>(new State(LOGGED_OUT));
 	protected final long userId;
+	protected final String lane;
 
 	private final Many<OnResponse<TdApi.Object>> responses;
 
@@ -85,10 +87,11 @@ public abstract class ReactiveApiPublisher {
 
 	private ReactiveApiPublisher(KafkaSharedTdlibServers kafkaSharedTdlibServers,
 			Set<ResultingEventTransformer> resultingEventTransformerSet,
-			long userId) {
+			long userId, String lane) {
 		this.kafkaSharedTdlibServers = kafkaSharedTdlibServers;
 		this.resultingEventTransformerSet = resultingEventTransformerSet;
 		this.userId = userId;
+		this.lane = Objects.requireNonNull(lane);
 		this.responses = this.kafkaSharedTdlibServers.responses();
 		this.rawTelegramClient = ClientManager.createReactive();
 		try {
@@ -114,18 +117,21 @@ public abstract class ReactiveApiPublisher {
 	public static ReactiveApiPublisher fromToken(KafkaSharedTdlibServers kafkaSharedTdlibServers,
 			Set<ResultingEventTransformer> resultingEventTransformerSet,
 			long userId,
-			String token) {
-		return new ReactiveApiPublisherToken(kafkaSharedTdlibServers, resultingEventTransformerSet, userId, token);
+			String token,
+			String lane) {
+		return new ReactiveApiPublisherToken(kafkaSharedTdlibServers, resultingEventTransformerSet, userId, token, lane);
 	}
 
 	public static ReactiveApiPublisher fromPhoneNumber(KafkaSharedTdlibServers kafkaSharedTdlibServers,
 			Set<ResultingEventTransformer> resultingEventTransformerSet,
 			long userId,
-			long phoneNumber) {
+			long phoneNumber,
+			String lane) {
 		return new ReactiveApiPublisherPhoneNumber(kafkaSharedTdlibServers,
 				resultingEventTransformerSet,
 				userId,
-				phoneNumber
+				phoneNumber,
+				lane
 		);
 	}
 
@@ -203,7 +209,7 @@ public abstract class ReactiveApiPublisher {
 				// Buffer requests to avoid halting the event loop
 				.onBackpressureBuffer();
 
-		kafkaSharedTdlibServers.events(messagesToSend);
+		kafkaSharedTdlibServers.events(lane, messagesToSend);
 
 		publishedResultingEvents
 				// Obtain only cluster-bound events
@@ -548,8 +554,9 @@ public abstract class ReactiveApiPublisher {
 		public ReactiveApiPublisherToken(KafkaSharedTdlibServers kafkaSharedTdlibServers,
 				Set<ResultingEventTransformer> resultingEventTransformerSet,
 				long userId,
-				String botToken) {
-			super(kafkaSharedTdlibServers, resultingEventTransformerSet, userId);
+				String botToken,
+				String lane) {
+			super(kafkaSharedTdlibServers, resultingEventTransformerSet, userId, lane);
 			this.botToken = botToken;
 		}
 
@@ -579,8 +586,9 @@ public abstract class ReactiveApiPublisher {
 		public ReactiveApiPublisherPhoneNumber(KafkaSharedTdlibServers kafkaSharedTdlibServers,
 				Set<ResultingEventTransformer> resultingEventTransformerSet,
 				long userId,
-				long phoneNumber) {
-			super(kafkaSharedTdlibServers, resultingEventTransformerSet, userId);
+				long phoneNumber,
+				String lane) {
+			super(kafkaSharedTdlibServers, resultingEventTransformerSet, userId, lane);
 			this.phoneNumber = phoneNumber;
 		}
 

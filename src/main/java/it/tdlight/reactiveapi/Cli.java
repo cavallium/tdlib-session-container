@@ -109,11 +109,17 @@ public class Cli {
 	private static void createSession(ReactiveApi api, String commandArgs) {
 		var parts = commandArgs.split(" ");
 		boolean invalid = false;
-		if (parts.length == 3) {
+		if (parts.length == 4 || parts.length == 3) {
+			String lane;
+			if (parts.length == 4) {
+				lane = parts[3];
+			} else {
+				lane = "";
+			}
 			CreateSessionRequest request = switch (parts[0]) {
-				case "bot" -> new CreateBotSessionRequest(Long.parseLong(parts[1]), parts[2]);
+				case "bot" -> new CreateBotSessionRequest(Long.parseLong(parts[1]), parts[2], lane);
 				case "user" -> new CreateUserSessionRequest(Long.parseLong(parts[1]),
-						Long.parseLong(parts[2]));
+						Long.parseLong(parts[2]), lane);
 				default -> {
 					invalid = true;
 					yield null;
@@ -129,7 +135,7 @@ public class Cli {
 			invalid = true;
 		}
 		if (invalid) {
-			LOG.error("Syntax: CreateSession <\"bot\"|\"user\"> <userid> <token|phoneNumber>");
+			LOG.error("Syntax: CreateSession <\"bot\"|\"user\"> <userid> <token|phoneNumber> [lane]");
 		}
 	}
 

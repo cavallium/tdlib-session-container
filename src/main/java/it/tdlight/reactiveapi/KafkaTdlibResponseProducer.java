@@ -1,7 +1,6 @@
 package it.tdlight.reactiveapi;
 
 import it.tdlight.jni.TdApi;
-import it.tdlight.reactiveapi.Event.ClientBoundEvent;
 import it.tdlight.reactiveapi.Event.OnResponse;
 
 public class KafkaTdlibResponseProducer extends KafkaProducer<OnResponse<TdApi.Object>> {
@@ -11,7 +10,12 @@ public class KafkaTdlibResponseProducer extends KafkaProducer<OnResponse<TdApi.O
 	}
 
 	@Override
-	public KafkaChannelName getChannelName() {
-		return KafkaChannelName.TDLIB_RESPONSE;
+	public KafkaChannelCodec getChannelCodec() {
+		return KafkaChannelCodec.TDLIB_RESPONSE;
+	}
+
+	@Override
+	public String getChannelName() {
+		return getChannelCodec().getKafkaName();
 	}
 }

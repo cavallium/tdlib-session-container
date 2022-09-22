@@ -9,6 +9,7 @@ import java.io.IOException;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.time.Duration;
+import java.util.HashMap;
 import java.util.Map.Entry;
 import java.util.Objects;
 import java.util.Set;
@@ -22,7 +23,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import reactor.core.Disposable;
 import reactor.core.publisher.Mono;
-import reactor.core.publisher.Sinks.EmitFailureHandler;
 import reactor.core.scheduler.Schedulers;
 
 public class AtomixReactiveApi implements ReactiveApi {
@@ -60,14 +60,17 @@ public class AtomixReactiveApi implements ReactiveApi {
 			@Nullable DiskSessionsManager diskSessions,
 			@NotNull Set<ResultingEventTransformer> resultingEventTransformerSet) {
 		this.mode = mode;
-		var kafkaTDLibRequestProducer = new KafkaTdlibRequestProducer(kafkaParameters);
-		var kafkaTDLibResponseConsumer = new KafkaTdlibResponseConsumer(kafkaParameters);
-		var kafkaClientBoundConsumer = new KafkaClientBoundConsumer(kafkaParameters);
-		var kafkaTdlibClientsChannels = new KafkaTdlibClientsChannels(kafkaTDLibRequestProducer,
-				kafkaTDLibResponseConsumer,
-				kafkaClientBoundConsumer
-		);
 		if (mode != AtomixReactiveApiMode.SERVER) {
+			var kafkaTDLibRequestProducer = new KafkaTdlibRequestProducer(kafkaParameters);
+			var kafkaTDLibResponseConsumer = new KafkaTdlibResponseConsumer(kafkaParameters);
+			var kafkaClientBoundConsumers = new HashMap<String, KafkaClientBoundConsumer>();
+			for (String lane : kafkaParameters.getAllLanes()) {
+				kafkaClientBoundConsumers.put(lane, new KafkaClientBoundConsumer(kafkaParameters, lane));
+			}
+			var kafkaTdlibClientsChannels = new KafkaTdlibClientsChannels(kafkaTDLibRequestProducer,
+					kafkaTDLibResponseConsumer,
+					kafkaClientBoundConsumers
+			);
 			this.kafkaSharedTdlibClients = new KafkaSharedTdlibClients(kafkaTdlibClientsChannels);
 			this.client = new LiveAtomixReactiveApiClient(kafkaSharedTdlibClients);
 		} else {
@@ -77,10 +80,13 @@ public class AtomixReactiveApi implements ReactiveApi {
 		if (mode != AtomixReactiveApiMode.CLIENT) {
 			var kafkaTDLibRequestConsumer = new KafkaTdlibRequestConsumer(kafkaParameters);
 			var kafkaTDLibResponseProducer = new KafkaTdlibResponseProducer(kafkaParameters);
-			var kafkaClientBoundProducer = new KafkaClientBoundProducer(kafkaParameters);
+			var kafkaClientBoundProducers = new HashMap<String, KafkaClientBoundProducer>();
+			for (String lane : kafkaParameters.getAllLanes()) {
+				kafkaClientBoundProducers.put(lane, new KafkaClientBoundProducer(kafkaParameters, lane));
+			}
 			var kafkaTDLibServer = new KafkaTdlibServersChannels(kafkaTDLibRequestConsumer,
 					kafkaTDLibResponseProducer,
-					kafkaClientBoundProducer
+					kafkaClientBoundProducers
 			);
 			this.kafkaSharedTdlibServers = new KafkaSharedTdlibServers(kafkaTDLibServer);
 		} else {
@@ -122,6 +128,7 @@ public class AtomixReactiveApi implements ReactiveApi {
 					return createSession(new LoadSessionFromDiskRequest(id,
 							diskSession.token,
 							diskSession.phoneNumber,
+							diskSession.lane,
 							true
 					));
 				})
@@ -152,41 +159,49 @@ public class AtomixReactiveApi implements ReactiveApi {
 		boolean loadedFromDisk;
 		long userId;
 		String botToken;
+		String lane;
 		Long phoneNumber;
 		if (req instanceof CreateBotSessionRequest createBotSessionRequest) {
 			loadedFromDisk = false;
 			userId = createBotSessionRequest.userId();
 			botToken = createBotSessionRequest.token();
 			phoneNumber = null;
+			lane = createBotSessionRequest.lane();
 			reactiveApiPublisher = ReactiveApiPublisher.fromToken(kafkaSharedTdlibServers, resultingEventTransformerSet,
 					userId,
-					botToken
+					botToken,
+					lane
 			);
 		} else if (req instanceof CreateUserSessionRequest createUserSessionRequest) {
 			loadedFromDisk = false;
 			userId = createUserSessionRequest.userId();
 			botToken = null;
 			phoneNumber = createUserSessionRequest.phoneNumber();
+			lane = createUserSessionRequest.lane();
 			reactiveApiPublisher = ReactiveApiPublisher.fromPhoneNumber(kafkaSharedTdlibServers, resultingEventTransformerSet,
 					userId,
-					phoneNumber
+					phoneNumber,
+					lane
 			);
 		} else if (req instanceof LoadSessionFromDiskRequest loadSessionFromDiskRequest) {
 			loadedFromDisk = true;
 			userId = loadSessionFromDiskRequest.userId();
 			botToken = loadSessionFromDiskRequest.token();
 			phoneNumber = loadSessionFromDiskRequest.phoneNumber();
+			lane = loadSessionFromDiskRequest.lane();
 			if (loadSessionFromDiskRequest.phoneNumber() != null) {
 				reactiveApiPublisher = ReactiveApiPublisher.fromPhoneNumber(kafkaSharedTdlibServers,
 						resultingEventTransformerSet,
 						userId,
-						phoneNumber
+						phoneNumber,
+						lane
 				);
 			} else {
 				reactiveApiPublisher = ReactiveApiPublisher.fromToken(kafkaSharedTdlibServers,
 						resultingEventTransformerSet,
 						userId,
-						botToken
+						botToken,
+						lane
 				);
 			}
 		} else {
@@ -231,7 +246,7 @@ public class AtomixReactiveApi implements ReactiveApi {
 
 					if (!loadedFromDisk) {
 						// Create the disk session configuration
-						var diskSession = new DiskSession(botToken, phoneNumber);
+						var diskSession = new DiskSession(botToken, phoneNumber, lane);
 						return Mono.<Void>fromCallable(() -> {
 							Objects.requireNonNull(diskSessions);
 							synchronized (diskSessions) {

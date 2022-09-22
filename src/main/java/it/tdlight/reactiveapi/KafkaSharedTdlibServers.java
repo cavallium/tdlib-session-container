@@ -34,7 +34,7 @@ public class KafkaSharedTdlibServers implements Closeable {
 	public KafkaSharedTdlibServers(KafkaTdlibServersChannels kafkaTdlibServersChannels) {
 		this.kafkaTdlibServersChannels = kafkaTdlibServersChannels;
 		this.responsesSub = kafkaTdlibServersChannels.response()
-				.sendMessages(0L, responses.asFlux().log("responses", Level.FINEST, SignalType.ON_NEXT))
+				.sendMessages(responses.asFlux().log("responses", Level.FINEST, SignalType.ON_NEXT))
 				.subscribeOn(Schedulers.parallel())
 				.subscribe();
 		this.requests = kafkaTdlibServersChannels.request()
@@ -47,9 +47,9 @@ public class KafkaSharedTdlibServers implements Closeable {
 				.log("requests", Level.FINEST, SignalType.REQUEST, SignalType.ON_NEXT);
 	}
 
-	public Disposable events(Flux<ClientBoundEvent> eventFlux) {
-		return kafkaTdlibServersChannels.events()
-				.sendMessages(0L, eventFlux)
+	public Disposable events(String lane, Flux<ClientBoundEvent> eventFlux) {
+		return kafkaTdlibServersChannels.events(lane)
+				.sendMessages(eventFlux)
 				.subscribeOn(Schedulers.parallel())
 				.subscribe();
 	}
