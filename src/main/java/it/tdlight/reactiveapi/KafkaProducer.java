@@ -44,7 +44,7 @@ public abstract class KafkaProducer<K> {
 		var channelName = getChannelName();
 		return eventsFlux
 				.<SenderRecord<Integer, K, Integer>>map(event ->
-						SenderRecord.create(new ProducerRecord<>(channelName, event), null))
+						SenderRecord.create(new ProducerRecord<>("tdlib." + channelName, event), null))
 				.log("produce-messages-" + channelName,
 						Level.FINEST,
 						SignalType.REQUEST,
