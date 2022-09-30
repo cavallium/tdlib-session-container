@@ -120,8 +120,8 @@ public abstract class KafkaConsumer<K> {
 						return new Timestamped<>(1, record.value());
 					}
 				})
-				.transform(ReactorUtils::subscribeOnce)
 				.transform(this::retryIfCleanup)
-				.transform(this::retryIfCommitFailed);
+				.transform(this::retryIfCommitFailed)
+				.transform(ReactorUtils::subscribeOnce);
 	}
 }
