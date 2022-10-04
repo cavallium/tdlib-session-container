@@ -1,37 +1,31 @@
 package it.tdlight.reactiveapi;
 
-import static java.util.Objects.requireNonNullElse;
-
 import it.tdlight.jni.TdApi;
 import it.tdlight.jni.TdApi.Object;
 import it.tdlight.reactiveapi.Event.ClientBoundEvent;
 import it.tdlight.reactiveapi.Event.OnRequest;
 import it.tdlight.reactiveapi.Event.OnResponse;
 import java.io.Closeable;
-import java.time.Duration;
 import java.util.concurrent.atomic.AtomicReference;
-import java.util.function.Function;
 import java.util.logging.Level;
 import reactor.core.Disposable;
-import reactor.core.publisher.BufferOverflowStrategy;
 import reactor.core.publisher.Flux;
-import reactor.core.publisher.GroupedFlux;
 import reactor.core.publisher.SignalType;
 import reactor.core.publisher.Sinks;
 import reactor.core.publisher.Sinks.Many;
 import reactor.core.scheduler.Schedulers;
 import reactor.util.concurrent.Queues;
 
-public class KafkaSharedTdlibServers implements Closeable {
+public class TdlibChannelsSharedServer implements Closeable {
 
-	private final KafkaTdlibServersChannels kafkaTdlibServersChannels;
+	private final TdlibChannelsServers kafkaTdlibServersChannels;
 	private final Disposable responsesSub;
 	private final AtomicReference<Disposable> requestsSub = new AtomicReference<>();
 	private final Many<OnResponse<TdApi.Object>> responses = Sinks.many().unicast().onBackpressureBuffer(
 			Queues.<OnResponse<TdApi.Object>>get(65535).get());
 	private final Flux<Timestamped<OnRequest<Object>>> requests;
 
-	public KafkaSharedTdlibServers(KafkaTdlibServersChannels kafkaTdlibServersChannels) {
+	public TdlibChannelsSharedServer(TdlibChannelsServers kafkaTdlibServersChannels) {
 		this.kafkaTdlibServersChannels = kafkaTdlibServersChannels;
 		this.responsesSub = kafkaTdlibServersChannels.response()
 				.sendMessages(responses.asFlux().log("responses", Level.FINEST, SignalType.ON_NEXT))

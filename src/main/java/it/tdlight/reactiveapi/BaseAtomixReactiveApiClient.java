@@ -52,7 +52,7 @@ abstract class BaseAtomixReactiveApiClient implements ReactiveApiMultiClient {
 	private final AtomicLong requestId = new AtomicLong(0);
 	private final Disposable subscription;
 
-	public BaseAtomixReactiveApiClient(KafkaSharedTdlibClients kafkaSharedTdlibClients) {
+	public BaseAtomixReactiveApiClient(ClientsSharedTdlib kafkaSharedTdlibClients) {
 		this.clientId = System.nanoTime();
 		this.requests = kafkaSharedTdlibClients.requests();
 

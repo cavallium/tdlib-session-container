@@ -2,9 +2,14 @@ package it.tdlight.reactiveapi;
 
 import static java.util.Objects.requireNonNull;
 
+import it.tdlight.jni.TdApi.Object;
 import it.tdlight.reactiveapi.CreateSessionRequest.CreateBotSessionRequest;
 import it.tdlight.reactiveapi.CreateSessionRequest.CreateUserSessionRequest;
 import it.tdlight.reactiveapi.CreateSessionRequest.LoadSessionFromDiskRequest;
+import it.tdlight.reactiveapi.ChannelFactory.KafkaChannelFactory;
+import it.tdlight.reactiveapi.Event.ClientBoundEvent;
+import it.tdlight.reactiveapi.Event.OnRequest;
+import it.tdlight.reactiveapi.Event.OnResponse;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -31,9 +36,9 @@ public class AtomixReactiveApi implements ReactiveApi {
 
 	private final AtomixReactiveApiMode mode;
 
-	private final KafkaSharedTdlibClients kafkaSharedTdlibClients;
+	private final ClientsSharedTdlib kafkaSharedTdlibClients;
 	@Nullable
-	private final KafkaSharedTdlibServers kafkaSharedTdlibServers;
+	private final TdlibChannelsSharedServer kafkaSharedTdlibServers;
 	private final ReactiveApiMultiClient client;
 
 	private final Set<ResultingEventTransformer> resultingEventTransformerSet;
@@ -60,35 +65,36 @@ public class AtomixReactiveApi implements ReactiveApi {
 			@Nullable DiskSessionsManager diskSessions,
 			@NotNull Set<ResultingEventTransformer> resultingEventTransformerSet) {
 		this.mode = mode;
+		ChannelFactory channelFactory = new KafkaChannelFactory();
 		if (mode != AtomixReactiveApiMode.SERVER) {
-			var kafkaTDLibRequestProducer = new KafkaTdlibRequestProducer(kafkaParameters);
-			var kafkaTDLibResponseConsumer = new KafkaTdlibResponseConsumer(kafkaParameters);
-			var kafkaClientBoundConsumers = new HashMap<String, KafkaClientBoundConsumer>();
+			EventProducer<OnRequest<?>> kafkaTDLibRequestProducer = ChannelProducerTdlibRequest.create(channelFactory, kafkaParameters);
+			EventConsumer<OnResponse<Object>> kafkaTDLibResponseConsumer = ChannelConsumerTdlibResponse.create(channelFactory, kafkaParameters);
+			HashMap<String, EventConsumer<ClientBoundEvent>> kafkaClientBoundConsumers = new HashMap<>();
 			for (String lane : kafkaParameters.getAllLanes()) {
-				kafkaClientBoundConsumers.put(lane, new KafkaClientBoundConsumer(kafkaParameters, lane));
+				kafkaClientBoundConsumers.put(lane, ChannelConsumerClientBoundEvent.create(channelFactory, kafkaParameters, lane));
 			}
-			var kafkaTdlibClientsChannels = new KafkaTdlibClientsChannels(kafkaTDLibRequestProducer,
+			var kafkaTdlibClientsChannels = new TdlibChannelsClients(kafkaTDLibRequestProducer,
 					kafkaTDLibResponseConsumer,
 					kafkaClientBoundConsumers
 			);
-			this.kafkaSharedTdlibClients = new KafkaSharedTdlibClients(kafkaTdlibClientsChannels);
+			this.kafkaSharedTdlibClients = new ClientsSharedTdlib(kafkaTdlibClientsChannels);
 			this.client = new LiveAtomixReactiveApiClient(kafkaSharedTdlibClients);
 		} else {
 			this.kafkaSharedTdlibClients = null;
 			this.client = null;
 		}
 		if (mode != AtomixReactiveApiMode.CLIENT) {
-			var kafkaTDLibRequestConsumer = new KafkaTdlibRequestConsumer(kafkaParameters);
-			var kafkaTDLibResponseProducer = new KafkaTdlibResponseProducer(kafkaParameters);
-			var kafkaClientBoundProducers = new HashMap<String, KafkaClientBoundProducer>();
+			EventConsumer<OnRequest<Object>> kafkaTDLibRequestConsumer = ChannelConsumerTdlibRequest.create(channelFactory, kafkaParameters);
+			EventProducer<OnResponse<Object>> kafkaTDLibResponseProducer = ChannelProducerTdlibResponse.create(channelFactory, kafkaParameters);
+			var kafkaClientBoundProducers = new HashMap<String, EventProducer<ClientBoundEvent>>();
 			for (String lane : kafkaParameters.getAllLanes()) {
-				kafkaClientBoundProducers.put(lane, new KafkaClientBoundProducer(kafkaParameters, lane));
+				kafkaClientBoundProducers.put(lane, ChannelProducerClientBoundEvent.create(channelFactory, kafkaParameters, lane));
 			}
-			var kafkaTDLibServer = new KafkaTdlibServersChannels(kafkaTDLibRequestConsumer,
+			var kafkaTDLibServer = new TdlibChannelsServers(kafkaTDLibRequestConsumer,
 					kafkaTDLibResponseProducer,
 					kafkaClientBoundProducers
 			);
-			this.kafkaSharedTdlibServers = new KafkaSharedTdlibServers(kafkaTDLibServer);
+			this.kafkaSharedTdlibServers = new TdlibChannelsSharedServer(kafkaTDLibServer);
 		} else {
 			this.kafkaSharedTdlibServers = null;
 		}

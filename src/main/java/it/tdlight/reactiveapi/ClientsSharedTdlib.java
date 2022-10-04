@@ -1,36 +1,28 @@
 package it.tdlight.reactiveapi;
 
-import static java.util.Objects.requireNonNullElse;
-
 import it.tdlight.jni.TdApi.Object;
 import it.tdlight.reactiveapi.Event.ClientBoundEvent;
 import it.tdlight.reactiveapi.Event.OnRequest;
 import it.tdlight.reactiveapi.Event.OnResponse;
 import java.io.Closeable;
-import java.time.Duration;
 import java.util.Map;
 import java.util.Map.Entry;
 import java.util.concurrent.atomic.AtomicReference;
-import java.util.function.Function;
-import java.util.logging.Level;
 import java.util.stream.Collectors;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import reactor.core.Disposable;
-import reactor.core.publisher.BufferOverflowStrategy;
 import reactor.core.publisher.Flux;
-import reactor.core.publisher.GroupedFlux;
-import reactor.core.publisher.SignalType;
 import reactor.core.publisher.Sinks;
 import reactor.core.publisher.Sinks.Many;
 import reactor.core.scheduler.Schedulers;
 import reactor.util.concurrent.Queues;
 
-public class KafkaSharedTdlibClients implements Closeable {
+public class ClientsSharedTdlib implements Closeable {
 
-	private static final Logger LOG = LogManager.getLogger(KafkaSharedTdlibClients.class);
+	private static final Logger LOG = LogManager.getLogger(ClientsSharedTdlib.class);
 
-	private final KafkaTdlibClientsChannels kafkaTdlibClientsChannels;
+	private final TdlibChannelsClients kafkaTdlibClientsChannels;
 	private final AtomicReference<Disposable> responsesSub = new AtomicReference<>();
 	private final Disposable requestsSub;
 	private final AtomicReference<Disposable> eventsSub = new AtomicReference<>();
@@ -39,7 +31,7 @@ public class KafkaSharedTdlibClients implements Closeable {
 	private final Many<OnRequest<?>> requests = Sinks.many().unicast()
 			.onBackpressureBuffer(Queues.<OnRequest<?>>get(65535).get());
 
-	public KafkaSharedTdlibClients(KafkaTdlibClientsChannels kafkaTdlibClientsChannels) {
+	public ClientsSharedTdlib(TdlibChannelsClients kafkaTdlibClientsChannels) {
 		this.kafkaTdlibClientsChannels = kafkaTdlibClientsChannels;
 		this.responses = kafkaTdlibClientsChannels.response().consumeMessages("td-responses");
 		this.events = kafkaTdlibClientsChannels.events().entrySet().stream()

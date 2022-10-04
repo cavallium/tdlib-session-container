@@ -1,6 +1,6 @@
 package it.tdlight.reactiveapi;
 
-public enum KafkaChannelCodec {
+public enum ChannelCodec {
 	CLIENT_BOUND_EVENT("event", ClientBoundEventSerializer.class, ClientBoundEventDeserializer.class),
 	TDLIB_REQUEST("request", TdlibRequestSerializer.class, TdlibRequestDeserializer.class),
 	TDLIB_RESPONSE("response", TdlibResponseSerializer.class, TdlibResponseDeserializer.class);
@@ -9,7 +9,7 @@ public enum KafkaChannelCodec {
 	private final Class<?> serializerClass;
 	private final Class<?> deserializerClass;
 
-	KafkaChannelCodec(String kafkaName,
+	ChannelCodec(String kafkaName,
 			Class<?> serializerClass,
 			Class<?> deserializerClass) {
 		this.name = kafkaName;

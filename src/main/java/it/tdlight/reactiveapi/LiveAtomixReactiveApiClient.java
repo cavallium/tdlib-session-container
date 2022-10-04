@@ -8,9 +8,9 @@ import reactor.core.publisher.Flux;
 
 public class LiveAtomixReactiveApiClient extends BaseAtomixReactiveApiClient {
 
-	private final KafkaSharedTdlibClients kafkaSharedTdlibClients;
+	private final ClientsSharedTdlib kafkaSharedTdlibClients;
 
-	LiveAtomixReactiveApiClient(KafkaSharedTdlibClients kafkaSharedTdlibClients) {
+	LiveAtomixReactiveApiClient(ClientsSharedTdlib kafkaSharedTdlibClients) {
 		super(kafkaSharedTdlibClients);
 		this.kafkaSharedTdlibClients = kafkaSharedTdlibClients;
 	}

@@ -71,7 +71,7 @@ public abstract class ReactiveApiPublisher {
 	private static final Duration SPECIAL_RAW_TIMEOUT_DURATION = Duration.ofMinutes(5);
 
 	private static final Duration HUNDRED_MS = Duration.ofMillis(100);
-	private final KafkaSharedTdlibServers kafkaSharedTdlibServers;
+	private final TdlibChannelsSharedServer kafkaSharedTdlibServers;
 	private final Set<ResultingEventTransformer> resultingEventTransformerSet;
 	private final ReactiveTelegramClient rawTelegramClient;
 	private final Flux<Signal> telegramClient;
@@ -85,7 +85,7 @@ public abstract class ReactiveApiPublisher {
 	private final AtomicReference<Disposable> disposable = new AtomicReference<>();
 	private final AtomicReference<Path> path = new AtomicReference<>();
 
-	private ReactiveApiPublisher(KafkaSharedTdlibServers kafkaSharedTdlibServers,
+	private ReactiveApiPublisher(TdlibChannelsSharedServer kafkaSharedTdlibServers,
 			Set<ResultingEventTransformer> resultingEventTransformerSet,
 			long userId, String lane) {
 		this.kafkaSharedTdlibServers = kafkaSharedTdlibServers;
@@ -114,7 +114,7 @@ public abstract class ReactiveApiPublisher {
 		});
 	}
 
-	public static ReactiveApiPublisher fromToken(KafkaSharedTdlibServers kafkaSharedTdlibServers,
+	public static ReactiveApiPublisher fromToken(TdlibChannelsSharedServer kafkaSharedTdlibServers,
 			Set<ResultingEventTransformer> resultingEventTransformerSet,
 			long userId,
 			String token,
@@ -122,7 +122,7 @@ public abstract class ReactiveApiPublisher {
 		return new ReactiveApiPublisherToken(kafkaSharedTdlibServers, resultingEventTransformerSet, userId, token, lane);
 	}
 
-	public static ReactiveApiPublisher fromPhoneNumber(KafkaSharedTdlibServers kafkaSharedTdlibServers,
+	public static ReactiveApiPublisher fromPhoneNumber(TdlibChannelsSharedServer kafkaSharedTdlibServers,
 			Set<ResultingEventTransformer> resultingEventTransformerSet,
 			long userId,
 			long phoneNumber,
@@ -551,7 +551,7 @@ public abstract class ReactiveApiPublisher {
 
 		private final String botToken;
 
-		public ReactiveApiPublisherToken(KafkaSharedTdlibServers kafkaSharedTdlibServers,
+		public ReactiveApiPublisherToken(TdlibChannelsSharedServer kafkaSharedTdlibServers,
 				Set<ResultingEventTransformer> resultingEventTransformerSet,
 				long userId,
 				String botToken,
@@ -583,7 +583,7 @@ public abstract class ReactiveApiPublisher {
 
 		private final long phoneNumber;
 
-		public ReactiveApiPublisherPhoneNumber(KafkaSharedTdlibServers kafkaSharedTdlibServers,
+		public ReactiveApiPublisherPhoneNumber(TdlibChannelsSharedServer kafkaSharedTdlibServers,
 				Set<ResultingEventTransformer> resultingEventTransformerSet,
 				long userId,
 				long phoneNumber,

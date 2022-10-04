@@ -1,16 +1,20 @@
-package it.tdlight.reactiveapi;
+package it.tdlight.reactiveapi.kafka;
 
 import static java.lang.Math.toIntExact;
 
 import it.tdlight.common.Init;
 import it.tdlight.common.utils.CantLoadLibrary;
+import it.tdlight.reactiveapi.EventConsumer;
+import it.tdlight.reactiveapi.ChannelCodec;
+import it.tdlight.reactiveapi.KafkaParameters;
+import it.tdlight.reactiveapi.ReactorUtils;
+import it.tdlight.reactiveapi.Timestamped;
 import java.time.Duration;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Function;
 import java.util.logging.Level;
-import java.util.regex.Pattern;
 import org.apache.kafka.clients.consumer.CommitFailedException;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.common.errors.RebalanceInProgressException;
@@ -19,21 +23,29 @@ import org.apache.kafka.common.serialization.IntegerDeserializer;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.jetbrains.annotations.NotNull;
-import org.jetbrains.annotations.Nullable;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.SignalType;
 import reactor.kafka.receiver.KafkaReceiver;
 import reactor.kafka.receiver.ReceiverOptions;
 import reactor.util.retry.Retry;
 
-public abstract class KafkaConsumer<K> {
+public final class KafkaConsumer<K> implements EventConsumer<K> {
 
 	private static final Logger LOG = LogManager.getLogger(KafkaConsumer.class);
 
 	private final KafkaParameters kafkaParameters;
+	private final boolean quickResponse;
+	private final ChannelCodec channelCodec;
+	private final String channelName;
 
-	public KafkaConsumer(KafkaParameters kafkaParameters) {
+	public KafkaConsumer(KafkaParameters kafkaParameters,
+			boolean quickResponse,
+			ChannelCodec channelCodec,
+			String channelName) {
 		this.kafkaParameters = kafkaParameters;
+		this.quickResponse = quickResponse;
+		this.channelCodec = channelCodec;
+		this.channelName = channelName;
 	}
 
 	public KafkaReceiver<Integer, K> createReceiver(@NotNull String kafkaGroupId) {
@@ -69,13 +81,22 @@ public abstract class KafkaConsumer<K> {
 		return KafkaReceiver.create(options);
 	}
 
-	public abstract KafkaChannelCodec getChannelCodec();
+	@Override
+	public boolean isQuickResponse() {
+		return quickResponse;
+	}
 
-	public abstract String getChannelName();
+	@Override
+	public ChannelCodec getChannelCodec() {
+		return channelCodec;
+	}
 
-	public abstract boolean isQuickResponse();
+	@Override
+	public String getChannelName() {
+		return channelName;
+	}
 
-	protected Flux<Timestamped<K>> retryIfCleanup(Flux<Timestamped<K>> eventFlux) {
+	public Flux<Timestamped<K>> retryIfCleanup(Flux<Timestamped<K>> eventFlux) {
 		return eventFlux.retryWhen(Retry
 				.backoff(Long.MAX_VALUE, Duration.ofMillis(100))
 				.maxBackoff(Duration.ofSeconds(5))
@@ -84,7 +105,7 @@ public abstract class KafkaConsumer<K> {
 				.doBeforeRetry(s -> LOG.warn("Rebalancing in progress")));
 	}
 
-	protected Flux<Timestamped<K>> retryIfCommitFailed(Flux<Timestamped<K>> eventFlux) {
+	public Flux<Timestamped<K>> retryIfCommitFailed(Flux<Timestamped<K>> eventFlux) {
 		return eventFlux.retryWhen(Retry
 				.backoff(10, Duration.ofSeconds(1))
 				.maxBackoff(Duration.ofSeconds(5))
@@ -98,6 +119,7 @@ public abstract class KafkaConsumer<K> {
 						+ " with max.poll.records.")));
 	}
 
+	@Override
 	public Flux<Timestamped<K>> consumeMessages(@NotNull String subGroupId) {
 		return consumeMessagesInternal(subGroupId);
 	}

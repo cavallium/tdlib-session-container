@@ -1,5 +1,8 @@
-package it.tdlight.reactiveapi;
+package it.tdlight.reactiveapi.kafka;
 
+import it.tdlight.reactiveapi.ChannelCodec;
+import it.tdlight.reactiveapi.EventProducer;
+import it.tdlight.reactiveapi.KafkaParameters;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.logging.Level;
@@ -15,13 +18,17 @@ import reactor.kafka.sender.KafkaSender;
 import reactor.kafka.sender.SenderOptions;
 import reactor.kafka.sender.SenderRecord;
 
-public abstract class KafkaProducer<K> {
+public final class KafkaProducer<K> implements EventProducer<K> {
 
 	private static final Logger LOG = LogManager.getLogger(KafkaProducer.class);
 
 	private final KafkaSender<Integer, K> sender;
+	private final ChannelCodec channelCodec;
+	private final String channelName;
 
-	public KafkaProducer(KafkaParameters kafkaParameters) {
+	public KafkaProducer(KafkaParameters kafkaParameters, ChannelCodec channelCodec, String channelName) {
+		this.channelCodec = channelCodec;
+		this.channelName = channelName;
 		Map<String, Object> props = new HashMap<>();
 		props.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, kafkaParameters.bootstrapServers());
 		props.put(ProducerConfig.CLIENT_ID_CONFIG, kafkaParameters.clientId());
@@ -36,10 +43,17 @@ public abstract class KafkaProducer<K> {
 		sender = KafkaSender.create(senderOptions.maxInFlight(1024));
 	}
 
-	public abstract KafkaChannelCodec getChannelCodec();
+	@Override
+	public ChannelCodec getChannelCodec() {
+		return channelCodec;
+	}
 
-	public abstract String getChannelName();
+	@Override
+	public String getChannelName() {
+		return channelName;
+	}
 
+	@Override
 	public Mono<Void> sendMessages(Flux<K> eventsFlux) {
 		var channelName = getChannelName();
 		return eventsFlux
@@ -57,6 +71,7 @@ public abstract class KafkaProducer<K> {
 				.then();
 	}
 
+	@Override
 	public void close() {
 		sender.close();
 	}
