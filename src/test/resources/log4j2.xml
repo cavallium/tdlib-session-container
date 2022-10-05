@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Configuration>
+  <Appenders>
+    <TerminalConsole name="ConsoleAppender">
+      <PatternLayout disableAnsi="false"
+        pattern="%d{${LOG_DATEFORMAT_PATTERN:-yyyy-MM-dd HH:mm:ss.SSS}} %highlight{${LOG_LEVEL_PATTERN:-%5p}}{FATAL=red blink, ERROR=red, WARN=yellow bold, INFO=green, DEBUG=green bold, TRACE=blue} %style{%processId}{magenta} [%15.15t] %style{%-20.20c{1}}{cyan} : %m%n%ex"/>
+    </TerminalConsole>
+		<Async name="Async">
+			<AppenderRef ref="ConsoleAppender"/>
+			<LinkedTransferQueue/>
+		</Async>
+  </Appenders>
+  <Loggers>
+		<AsyncLogger name="reactor.kafka" level="WARN" additivity="false"/>
+		<AsyncLogger name="org.apache.kafka" level="WARN" additivity="false"/>
+		<!-- log only INFO, WARN, ERROR and FATAL logging by classes in this package -->
+		<Logger name="io.netty" level="INFO" additivity="false"/>
+
+    <Root level="DEBUG">
+      <filters>
+        <MarkerFilter marker="NETWORK_PACKETS" onMatch="DENY" onMismatch="NEUTRAL"/>
+      </filters>
+      <AppenderRef ref="Async"/>
+    </Root>
+  </Loggers>
+</Configuration>

@@ -7,10 +7,10 @@ public class ChannelProducerTdlibRequest {
 	private ChannelProducerTdlibRequest() {
 	}
 
-	public static EventProducer<OnRequest<?>> create(ChannelFactory channelFactory, KafkaParameters kafkaParameters) {
-		return channelFactory.newProducer(kafkaParameters,
+	public static EventProducer<OnRequest<?>> create(ChannelFactory channelFactory, ChannelsParameters channelsParameters) {
+		return channelFactory.newProducer(channelsParameters,
 				ChannelCodec.TDLIB_REQUEST,
-				ChannelCodec.TDLIB_REQUEST.getKafkaName()
+				Channel.TDLIB_REQUEST.getChannelName()
 		);
 	}
 

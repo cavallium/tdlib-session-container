@@ -9,11 +9,8 @@ import java.io.IOException;
 import java.lang.reflect.InvocationTargetException;
 import java.nio.file.Files;
 import java.nio.file.Paths;
-import java.util.ArrayList;
 import java.util.HashSet;
-import java.util.List;
 import java.util.Set;
-import java.util.concurrent.ThreadLocalRandom;
 import org.jetbrains.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -52,11 +49,10 @@ public class Entrypoint {
 			String diskSessionsConfigPath = args.diskSessionsPath;
 			clusterSettings = mapper.readValue(Paths.get(clusterConfigPath).toFile(), ClusterSettings.class);
 			instanceSettings = mapper.readValue(Paths.get(instanceConfigPath).toFile(), InstanceSettings.class);
-			if (instanceSettings.client) {
-				diskSessions = null;
-			} else {
-				diskSessions = new DiskSessionsManager(mapper, diskSessionsConfigPath);
-			}
+			diskSessions = switch (instanceSettings.instanceType) {
+				case TDLIB -> new DiskSessionsManager(mapper, diskSessionsConfigPath);
+				case UPDATES_CONSUMER -> null;
+			};
 		}
 
 		return start(clusterSettings, instanceSettings, diskSessions);
@@ -68,43 +64,47 @@ public class Entrypoint {
 
 		Set<ResultingEventTransformer> resultingEventTransformerSet;
 		AtomixReactiveApiMode mode = AtomixReactiveApiMode.SERVER;
-		if (instanceSettings.client) {
-			if (diskSessions != null) {
-				throw new IllegalArgumentException("A client instance can't have a session manager!");
+		switch (instanceSettings.instanceType) {
+			case UPDATES_CONSUMER -> {
+				if (diskSessions != null) {
+					throw new IllegalArgumentException("An updates-consumer instance can't have a session manager!");
+				}
+				if (instanceSettings.listenAddress == null) {
+					throw new IllegalArgumentException("An updates-consumer instance must have an address (host:port)");
+				}
+				mode = AtomixReactiveApiMode.CLIENT;
+				resultingEventTransformerSet = Set.of();
 			}
-			if (instanceSettings.clientAddress == null) {
-				throw new IllegalArgumentException("A client instance must have an address (host:port)");
-			}
-			mode = AtomixReactiveApiMode.CLIENT;
-			resultingEventTransformerSet = Set.of();
-		} else {
-			if (diskSessions == null) {
-				throw new IllegalArgumentException("A full instance must have a session manager!");
-			}
+			case TDLIB -> {
+				if (diskSessions == null) {
+					throw new IllegalArgumentException("A tdlib instance must have a session manager!");
+				}
 
-			resultingEventTransformerSet = new HashSet<>();
-			if (instanceSettings.resultingEventTransformers != null) {
-				for (var resultingEventTransformer: instanceSettings.resultingEventTransformers) {
-					try {
-						var instance = resultingEventTransformer.getConstructor().newInstance();
-						resultingEventTransformerSet.add(instance);
-						LOG.info("Loaded and applied resulting event transformer: " + resultingEventTransformer.getName());
-					} catch (InstantiationException | IllegalAccessException | InvocationTargetException e) {
-						throw new IllegalArgumentException("Failed to load resulting event transformer: "
-								+ resultingEventTransformer.getName());
-					} catch (NoSuchMethodException e) {
-						throw new IllegalArgumentException("The client transformer must declare an empty constructor: "
-								+ resultingEventTransformer.getName());
+				resultingEventTransformerSet = new HashSet<>();
+				if (instanceSettings.resultingEventTransformers != null) {
+					for (var resultingEventTransformer: instanceSettings.resultingEventTransformers) {
+						try {
+							var instance = resultingEventTransformer.getConstructor().newInstance();
+							resultingEventTransformerSet.add(instance);
+							LOG.info("Loaded and applied resulting event transformer: " + resultingEventTransformer.getName());
+						} catch (InstantiationException | IllegalAccessException | InvocationTargetException e) {
+							throw new IllegalArgumentException("Failed to load resulting event transformer: "
+									+ resultingEventTransformer.getName());
+						} catch (NoSuchMethodException e) {
+							throw new IllegalArgumentException("The client transformer must declare an empty constructor: "
+									+ resultingEventTransformer.getName());
+						}
 					}
 				}
-			}
 
-			resultingEventTransformerSet = unmodifiableSet(resultingEventTransformerSet);
+				resultingEventTransformerSet = unmodifiableSet(resultingEventTransformerSet);
+			}
+			default -> throw new UnsupportedOperationException("Unsupported instance type: " + instanceSettings.instanceType);
 		}
 
-		var kafkaParameters = new KafkaParameters(clusterSettings, instanceSettings.id);
+		ChannelsParameters channelsParameters = clusterSettings.toParameters(instanceSettings.id, instanceSettings.instanceType);
 
-		var api = new AtomixReactiveApi(mode, kafkaParameters, diskSessions, resultingEventTransformerSet);
+		var api = new AtomixReactiveApi(mode, channelsParameters, diskSessions, resultingEventTransformerSet);
 
 		LOG.info("Starting ReactiveApi...");
 

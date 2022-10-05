@@ -71,7 +71,7 @@ public abstract class ReactiveApiPublisher {
 	private static final Duration SPECIAL_RAW_TIMEOUT_DURATION = Duration.ofMinutes(5);
 
 	private static final Duration HUNDRED_MS = Duration.ofMillis(100);
-	private final TdlibChannelsSharedServer kafkaSharedTdlibServers;
+	private final TdlibChannelsSharedServer sharedTdlibServers;
 	private final Set<ResultingEventTransformer> resultingEventTransformerSet;
 	private final ReactiveTelegramClient rawTelegramClient;
 	private final Flux<Signal> telegramClient;
@@ -85,14 +85,14 @@ public abstract class ReactiveApiPublisher {
 	private final AtomicReference<Disposable> disposable = new AtomicReference<>();
 	private final AtomicReference<Path> path = new AtomicReference<>();
 
-	private ReactiveApiPublisher(TdlibChannelsSharedServer kafkaSharedTdlibServers,
+	private ReactiveApiPublisher(TdlibChannelsSharedServer sharedTdlibServers,
 			Set<ResultingEventTransformer> resultingEventTransformerSet,
 			long userId, String lane) {
-		this.kafkaSharedTdlibServers = kafkaSharedTdlibServers;
+		this.sharedTdlibServers = sharedTdlibServers;
 		this.resultingEventTransformerSet = resultingEventTransformerSet;
 		this.userId = userId;
 		this.lane = Objects.requireNonNull(lane);
-		this.responses = this.kafkaSharedTdlibServers.responses();
+		this.responses = this.sharedTdlibServers.responses();
 		this.rawTelegramClient = ClientManager.createReactive();
 		try {
 			Init.start();
@@ -114,20 +114,20 @@ public abstract class ReactiveApiPublisher {
 		});
 	}
 
-	public static ReactiveApiPublisher fromToken(TdlibChannelsSharedServer kafkaSharedTdlibServers,
+	public static ReactiveApiPublisher fromToken(TdlibChannelsSharedServer sharedTdlibServers,
 			Set<ResultingEventTransformer> resultingEventTransformerSet,
 			long userId,
 			String token,
 			String lane) {
-		return new ReactiveApiPublisherToken(kafkaSharedTdlibServers, resultingEventTransformerSet, userId, token, lane);
+		return new ReactiveApiPublisherToken(sharedTdlibServers, resultingEventTransformerSet, userId, token, lane);
 	}
 
-	public static ReactiveApiPublisher fromPhoneNumber(TdlibChannelsSharedServer kafkaSharedTdlibServers,
+	public static ReactiveApiPublisher fromPhoneNumber(TdlibChannelsSharedServer sharedTdlibServers,
 			Set<ResultingEventTransformer> resultingEventTransformerSet,
 			long userId,
 			long phoneNumber,
 			String lane) {
-		return new ReactiveApiPublisherPhoneNumber(kafkaSharedTdlibServers,
+		return new ReactiveApiPublisherPhoneNumber(sharedTdlibServers,
 				resultingEventTransformerSet,
 				userId,
 				phoneNumber,
@@ -209,7 +209,7 @@ public abstract class ReactiveApiPublisher {
 				// Buffer requests to avoid halting the event loop
 				.onBackpressureBuffer();
 
-		kafkaSharedTdlibServers.events(lane, messagesToSend);
+		sharedTdlibServers.events(lane, messagesToSend);
 
 		publishedResultingEvents
 				// Obtain only cluster-bound events
@@ -551,12 +551,12 @@ public abstract class ReactiveApiPublisher {
 
 		private final String botToken;
 
-		public ReactiveApiPublisherToken(TdlibChannelsSharedServer kafkaSharedTdlibServers,
+		public ReactiveApiPublisherToken(TdlibChannelsSharedServer sharedTdlibServers,
 				Set<ResultingEventTransformer> resultingEventTransformerSet,
 				long userId,
 				String botToken,
 				String lane) {
-			super(kafkaSharedTdlibServers, resultingEventTransformerSet, userId, lane);
+			super(sharedTdlibServers, resultingEventTransformerSet, userId, lane);
 			this.botToken = botToken;
 		}
 
@@ -583,12 +583,12 @@ public abstract class ReactiveApiPublisher {
 
 		private final long phoneNumber;
 
-		public ReactiveApiPublisherPhoneNumber(TdlibChannelsSharedServer kafkaSharedTdlibServers,
+		public ReactiveApiPublisherPhoneNumber(TdlibChannelsSharedServer sharedTdlibServers,
 				Set<ResultingEventTransformer> resultingEventTransformerSet,
 				long userId,
 				long phoneNumber,
 				String lane) {
-			super(kafkaSharedTdlibServers, resultingEventTransformerSet, userId, lane);
+			super(sharedTdlibServers, resultingEventTransformerSet, userId, lane);
 			this.phoneNumber = phoneNumber;
 		}
 

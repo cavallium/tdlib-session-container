@@ -1,0 +1,63 @@
+package it.tdlight.reactiveapi;
+
+import com.google.common.net.HostAndPort;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Objects;
+import java.util.Set;
+import org.jetbrains.annotations.Nullable;
+
+public final class RSocketParameters implements ChannelsParameters {
+
+	private final boolean client;
+	private final HostAndPort host;
+	private final List<String> lanes;
+
+	public RSocketParameters(InstanceType instanceType, String host, List<String> lanes) {
+		this.client = instanceType != InstanceType.UPDATES_CONSUMER;
+		this.host = HostAndPort.fromString(host);
+		this.lanes = lanes;
+	}
+
+	@Override
+	public Set<String> getAllLanes() {
+		var lanes = new LinkedHashSet<String>(this.lanes.size() + 1);
+		lanes.add("main");
+		lanes.addAll(this.lanes);
+		return lanes;
+	}
+
+	public boolean isClient() {
+		return client;
+	}
+
+	public HostAndPort host() {
+		return host;
+	}
+
+	@Override
+	public boolean equals(Object obj) {
+		if (obj == this) {
+			return true;
+		}
+		if (obj == null || obj.getClass() != this.getClass()) {
+			return false;
+		}
+		var that = (RSocketParameters) obj;
+		return Objects.equals(this.client, that.client) && Objects.equals(
+				this.host,
+				that.host) && Objects.equals(this.lanes, that.lanes);
+	}
+
+	@Override
+	public int hashCode() {
+		return Objects.hash(client, host, lanes);
+	}
+
+	@Override
+	public String toString() {
+		return "RSocketParameters[client=" + client + ", " + "host=" + host + ", "
+				+ "lanes=" + lanes + ']';
+	}
+
+}

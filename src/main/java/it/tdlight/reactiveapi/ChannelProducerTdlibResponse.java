@@ -8,10 +8,10 @@ public class ChannelProducerTdlibResponse {
 	private ChannelProducerTdlibResponse() {
 	}
 
-	public static EventProducer<OnResponse<Object>> create(ChannelFactory channelFactory, KafkaParameters kafkaParameters) {
-		return channelFactory.newProducer(kafkaParameters,
+	public static EventProducer<OnResponse<Object>> create(ChannelFactory channelFactory, ChannelsParameters channelsParameters) {
+		return channelFactory.newProducer(channelsParameters,
 				ChannelCodec.TDLIB_RESPONSE,
-				ChannelCodec.TDLIB_RESPONSE.getKafkaName()
+				Channel.TDLIB_RESPONSE.getChannelName()
 		);
 	}
 

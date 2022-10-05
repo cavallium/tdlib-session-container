@@ -8,11 +8,11 @@ public class ChannelConsumerTdlibRequest {
 	private ChannelConsumerTdlibRequest() {
 	}
 
-	public static EventConsumer<OnRequest<Object>> create(ChannelFactory channelFactory, KafkaParameters kafkaParameters) {
-		return channelFactory.newConsumer(kafkaParameters,
+	public static EventConsumer<OnRequest<Object>> create(ChannelFactory channelFactory, ChannelsParameters channelsParameters) {
+		return channelFactory.newConsumer(channelsParameters,
 				true,
 				ChannelCodec.TDLIB_REQUEST,
-				ChannelCodec.TDLIB_REQUEST.getKafkaName()
+				Channel.TDLIB_REQUEST.getChannelName()
 		);
 	}
 

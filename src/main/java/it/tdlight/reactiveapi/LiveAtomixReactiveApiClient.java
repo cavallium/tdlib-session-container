@@ -8,21 +8,21 @@ import reactor.core.publisher.Flux;
 
 public class LiveAtomixReactiveApiClient extends BaseAtomixReactiveApiClient {
 
-	private final ClientsSharedTdlib kafkaSharedTdlibClients;
+	private final ClientsSharedTdlib sharedTdlibClients;
 
-	LiveAtomixReactiveApiClient(ClientsSharedTdlib kafkaSharedTdlibClients) {
-		super(kafkaSharedTdlibClients);
-		this.kafkaSharedTdlibClients = kafkaSharedTdlibClients;
+	LiveAtomixReactiveApiClient(ClientsSharedTdlib sharedTdlibClients) {
+		super(sharedTdlibClients);
+		this.sharedTdlibClients = sharedTdlibClients;
 	}
 
 	@Override
 	public Flux<ClientBoundEvent> clientBoundEvents(String lane) {
-		return kafkaSharedTdlibClients.events(lane).map(Timestamped::data);
+		return sharedTdlibClients.events(lane).map(Timestamped::data);
 	}
 
 	@Override
 	public Map<String, Flux<ClientBoundEvent>> clientBoundEvents() {
-		return kafkaSharedTdlibClients.events().entrySet().stream()
+		return sharedTdlibClients.events().entrySet().stream()
 				.collect(Collectors.toUnmodifiableMap(Entry::getKey, e -> e.getValue().map(Timestamped::data)));
 	}
 }

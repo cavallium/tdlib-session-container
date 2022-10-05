@@ -18,21 +18,20 @@ import reactor.util.concurrent.Queues;
 
 public class TdlibChannelsSharedServer implements Closeable {
 
-	private final TdlibChannelsServers kafkaTdlibServersChannels;
+	private final TdlibChannelsServers tdServersChannels;
 	private final Disposable responsesSub;
 	private final AtomicReference<Disposable> requestsSub = new AtomicReference<>();
 	private final Many<OnResponse<TdApi.Object>> responses = Sinks.many().unicast().onBackpressureBuffer(
 			Queues.<OnResponse<TdApi.Object>>get(65535).get());
 	private final Flux<Timestamped<OnRequest<Object>>> requests;
 
-	public TdlibChannelsSharedServer(TdlibChannelsServers kafkaTdlibServersChannels) {
-		this.kafkaTdlibServersChannels = kafkaTdlibServersChannels;
-		this.responsesSub = kafkaTdlibServersChannels.response()
+	public TdlibChannelsSharedServer(TdlibChannelsServers tdServersChannels) {
+		this.tdServersChannels = tdServersChannels;
+		this.responsesSub = tdServersChannels.response()
 				.sendMessages(responses.asFlux().log("responses", Level.FINEST, SignalType.ON_NEXT))
 				.subscribeOn(Schedulers.parallel())
 				.subscribe();
-		this.requests = kafkaTdlibServersChannels.request()
-				.consumeMessages("td-requests");
+		this.requests = tdServersChannels.request().consumeMessages();
 	}
 
 	public Flux<Timestamped<OnRequest<Object>>> requests() {
@@ -42,7 +41,7 @@ public class TdlibChannelsSharedServer implements Closeable {
 	}
 
 	public Disposable events(String lane, Flux<ClientBoundEvent> eventFlux) {
-		return kafkaTdlibServersChannels.events(lane)
+		return tdServersChannels.events(lane)
 				.sendMessages(eventFlux)
 				.subscribeOn(Schedulers.parallel())
 				.subscribe();
@@ -59,6 +58,6 @@ public class TdlibChannelsSharedServer implements Closeable {
 		if (requestsSub != null) {
 			requestsSub.dispose();
 		}
-		kafkaTdlibServersChannels.close();
+		tdServersChannels.close();
 	}
 }

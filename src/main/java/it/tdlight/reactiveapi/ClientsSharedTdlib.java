@@ -22,7 +22,7 @@ public class ClientsSharedTdlib implements Closeable {
 
 	private static final Logger LOG = LogManager.getLogger(ClientsSharedTdlib.class);
 
-	private final TdlibChannelsClients kafkaTdlibClientsChannels;
+	private final TdlibChannelsClients tdClientsChannels;
 	private final AtomicReference<Disposable> responsesSub = new AtomicReference<>();
 	private final Disposable requestsSub;
 	private final AtomicReference<Disposable> eventsSub = new AtomicReference<>();
@@ -31,12 +31,12 @@ public class ClientsSharedTdlib implements Closeable {
 	private final Many<OnRequest<?>> requests = Sinks.many().unicast()
 			.onBackpressureBuffer(Queues.<OnRequest<?>>get(65535).get());
 
-	public ClientsSharedTdlib(TdlibChannelsClients kafkaTdlibClientsChannels) {
-		this.kafkaTdlibClientsChannels = kafkaTdlibClientsChannels;
-		this.responses = kafkaTdlibClientsChannels.response().consumeMessages("td-responses");
-		this.events = kafkaTdlibClientsChannels.events().entrySet().stream()
-				.collect(Collectors.toUnmodifiableMap(Entry::getKey, e -> e.getValue().consumeMessages(e.getKey())));
-		this.requestsSub = kafkaTdlibClientsChannels.request()
+	public ClientsSharedTdlib(TdlibChannelsClients tdClientsChannels) {
+		this.tdClientsChannels = tdClientsChannels;
+		this.responses = tdClientsChannels.response().consumeMessages();
+		this.events = tdClientsChannels.events().entrySet().stream()
+				.collect(Collectors.toUnmodifiableMap(Entry::getKey, e -> e.getValue().consumeMessages()));
+		this.requestsSub = tdClientsChannels.request()
 				.sendMessages(requests.asFlux())
 				.subscribeOn(Schedulers.parallel())
 				.subscribe();
@@ -73,6 +73,6 @@ public class ClientsSharedTdlib implements Closeable {
 		if (eventsSub != null) {
 			eventsSub.dispose();
 		}
-		kafkaTdlibClientsChannels.close();
+		tdClientsChannels.close();
 	}
 }

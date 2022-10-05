@@ -6,7 +6,6 @@ import it.tdlight.jni.TdApi.Object;
 import it.tdlight.reactiveapi.CreateSessionRequest.CreateBotSessionRequest;
 import it.tdlight.reactiveapi.CreateSessionRequest.CreateUserSessionRequest;
 import it.tdlight.reactiveapi.CreateSessionRequest.LoadSessionFromDiskRequest;
-import it.tdlight.reactiveapi.ChannelFactory.KafkaChannelFactory;
 import it.tdlight.reactiveapi.Event.ClientBoundEvent;
 import it.tdlight.reactiveapi.Event.OnRequest;
 import it.tdlight.reactiveapi.Event.OnResponse;
@@ -36,9 +35,9 @@ public class AtomixReactiveApi implements ReactiveApi {
 
 	private final AtomixReactiveApiMode mode;
 
-	private final ClientsSharedTdlib kafkaSharedTdlibClients;
+	private final ClientsSharedTdlib sharedTdlibClients;
 	@Nullable
-	private final TdlibChannelsSharedServer kafkaSharedTdlibServers;
+	private final TdlibChannelsSharedServer sharedTdlibServers;
 	private final ReactiveApiMultiClient client;
 
 	private final Set<ResultingEventTransformer> resultingEventTransformerSet;
@@ -61,42 +60,42 @@ public class AtomixReactiveApi implements ReactiveApi {
 	}
 
 	public AtomixReactiveApi(AtomixReactiveApiMode mode,
-			KafkaParameters kafkaParameters,
+			ChannelsParameters channelsParameters,
 			@Nullable DiskSessionsManager diskSessions,
 			@NotNull Set<ResultingEventTransformer> resultingEventTransformerSet) {
 		this.mode = mode;
-		ChannelFactory channelFactory = new KafkaChannelFactory();
+		ChannelFactory channelFactory = ChannelFactory.getFactoryFromParameters(channelsParameters);
 		if (mode != AtomixReactiveApiMode.SERVER) {
-			EventProducer<OnRequest<?>> kafkaTDLibRequestProducer = ChannelProducerTdlibRequest.create(channelFactory, kafkaParameters);
-			EventConsumer<OnResponse<Object>> kafkaTDLibResponseConsumer = ChannelConsumerTdlibResponse.create(channelFactory, kafkaParameters);
-			HashMap<String, EventConsumer<ClientBoundEvent>> kafkaClientBoundConsumers = new HashMap<>();
-			for (String lane : kafkaParameters.getAllLanes()) {
-				kafkaClientBoundConsumers.put(lane, ChannelConsumerClientBoundEvent.create(channelFactory, kafkaParameters, lane));
+			EventProducer<OnRequest<?>> tdRequestProducer = ChannelProducerTdlibRequest.create(channelFactory, channelsParameters);
+			EventConsumer<OnResponse<Object>> tdResponseConsumer = ChannelConsumerTdlibResponse.create(channelFactory, channelsParameters);
+			HashMap<String, EventConsumer<ClientBoundEvent>> clientBoundConsumers = new HashMap<>();
+			for (String lane : channelsParameters.getAllLanes()) {
+				clientBoundConsumers.put(lane, ChannelConsumerClientBoundEvent.create(channelFactory, channelsParameters, lane));
 			}
-			var kafkaTdlibClientsChannels = new TdlibChannelsClients(kafkaTDLibRequestProducer,
-					kafkaTDLibResponseConsumer,
-					kafkaClientBoundConsumers
+			var tdClientsChannels = new TdlibChannelsClients(tdRequestProducer,
+					tdResponseConsumer,
+					clientBoundConsumers
 			);
-			this.kafkaSharedTdlibClients = new ClientsSharedTdlib(kafkaTdlibClientsChannels);
-			this.client = new LiveAtomixReactiveApiClient(kafkaSharedTdlibClients);
+			this.sharedTdlibClients = new ClientsSharedTdlib(tdClientsChannels);
+			this.client = new LiveAtomixReactiveApiClient(sharedTdlibClients);
 		} else {
-			this.kafkaSharedTdlibClients = null;
+			this.sharedTdlibClients = null;
 			this.client = null;
 		}
 		if (mode != AtomixReactiveApiMode.CLIENT) {
-			EventConsumer<OnRequest<Object>> kafkaTDLibRequestConsumer = ChannelConsumerTdlibRequest.create(channelFactory, kafkaParameters);
-			EventProducer<OnResponse<Object>> kafkaTDLibResponseProducer = ChannelProducerTdlibResponse.create(channelFactory, kafkaParameters);
-			var kafkaClientBoundProducers = new HashMap<String, EventProducer<ClientBoundEvent>>();
-			for (String lane : kafkaParameters.getAllLanes()) {
-				kafkaClientBoundProducers.put(lane, ChannelProducerClientBoundEvent.create(channelFactory, kafkaParameters, lane));
+			EventConsumer<OnRequest<Object>> tdRequestConsumer = ChannelConsumerTdlibRequest.create(channelFactory, channelsParameters);
+			EventProducer<OnResponse<Object>> tdResponseProducer = ChannelProducerTdlibResponse.create(channelFactory, channelsParameters);
+			var clientBoundProducers = new HashMap<String, EventProducer<ClientBoundEvent>>();
+			for (String lane : channelsParameters.getAllLanes()) {
+				clientBoundProducers.put(lane, ChannelProducerClientBoundEvent.create(channelFactory, channelsParameters, lane));
 			}
-			var kafkaTDLibServer = new TdlibChannelsServers(kafkaTDLibRequestConsumer,
-					kafkaTDLibResponseProducer,
-					kafkaClientBoundProducers
+			var tdServer = new TdlibChannelsServers(tdRequestConsumer,
+					tdResponseProducer,
+					clientBoundProducers
 			);
-			this.kafkaSharedTdlibServers = new TdlibChannelsSharedServer(kafkaTDLibServer);
+			this.sharedTdlibServers = new TdlibChannelsSharedServer(tdServer);
 		} else {
-			this.kafkaSharedTdlibServers = null;
+			this.sharedTdlibServers = null;
 		}
 		this.resultingEventTransformerSet = resultingEventTransformerSet;
 
@@ -142,8 +141,8 @@ public class AtomixReactiveApi implements ReactiveApi {
 				.doOnTerminate(() -> LOG.info("Loaded all saved sessions from disk"));
 
 		return loadSessions.<Void>then(Mono.fromRunnable(() -> {
-			if (kafkaSharedTdlibServers != null) {
-				requestsSub = kafkaSharedTdlibServers.requests()
+			if (sharedTdlibServers != null) {
+				requestsSub = sharedTdlibServers.requests()
 						.onBackpressureError()
 						.doOnNext(req -> localSessions.get(req.data().userId()).handleRequest(req.data()))
 						.subscribeOn(Schedulers.parallel())
@@ -173,7 +172,7 @@ public class AtomixReactiveApi implements ReactiveApi {
 			botToken = createBotSessionRequest.token();
 			phoneNumber = null;
 			lane = createBotSessionRequest.lane();
-			reactiveApiPublisher = ReactiveApiPublisher.fromToken(kafkaSharedTdlibServers, resultingEventTransformerSet,
+			reactiveApiPublisher = ReactiveApiPublisher.fromToken(sharedTdlibServers, resultingEventTransformerSet,
 					userId,
 					botToken,
 					lane
@@ -184,7 +183,7 @@ public class AtomixReactiveApi implements ReactiveApi {
 			botToken = null;
 			phoneNumber = createUserSessionRequest.phoneNumber();
 			lane = createUserSessionRequest.lane();
-			reactiveApiPublisher = ReactiveApiPublisher.fromPhoneNumber(kafkaSharedTdlibServers, resultingEventTransformerSet,
+			reactiveApiPublisher = ReactiveApiPublisher.fromPhoneNumber(sharedTdlibServers, resultingEventTransformerSet,
 					userId,
 					phoneNumber,
 					lane
@@ -196,14 +195,14 @@ public class AtomixReactiveApi implements ReactiveApi {
 			phoneNumber = loadSessionFromDiskRequest.phoneNumber();
 			lane = loadSessionFromDiskRequest.lane();
 			if (loadSessionFromDiskRequest.phoneNumber() != null) {
-				reactiveApiPublisher = ReactiveApiPublisher.fromPhoneNumber(kafkaSharedTdlibServers,
+				reactiveApiPublisher = ReactiveApiPublisher.fromPhoneNumber(sharedTdlibServers,
 						resultingEventTransformerSet,
 						userId,
 						phoneNumber,
 						lane
 				);
 			} else {
-				reactiveApiPublisher = ReactiveApiPublisher.fromToken(kafkaSharedTdlibServers,
+				reactiveApiPublisher = ReactiveApiPublisher.fromToken(sharedTdlibServers,
 						resultingEventTransformerSet,
 						userId,
 						botToken,
@@ -279,24 +278,24 @@ public class AtomixReactiveApi implements ReactiveApi {
 	@Override
 	public Mono<Void> close() {
 		closeRequested = true;
-		Mono<?> kafkaServerProducersStopper;
-		if (kafkaSharedTdlibServers != null) {
-			kafkaServerProducersStopper = Mono.fromRunnable(kafkaSharedTdlibServers::close).subscribeOn(Schedulers.boundedElastic());
+		Mono<?> serverProducersStopper;
+		if (sharedTdlibServers != null) {
+			serverProducersStopper = Mono.fromRunnable(sharedTdlibServers::close).subscribeOn(Schedulers.boundedElastic());
 		} else {
-			kafkaServerProducersStopper = Mono.empty();
+			serverProducersStopper = Mono.empty();
 		}
-		Mono<?> kafkaClientProducersStopper;
-		if (kafkaSharedTdlibClients != null) {
-			kafkaClientProducersStopper = Mono
-					.fromRunnable(kafkaSharedTdlibClients::close)
+		Mono<?> clientProducersStopper;
+		if (sharedTdlibClients != null) {
+			clientProducersStopper = Mono
+					.fromRunnable(sharedTdlibClients::close)
 					.subscribeOn(Schedulers.boundedElastic());
 		} else {
-			kafkaClientProducersStopper = Mono.empty();
+			clientProducersStopper = Mono.empty();
 		}
 		if (requestsSub != null) {
 			requestsSub.dispose();
 		}
-		return Mono.when(kafkaServerProducersStopper, kafkaClientProducersStopper);
+		return Mono.when(serverProducersStopper, clientProducersStopper);
 	}
 
 	@Override

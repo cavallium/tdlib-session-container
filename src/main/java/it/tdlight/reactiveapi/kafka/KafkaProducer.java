@@ -30,7 +30,7 @@ public final class KafkaProducer<K> implements EventProducer<K> {
 		this.channelCodec = channelCodec;
 		this.channelName = channelName;
 		Map<String, Object> props = new HashMap<>();
-		props.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, kafkaParameters.bootstrapServers());
+		props.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, kafkaParameters.getBootstrapServersString());
 		props.put(ProducerConfig.CLIENT_ID_CONFIG, kafkaParameters.clientId());
 		props.put(ProducerConfig.ACKS_CONFIG, "1");
 		props.put(ProducerConfig.BATCH_SIZE_CONFIG, Integer.toString(32 * 1024));

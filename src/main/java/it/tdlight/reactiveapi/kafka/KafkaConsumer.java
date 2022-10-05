@@ -56,7 +56,7 @@ public final class KafkaConsumer<K> implements EventConsumer<K> {
 			throw new RuntimeException(e);
 		}
 		Map<String, Object> props = new HashMap<>();
-		props.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, kafkaParameters.bootstrapServers());
+		props.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, kafkaParameters.getBootstrapServersString());
 		props.put(ConsumerConfig.CLIENT_ID_CONFIG, kafkaParameters.clientId());
 		props.put(ConsumerConfig.GROUP_ID_CONFIG, kafkaGroupId);
 		props.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, IntegerDeserializer.class);
@@ -81,7 +81,6 @@ public final class KafkaConsumer<K> implements EventConsumer<K> {
 		return KafkaReceiver.create(options);
 	}
 
-	@Override
 	public boolean isQuickResponse() {
 		return quickResponse;
 	}
@@ -120,12 +119,12 @@ public final class KafkaConsumer<K> implements EventConsumer<K> {
 	}
 
 	@Override
-	public Flux<Timestamped<K>> consumeMessages(@NotNull String subGroupId) {
-		return consumeMessagesInternal(subGroupId);
+	public Flux<Timestamped<K>> consumeMessages() {
+		return consumeMessagesInternal();
 	}
 
-	private Flux<Timestamped<K>> consumeMessagesInternal(@NotNull String subGroupId) {
-		return createReceiver(kafkaParameters.groupId() + (subGroupId.isBlank() ? "" : ("-" + subGroupId)))
+	private Flux<Timestamped<K>> consumeMessagesInternal() {
+		return createReceiver(kafkaParameters.groupId() + "-" + channelName)
 				.receiveAutoAck(isQuickResponse() ? 1 : 4)
 				.concatMap(Function.identity())
 				.log("consume-messages",

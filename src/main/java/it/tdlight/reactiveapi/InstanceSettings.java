@@ -3,7 +3,7 @@ package it.tdlight.reactiveapi;
 import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import java.util.List;
-import java.util.Set;
+import java.util.Objects;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -12,30 +12,47 @@ public class InstanceSettings {
 	@NotNull
 	public String id;
 
-	/**
-	 * True if this is just a client, false if this is a server
-	 */
-	public boolean client;
+	public InstanceType instanceType;
 
 	/**
-	 * If {@link #client} is true, this will be the address of this client
+	 * If {@link #instanceType} is true, this will be the address of this client
 	 */
-	public @Nullable String clientAddress;
+	public @Nullable String listenAddress;
 
 	/**
-	 * If {@link #client} is false, this will transform resulting events <b>before</b> being sent
+	 * If {@link #instanceType} is false, this will transform resulting events <b>before</b> being sent
 	 */
 	public @Nullable List<Class<? extends ResultingEventTransformer>> resultingEventTransformers;
 
+	public InstanceSettings(@NotNull String id,
+			@NotNull InstanceType instanceType,
+			@Nullable String listenAddress,
+			@Nullable List<Class<? extends ResultingEventTransformer>> resultingEventTransformers) {
+		this.id = id;
+		this.instanceType = instanceType;
+		this.listenAddress = listenAddress;
+		this.resultingEventTransformers = resultingEventTransformers;
+	}
+
 	@JsonCreator
 	public InstanceSettings(@JsonProperty(required = true, value = "id") @NotNull String id,
-			@JsonProperty(required = true, value = "client") boolean client,
-			@JsonProperty("clientAddress") @Nullable String clientAddress,
-			@JsonProperty("resultingEventTransformers") @Nullable
-					List<Class<? extends ResultingEventTransformer>> resultingEventTransformers) {
+			@Deprecated @JsonProperty(value = "client", defaultValue = "null") Boolean deprecatedIsClient,
+			@JsonProperty(value = "instanceType", defaultValue = "null") String instanceType,
+			@Deprecated @JsonProperty(value = "clientAddress", defaultValue = "null") @Nullable String deprecatedClientAddress,
+			@JsonProperty(value = "listenAddress", defaultValue = "null") @Nullable String listenAddress,
+			@JsonProperty("resultingEventTransformers")
+			@Nullable List<Class<? extends ResultingEventTransformer>> resultingEventTransformers) {
 		this.id = id;
-		this.client = client;
-		this.clientAddress = clientAddress;
+		if (deprecatedIsClient != null) {
+			this.instanceType = deprecatedIsClient ? InstanceType.UPDATES_CONSUMER : InstanceType.TDLIB;
+		} else {
+			this.instanceType = InstanceType.valueOf(instanceType.toUpperCase());
+		}
+		if (deprecatedClientAddress != null) {
+			this.listenAddress = deprecatedClientAddress;
+		} else {
+			this.listenAddress = listenAddress;
+		}
 		this.resultingEventTransformers = resultingEventTransformers;
 	}
 }

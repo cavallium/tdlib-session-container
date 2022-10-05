@@ -1,24 +1,22 @@
 package it.tdlight.reactiveapi;
 
-public enum ChannelCodec {
-	CLIENT_BOUND_EVENT("event", ClientBoundEventSerializer.class, ClientBoundEventDeserializer.class),
-	TDLIB_REQUEST("request", TdlibRequestSerializer.class, TdlibRequestDeserializer.class),
-	TDLIB_RESPONSE("response", TdlibResponseSerializer.class, TdlibResponseDeserializer.class);
+import java.lang.reflect.InvocationTargetException;
+import org.apache.kafka.common.serialization.Deserializer;
+import org.apache.kafka.common.serialization.Serializer;
 
-	private final String name;
+public class ChannelCodec {
+	public static final ChannelCodec CLIENT_BOUND_EVENT = new ChannelCodec(ClientBoundEventSerializer.class, ClientBoundEventDeserializer.class);
+	public static final ChannelCodec TDLIB_REQUEST = new ChannelCodec(TdlibRequestSerializer.class, TdlibRequestDeserializer.class);
+	public static final ChannelCodec TDLIB_RESPONSE = new ChannelCodec(TdlibResponseSerializer.class, TdlibResponseDeserializer.class);
+	public static final ChannelCodec UTF8_TEST = new ChannelCodec(UtfCodec.class, UtfCodec.class);
+
 	private final Class<?> serializerClass;
 	private final Class<?> deserializerClass;
 
-	ChannelCodec(String kafkaName,
-			Class<?> serializerClass,
+	public ChannelCodec(Class<?> serializerClass,
 			Class<?> deserializerClass) {
-		this.name = kafkaName;
 		this.serializerClass = serializerClass;
 		this.deserializerClass = deserializerClass;
-	}
-
-	public String getKafkaName() {
-		return name;
 	}
 
 	public Class<?> getSerializerClass() {
@@ -29,8 +27,23 @@ public enum ChannelCodec {
 		return deserializerClass;
 	}
 
-	@Override
-	public String toString() {
-		return name;
+	public <K> Deserializer<K> getNewDeserializer() {
+		try {
+			//noinspection unchecked
+			return (Deserializer<K>) deserializerClass.getDeclaredConstructor().newInstance();
+		} catch (InstantiationException | IllegalAccessException | InvocationTargetException | NoSuchMethodException |
+						 ClassCastException e) {
+			throw new IllegalStateException("Can't instantiate the codec deserializer", e);
+		}
+	}
+
+	public <K> Serializer<K> getNewSerializer() {
+		try {
+			//noinspection unchecked
+			return (Serializer<K>) serializerClass.getDeclaredConstructor().newInstance();
+		} catch (InstantiationException | IllegalAccessException | InvocationTargetException | NoSuchMethodException |
+						 ClassCastException e) {
+			throw new IllegalStateException("Can't instantiate the codec serializer", e);
+		}
 	}
 }

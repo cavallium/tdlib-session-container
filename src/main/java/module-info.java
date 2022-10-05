@@ -1,6 +1,8 @@
 module tdlib.reactive.api {
 	exports it.tdlight.reactiveapi;
 	exports it.tdlight.reactiveapi.generated;
+	exports it.tdlight.reactiveapi.rsocket;
+	exports it.tdlight.reactiveapi.kafka;
 	requires com.fasterxml.jackson.annotation;
 	requires org.jetbrains.annotations;
 	requires org.slf4j;
@@ -22,4 +24,8 @@ module tdlib.reactive.api {
 	requires jdk.unsupported;
 	requires jakarta.xml.bind;
 	requires reactor.core;
+	requires rsocket.core;
+	requires rsocket.transport.local;
+	requires rsocket.transport.netty;
+	requires io.netty.buffer;
 }
