@@ -35,9 +35,9 @@ public class AtomixReactiveApi implements ReactiveApi {
 
 	private final AtomixReactiveApiMode mode;
 
-	private final ClientsSharedTdlib sharedTdlibClients;
+	private final TdlibChannelsSharedReceive sharedTdlibClients;
 	@Nullable
-	private final TdlibChannelsSharedServer sharedTdlibServers;
+	private final TdlibChannelsSharedHost sharedTdlibServers;
 	private final ReactiveApiMultiClient client;
 
 	private final Set<ResultingEventTransformer> resultingEventTransformerSet;
@@ -66,34 +66,34 @@ public class AtomixReactiveApi implements ReactiveApi {
 		this.mode = mode;
 		ChannelFactory channelFactory = ChannelFactory.getFactoryFromParameters(channelsParameters);
 		if (mode != AtomixReactiveApiMode.SERVER) {
-			EventProducer<OnRequest<?>> tdRequestProducer = ChannelProducerTdlibRequest.create(channelFactory, channelsParameters);
-			EventConsumer<OnResponse<Object>> tdResponseConsumer = ChannelConsumerTdlibResponse.create(channelFactory, channelsParameters);
+			EventProducer<OnRequest<?>> tdRequestProducer = ChannelProducerTdlibRequest.create(channelFactory);
+			EventConsumer<OnResponse<Object>> tdResponseConsumer = ChannelConsumerTdlibResponse.create(channelFactory);
 			HashMap<String, EventConsumer<ClientBoundEvent>> clientBoundConsumers = new HashMap<>();
 			for (String lane : channelsParameters.getAllLanes()) {
-				clientBoundConsumers.put(lane, ChannelConsumerClientBoundEvent.create(channelFactory, channelsParameters, lane));
+				clientBoundConsumers.put(lane, ChannelConsumerClientBoundEvent.create(channelFactory, lane));
 			}
 			var tdClientsChannels = new TdlibChannelsClients(tdRequestProducer,
 					tdResponseConsumer,
 					clientBoundConsumers
 			);
-			this.sharedTdlibClients = new ClientsSharedTdlib(tdClientsChannels);
+			this.sharedTdlibClients = new TdlibChannelsSharedReceive(tdClientsChannels);
 			this.client = new LiveAtomixReactiveApiClient(sharedTdlibClients);
 		} else {
 			this.sharedTdlibClients = null;
 			this.client = null;
 		}
 		if (mode != AtomixReactiveApiMode.CLIENT) {
-			EventConsumer<OnRequest<Object>> tdRequestConsumer = ChannelConsumerTdlibRequest.create(channelFactory, channelsParameters);
-			EventProducer<OnResponse<Object>> tdResponseProducer = ChannelProducerTdlibResponse.create(channelFactory, channelsParameters);
+			EventConsumer<OnRequest<Object>> tdRequestConsumer = ChannelConsumerTdlibRequest.create(channelFactory);
+			EventProducer<OnResponse<Object>> tdResponseProducer = ChannelProducerTdlibResponse.create(channelFactory);
 			var clientBoundProducers = new HashMap<String, EventProducer<ClientBoundEvent>>();
 			for (String lane : channelsParameters.getAllLanes()) {
-				clientBoundProducers.put(lane, ChannelProducerClientBoundEvent.create(channelFactory, channelsParameters, lane));
+				clientBoundProducers.put(lane, ChannelProducerClientBoundEvent.create(channelFactory, lane));
 			}
 			var tdServer = new TdlibChannelsServers(tdRequestConsumer,
 					tdResponseProducer,
 					clientBoundProducers
 			);
-			this.sharedTdlibServers = new TdlibChannelsSharedServer(tdServer);
+			this.sharedTdlibServers = new TdlibChannelsSharedHost(channelsParameters.getAllLanes(), tdServer);
 		} else {
 			this.sharedTdlibServers = null;
 		}
@@ -143,10 +143,9 @@ public class AtomixReactiveApi implements ReactiveApi {
 		return loadSessions.<Void>then(Mono.fromRunnable(() -> {
 			if (sharedTdlibServers != null) {
 				requestsSub = sharedTdlibServers.requests()
-						.onBackpressureError()
 						.doOnNext(req -> localSessions.get(req.data().userId()).handleRequest(req.data()))
 						.subscribeOn(Schedulers.parallel())
-						.subscribe();
+						.subscribe(n -> {}, ex -> LOG.error("Requests channel broke unexpectedly", ex));
 			}
 			})).transform(ReactorUtils::subscribeOnce);
 	}

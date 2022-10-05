@@ -13,8 +13,8 @@ public final class RSocketParameters implements ChannelsParameters {
 	private final HostAndPort host;
 	private final List<String> lanes;
 
-	public RSocketParameters(InstanceType instanceType, String host, List<String> lanes) {
-		this.client = instanceType != InstanceType.UPDATES_CONSUMER;
+	public RSocketParameters(boolean client, String host, List<String> lanes) {
+		this.client = client;
 		this.host = HostAndPort.fromString(host);
 		this.lanes = lanes;
 	}

@@ -1,74 +1,77 @@
 package it.tdlight.reactiveapi;
 
+import io.rsocket.core.RSocketClient;
 import it.tdlight.reactiveapi.kafka.KafkaConsumer;
 import it.tdlight.reactiveapi.kafka.KafkaProducer;
-import it.tdlight.reactiveapi.rsocket.RSocketConsumeAsClient;
-import it.tdlight.reactiveapi.rsocket.RSocketProduceAsServer;
-import it.tdlight.reactiveapi.rsocket.RSocketConsumeAsServer;
-import it.tdlight.reactiveapi.rsocket.RSocketProduceAsClient;
+import it.tdlight.reactiveapi.rsocket.MyRSocketClient;
+import it.tdlight.reactiveapi.rsocket.MyRSocketServer;
+import it.tdlight.reactiveapi.rsocket.RSocketChannelManager;
+import java.io.Closeable;
+import java.io.IOException;
 
 public interface ChannelFactory {
 
 	static ChannelFactory getFactoryFromParameters(ChannelsParameters channelsParameters) {
-		if (channelsParameters instanceof KafkaParameters) {
-			return new KafkaChannelFactory();
+		if (channelsParameters instanceof KafkaParameters kafkaParameters) {
+			return new KafkaChannelFactory(kafkaParameters);
+		} else if (channelsParameters instanceof RSocketParameters socketParameters) {
+			return new RSocketChannelFactory(socketParameters);
 		} else {
-			return new RsocketChannelFactory();
+			throw new UnsupportedOperationException("Unsupported parameters type: " + channelsParameters);
 		}
 	}
 
-	<T> EventConsumer<T> newConsumer(ChannelsParameters channelsParameters,
-			boolean quickResponse,
-			ChannelCodec channelCodec,
-			String channelName);
+	<T> EventConsumer<T> newConsumer(boolean quickResponse, ChannelCodec channelCodec, String channelName);
 
-	<T> EventProducer<T> newProducer(ChannelsParameters channelsParameters,
-			ChannelCodec channelCodec,
-			String channelName);
+	<T> EventProducer<T> newProducer(ChannelCodec channelCodec, String channelName);
 
 	class KafkaChannelFactory implements ChannelFactory {
 
-		@Override
-		public <T> EventConsumer<T> newConsumer(ChannelsParameters channelsParameters,
-				boolean quickResponse,
-				ChannelCodec channelCodec,
-				String channelName) {
-			return new KafkaConsumer<>((KafkaParameters) channelsParameters, quickResponse, channelCodec, channelName);
+		private final KafkaParameters channelsParameters;
+
+		public KafkaChannelFactory(KafkaParameters channelsParameters) {
+			this.channelsParameters = channelsParameters;
 		}
 
 		@Override
-		public <T> EventProducer<T> newProducer(ChannelsParameters channelsParameters,
-				ChannelCodec channelCodec,
-				String channelName) {
-			return new KafkaProducer<>((KafkaParameters) channelsParameters, channelCodec, channelName);
+		public <T> EventConsumer<T> newConsumer(boolean quickResponse, ChannelCodec channelCodec, String channelName) {
+			return new KafkaConsumer<>(channelsParameters, quickResponse, channelCodec, channelName);
+		}
+
+		@Override
+		public <T> EventProducer<T> newProducer(ChannelCodec channelCodec, String channelName) {
+			return new KafkaProducer<>(channelsParameters, channelCodec, channelName);
 		}
 	}
 
-	class RsocketChannelFactory implements ChannelFactory {
+	class RSocketChannelFactory implements ChannelFactory, Closeable {
 
-		@Override
-		public <T> EventConsumer<T> newConsumer(ChannelsParameters channelsParameters,
-				boolean quickResponse,
-				ChannelCodec channelCodec,
-				String channelName) {
-			var socketParameters = (RSocketParameters) channelsParameters;
-			if (socketParameters.isClient()) {
-				return new RSocketConsumeAsClient<>(socketParameters.channelHost(channelName), channelCodec, channelName);
+		private final RSocketParameters channelsParameters;
+		private final RSocketChannelManager manager;
+
+		public RSocketChannelFactory(RSocketParameters channelsParameters) {
+			this.channelsParameters = channelsParameters;
+			if (channelsParameters.isClient()) {
+				this.manager = new MyRSocketClient(channelsParameters.baseHost());
 			} else {
-				return new RSocketConsumeAsServer<>(socketParameters.channelHost(channelName), channelCodec, channelName);
+				this.manager = new MyRSocketServer(channelsParameters.baseHost());
 			}
 		}
 
 		@Override
-		public <T> EventProducer<T> newProducer(ChannelsParameters channelsParameters,
-				ChannelCodec channelCodec,
-				String channelName) {
-			var socketParameters = (RSocketParameters) channelsParameters;
-			if (socketParameters.isClient()) {
-				return new RSocketProduceAsClient<>(socketParameters.channelHost(channelName), channelCodec, channelName);
-			} else {
-				return new RSocketProduceAsServer<>(socketParameters.channelHost(channelName), channelCodec, channelName);
-			}
+		public <T> EventConsumer<T> newConsumer(boolean quickResponse, ChannelCodec channelCodec, String channelName) {
+			return manager.registerConsumer(channelCodec, channelName);
+		}
+
+		@Override
+		public <T> EventProducer<T> newProducer(ChannelCodec channelCodec, String channelName) {
+			return manager.registerProducer(channelCodec, channelName);
+		}
+
+		@Override
+		public void close() throws IOException {
+			manager.dispose();
+			manager.onClose().block();
 		}
 	}
 }

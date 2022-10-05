@@ -7,11 +7,8 @@ public class ChannelProducerTdlibRequest {
 	private ChannelProducerTdlibRequest() {
 	}
 
-	public static EventProducer<OnRequest<?>> create(ChannelFactory channelFactory, ChannelsParameters channelsParameters) {
-		return channelFactory.newProducer(channelsParameters,
-				ChannelCodec.TDLIB_REQUEST,
-				Channel.TDLIB_REQUEST.getChannelName()
-		);
+	public static EventProducer<OnRequest<?>> create(ChannelFactory channelFactory) {
+		return channelFactory.newProducer(ChannelCodec.TDLIB_REQUEST, Channel.TDLIB_REQUEST.getChannelName());
 	}
 
 }

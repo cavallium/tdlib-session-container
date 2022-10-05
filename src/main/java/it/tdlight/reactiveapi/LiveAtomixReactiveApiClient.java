@@ -8,9 +8,9 @@ import reactor.core.publisher.Flux;
 
 public class LiveAtomixReactiveApiClient extends BaseAtomixReactiveApiClient {
 
-	private final ClientsSharedTdlib sharedTdlibClients;
+	private final TdlibChannelsSharedReceive sharedTdlibClients;
 
-	LiveAtomixReactiveApiClient(ClientsSharedTdlib sharedTdlibClients) {
+	LiveAtomixReactiveApiClient(TdlibChannelsSharedReceive sharedTdlibClients) {
 		super(sharedTdlibClients);
 		this.sharedTdlibClients = sharedTdlibClients;
 	}

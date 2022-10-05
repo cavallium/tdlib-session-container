@@ -31,7 +31,7 @@ public class ClusterSettings {
 
 	public ChannelsParameters toParameters(String clientId, InstanceType instanceType) {
 		if (rsocketHost != null) {
-			return new RSocketParameters(instanceType, rsocketHost, lanes);
+			return new RSocketParameters(instanceType != InstanceType.UPDATES_CONSUMER, rsocketHost, lanes);
 		} else {
 			return new KafkaParameters(clientId, clientId, kafkaBootstrapServers, List.copyOf(lanes));
 		}

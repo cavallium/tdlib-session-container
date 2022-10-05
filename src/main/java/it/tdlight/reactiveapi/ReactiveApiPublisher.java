@@ -71,7 +71,7 @@ public abstract class ReactiveApiPublisher {
 	private static final Duration SPECIAL_RAW_TIMEOUT_DURATION = Duration.ofMinutes(5);
 
 	private static final Duration HUNDRED_MS = Duration.ofMillis(100);
-	private final TdlibChannelsSharedServer sharedTdlibServers;
+	private final TdlibChannelsSharedHost sharedTdlibServers;
 	private final Set<ResultingEventTransformer> resultingEventTransformerSet;
 	private final ReactiveTelegramClient rawTelegramClient;
 	private final Flux<Signal> telegramClient;
@@ -85,7 +85,7 @@ public abstract class ReactiveApiPublisher {
 	private final AtomicReference<Disposable> disposable = new AtomicReference<>();
 	private final AtomicReference<Path> path = new AtomicReference<>();
 
-	private ReactiveApiPublisher(TdlibChannelsSharedServer sharedTdlibServers,
+	private ReactiveApiPublisher(TdlibChannelsSharedHost sharedTdlibServers,
 			Set<ResultingEventTransformer> resultingEventTransformerSet,
 			long userId, String lane) {
 		this.sharedTdlibServers = sharedTdlibServers;
@@ -114,7 +114,7 @@ public abstract class ReactiveApiPublisher {
 		});
 	}
 
-	public static ReactiveApiPublisher fromToken(TdlibChannelsSharedServer sharedTdlibServers,
+	public static ReactiveApiPublisher fromToken(TdlibChannelsSharedHost sharedTdlibServers,
 			Set<ResultingEventTransformer> resultingEventTransformerSet,
 			long userId,
 			String token,
@@ -122,7 +122,7 @@ public abstract class ReactiveApiPublisher {
 		return new ReactiveApiPublisherToken(sharedTdlibServers, resultingEventTransformerSet, userId, token, lane);
 	}
 
-	public static ReactiveApiPublisher fromPhoneNumber(TdlibChannelsSharedServer sharedTdlibServers,
+	public static ReactiveApiPublisher fromPhoneNumber(TdlibChannelsSharedHost sharedTdlibServers,
 			Set<ResultingEventTransformer> resultingEventTransformerSet,
 			long userId,
 			long phoneNumber,
@@ -551,7 +551,7 @@ public abstract class ReactiveApiPublisher {
 
 		private final String botToken;
 
-		public ReactiveApiPublisherToken(TdlibChannelsSharedServer sharedTdlibServers,
+		public ReactiveApiPublisherToken(TdlibChannelsSharedHost sharedTdlibServers,
 				Set<ResultingEventTransformer> resultingEventTransformerSet,
 				long userId,
 				String botToken,
@@ -583,7 +583,7 @@ public abstract class ReactiveApiPublisher {
 
 		private final long phoneNumber;
 
-		public ReactiveApiPublisherPhoneNumber(TdlibChannelsSharedServer sharedTdlibServers,
+		public ReactiveApiPublisherPhoneNumber(TdlibChannelsSharedHost sharedTdlibServers,
 				Set<ResultingEventTransformer> resultingEventTransformerSet,
 				long userId,
 				long phoneNumber,

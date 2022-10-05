@@ -8,11 +8,8 @@ public class ChannelProducerTdlibResponse {
 	private ChannelProducerTdlibResponse() {
 	}
 
-	public static EventProducer<OnResponse<Object>> create(ChannelFactory channelFactory, ChannelsParameters channelsParameters) {
-		return channelFactory.newProducer(channelsParameters,
-				ChannelCodec.TDLIB_RESPONSE,
-				Channel.TDLIB_RESPONSE.getChannelName()
-		);
+	public static EventProducer<OnResponse<Object>> create(ChannelFactory channelFactory) {
+		return channelFactory.newProducer(ChannelCodec.TDLIB_RESPONSE, Channel.TDLIB_RESPONSE.getChannelName());
 	}
 
 }

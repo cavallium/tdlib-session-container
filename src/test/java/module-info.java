@@ -9,4 +9,6 @@ module tdlib.reactive.api.test {
 	requires it.unimi.dsi.fastutil;
 	requires org.reactivestreams;
 	requires kafka.clients;
+	requires java.logging;
+	requires rsocket.core;
 }

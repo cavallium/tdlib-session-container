@@ -52,7 +52,7 @@ abstract class BaseAtomixReactiveApiClient implements ReactiveApiMultiClient {
 	private final AtomicLong requestId = new AtomicLong(0);
 	private final Disposable subscription;
 
-	public BaseAtomixReactiveApiClient(ClientsSharedTdlib sharedTdlibClients) {
+	public BaseAtomixReactiveApiClient(TdlibChannelsSharedReceive sharedTdlibClients) {
 		this.clientId = System.nanoTime();
 		this.requests = sharedTdlibClients.requests();
 
@@ -78,7 +78,7 @@ abstract class BaseAtomixReactiveApiClient implements ReactiveApiMultiClient {
 			}
 			var cf = new CompletableFuture<Timestamped<OnResponse<TdApi.Object>>>();
 			this.responses.put(requestId, cf);
-			Mono<T> response = Mono.fromFuture(cf)
+			Mono<T> response = Mono.fromFuture(() -> cf)
 					.timeout(timeoutDuration, Mono.fromSupplier(() -> new Timestamped<>(requestTimestamp.toEpochMilli(),
 							new Response<>(clientId, requestId, userId, new TdApi.Error(408, "Request Timeout")))))
 					.<T>handle((responseObj, sink) -> {
