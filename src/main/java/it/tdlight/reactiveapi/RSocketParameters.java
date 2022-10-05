@@ -31,8 +31,33 @@ public final class RSocketParameters implements ChannelsParameters {
 		return client;
 	}
 
-	public HostAndPort host() {
+	public HostAndPort baseHost() {
 		return host;
+	}
+
+	public HostAndPort channelHost(String channelName) {
+		return switch (channelName) {
+			case "request" -> HostAndPort.fromParts(host.getHost(), host.getPort());
+			case "response" -> HostAndPort.fromParts(host.getHost(), host.getPort() + 1);
+			default -> {
+				if (channelName.startsWith("event-")) {
+					var lane = channelName.substring("event-".length());
+					int index;
+					if (lane.equals("main")) {
+						index = 0;
+					} else {
+						index = lanes.indexOf(lane);
+						if (index < 0) {
+							throw new IllegalArgumentException("Unknown lane: " + lane);
+						}
+						index++;
+					}
+					yield HostAndPort.fromParts(host.getHost(), host.getPort() + 2 + index);
+				} else {
+					throw new IllegalArgumentException("Unknown channel: " + channelName);
+				}
+			}
+		};
 	}
 
 	@Override

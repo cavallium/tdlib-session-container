@@ -29,9 +29,10 @@ public class TdlibChannelsSharedServer implements Closeable {
 		this.tdServersChannels = tdServersChannels;
 		this.responsesSub = tdServersChannels.response()
 				.sendMessages(responses.asFlux().log("responses", Level.FINEST, SignalType.ON_NEXT))
+				.repeat()
 				.subscribeOn(Schedulers.parallel())
 				.subscribe();
-		this.requests = tdServersChannels.request().consumeMessages();
+		this.requests = tdServersChannels.request().consumeMessages().repeat();
 	}
 
 	public Flux<Timestamped<OnRequest<Object>>> requests() {
@@ -43,6 +44,7 @@ public class TdlibChannelsSharedServer implements Closeable {
 	public Disposable events(String lane, Flux<ClientBoundEvent> eventFlux) {
 		return tdServersChannels.events(lane)
 				.sendMessages(eventFlux)
+				.repeat()
 				.subscribeOn(Schedulers.parallel())
 				.subscribe();
 	}

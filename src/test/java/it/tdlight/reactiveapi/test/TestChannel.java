@@ -177,7 +177,6 @@ public abstract class TestChannel {
 				.map(Integer::parseUnsignedInt)
 				.take(10, true)
 				.collect(Collectors.toCollection(IntArrayList::new));
-		var receiverWait =  Flux.<IntArrayList>empty().delaySubscription(Duration.ofSeconds(4));
 		var receiver2 = consumer
 				.consumeMessages()
 				.limitRate(1)
@@ -187,7 +186,7 @@ public abstract class TestChannel {
 		Flux<IntArrayList> part1 = Flux
 				.merge((isServerSender() ? sender : receiver1), isServerSender() ? receiver1 : sender);
 		Flux<IntArrayList> part2 = Flux
-				.merge((isServerSender() ? sender : receiver2), receiverWait.then(isServerSender() ? receiver2 : sender));
+				.merge((isServerSender() ? sender : receiver2), isServerSender() ? receiver2 : sender);
 		var response = Flux.concat(part1, part2).reduce((a, b) -> {
 			a.addAll(b);
 			return a;

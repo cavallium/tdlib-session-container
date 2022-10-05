@@ -53,9 +53,9 @@ public interface ChannelFactory {
 				String channelName) {
 			var socketParameters = (RSocketParameters) channelsParameters;
 			if (socketParameters.isClient()) {
-				return new RSocketConsumeAsClient<>(socketParameters.host(), channelCodec, channelName);
+				return new RSocketConsumeAsClient<>(socketParameters.channelHost(channelName), channelCodec, channelName);
 			} else {
-				return new RSocketConsumeAsServer<>(socketParameters.host(), channelCodec, channelName);
+				return new RSocketConsumeAsServer<>(socketParameters.channelHost(channelName), channelCodec, channelName);
 			}
 		}
 
@@ -65,9 +65,9 @@ public interface ChannelFactory {
 				String channelName) {
 			var socketParameters = (RSocketParameters) channelsParameters;
 			if (socketParameters.isClient()) {
-				return new RSocketProduceAsServer<>(socketParameters.host(), channelCodec, channelName);
+				return new RSocketProduceAsClient<>(socketParameters.channelHost(channelName), channelCodec, channelName);
 			} else {
-				return new RSocketProduceAsClient<>(socketParameters.host(), channelCodec, channelName);
+				return new RSocketProduceAsServer<>(socketParameters.channelHost(channelName), channelCodec, channelName);
 			}
 		}
 	}

@@ -15,7 +15,9 @@ import io.rsocket.util.DefaultPayload;
 import it.tdlight.reactiveapi.ChannelCodec;
 import it.tdlight.reactiveapi.EventProducer;
 import it.tdlight.reactiveapi.ReactorUtils;
+import java.nio.channels.ClosedChannelException;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.logging.Level;
 import org.apache.kafka.common.serialization.Serializer;
@@ -26,6 +28,7 @@ import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.core.publisher.Sinks;
 import reactor.core.publisher.Sinks.Empty;
+import reactor.util.retry.Retry;
 
 public final class RSocketProduceAsServer<K> implements EventProducer<K> {
 
@@ -84,12 +87,23 @@ public final class RSocketProduceAsServer<K> implements EventProducer<K> {
 							});
 						}
 					})
-					.resume(new Resume())
+					//.resume(new Resume())
 					.payloadDecoder(PayloadDecoder.ZERO_COPY)
 					.bind(TcpServerTransport.create(host.getHost(), host.getPort()))
+					.retryWhen(Retry
+							.backoff(Long.MAX_VALUE, Duration.ofSeconds(1))
+							.maxBackoff(Duration.ofSeconds(16))
+							.jitter(1.0)
+							.doBeforeRetry(rs -> LOG.warn("Failed to bind, retrying. {}", rs)))
 					.doOnNext(serverRef::set)
 					.flatMap(closeableChannel -> closeableChannel.onClose()
-							.takeUntilOther(closeRequest.asMono().doFinally(s -> closeableChannel.dispose())));
+							.takeUntilOther(closeRequest.asMono().doFinally(s -> closeableChannel.dispose())))
+					.retryWhen(Retry
+							.backoff(Long.MAX_VALUE, Duration.ofSeconds(1))
+							.filter(ex -> ex instanceof ClosedChannelException)
+							.maxBackoff(Duration.ofSeconds(16))
+							.jitter(1.0)
+							.doBeforeRetry(rs -> LOG.warn("Failed to communicate, retrying. {}", rs)));
 		});
 	}
 

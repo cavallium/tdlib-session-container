@@ -18,6 +18,7 @@ import it.tdlight.reactiveapi.ChannelCodec;
 import it.tdlight.reactiveapi.EventConsumer;
 import it.tdlight.reactiveapi.RSocketParameters;
 import it.tdlight.reactiveapi.Timestamped;
+import java.nio.channels.ClosedChannelException;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.concurrent.ConcurrentLinkedDeque;
@@ -30,6 +31,7 @@ import org.apache.logging.log4j.Logger;
 import org.jetbrains.annotations.NotNull;
 import org.reactivestreams.Subscription;
 import reactor.core.CoreSubscriber;
+import reactor.core.Disposable;
 import reactor.core.publisher.BaseSubscriber;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
@@ -73,7 +75,7 @@ public class RSocketConsumeAsServer<T> implements EventConsumer<T> {
 		return Mono
 				.<Tuple3<CloseableChannel, RSocket, Flux<Timestamped<T>>>>create(sink -> {
 					AtomicReference<CloseableChannel> serverRef = new AtomicReference<>();
-					var server = RSocketServer
+					var disposable = RSocketServer
 							.create((setup, in) -> {
 								var inRawFlux = in.requestStream(DefaultPayload.create("", "consume"));
 								var inFlux = inRawFlux.map(payload -> {
@@ -87,16 +89,30 @@ public class RSocketConsumeAsServer<T> implements EventConsumer<T> {
 								return Mono.just(new RSocket() {});
 							})
 							.payloadDecoder(PayloadDecoder.ZERO_COPY)
-							.resume(new Resume())
-							.bindNow(TcpServerTransport.create(host.getHost(), host.getPort()));
-					serverRef.set(server);
-					sink.onCancel(server);
+							//.resume(new Resume())
+							.bind(TcpServerTransport.create(host.getHost(), host.getPort()))
+							.retryWhen(Retry
+									.backoff(Long.MAX_VALUE, Duration.ofSeconds(1))
+									.maxBackoff(Duration.ofSeconds(16))
+									.jitter(1.0)
+									.doBeforeRetry(rs -> LOG.warn("Failed to bind, retrying. {}", rs)))
+							.subscribe(server -> {
+								serverRef.set(server);
+								sink.onCancel(server);
+							});
+					sink.onDispose(disposable);
 				})
 				.subscribeOn(Schedulers.boundedElastic())
 				.flatMapMany(t -> t.getT3().doFinally(s -> {
 					t.getT2().dispose();
 					t.getT1().dispose();
 				}))
+				.retryWhen(Retry
+						.backoff(Long.MAX_VALUE, Duration.ofSeconds(1))
+						.filter(ex -> ex instanceof ClosedChannelException)
+						.maxBackoff(Duration.ofSeconds(16))
+						.jitter(1.0)
+						.doBeforeRetry(rs -> LOG.warn("Failed to communicate, retrying. {}", rs)))
 				.log("RSOCKET_CONSUMER_SERVER", Level.FINE);
 		}
 		/*return Flux.defer(() -> {

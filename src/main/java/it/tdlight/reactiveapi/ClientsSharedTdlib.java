@@ -33,11 +33,12 @@ public class ClientsSharedTdlib implements Closeable {
 
 	public ClientsSharedTdlib(TdlibChannelsClients tdClientsChannels) {
 		this.tdClientsChannels = tdClientsChannels;
-		this.responses = tdClientsChannels.response().consumeMessages();
+		this.responses = tdClientsChannels.response().consumeMessages().repeat();
 		this.events = tdClientsChannels.events().entrySet().stream()
-				.collect(Collectors.toUnmodifiableMap(Entry::getKey, e -> e.getValue().consumeMessages()));
+				.collect(Collectors.toUnmodifiableMap(Entry::getKey, e -> e.getValue().consumeMessages().repeat()));
 		this.requestsSub = tdClientsChannels.request()
 				.sendMessages(requests.asFlux())
+				.repeat()
 				.subscribeOn(Schedulers.parallel())
 				.subscribe();
 	}

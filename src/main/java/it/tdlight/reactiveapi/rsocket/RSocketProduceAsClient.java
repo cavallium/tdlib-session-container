@@ -16,6 +16,7 @@ import it.tdlight.reactiveapi.EventProducer;
 import it.tdlight.reactiveapi.RSocketParameters;
 import it.tdlight.reactiveapi.ReactorUtils;
 import it.tdlight.reactiveapi.Timestamped;
+import java.nio.channels.ClosedChannelException;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.logging.Level;
@@ -66,9 +67,21 @@ public final class RSocketProduceAsClient<K> implements EventProducer<K> {
 						.payloadDecoder(PayloadDecoder.ZERO_COPY)
 						.setupPayload(DefaultPayload.create("", "connect"))
 						.acceptor(SocketAcceptor.forRequestStream(payload  -> serializedEventsFlux))
+						//.resume(new Resume())
 						.connect(TcpClientTransport.create(host.getHost(), host.getPort()))
+						.retryWhen(Retry
+								.backoff(Long.MAX_VALUE, Duration.ofSeconds(1))
+								.maxBackoff(Duration.ofSeconds(16))
+								.jitter(1.0)
+								.doBeforeRetry(rs -> LOG.warn("Failed to bind, retrying. {}", rs)))
 						.flatMap(rSocket -> rSocket.onClose()
 								.takeUntilOther(closeRequest.asMono().doFinally(s -> rSocket.dispose())))
+						.retryWhen(Retry
+								.backoff(Long.MAX_VALUE, Duration.ofSeconds(1))
+								.filter(ex -> ex instanceof ClosedChannelException)
+								.maxBackoff(Duration.ofSeconds(16))
+								.jitter(1.0)
+								.doBeforeRetry(rs -> LOG.warn("Failed to communicate, retrying. {}", rs)))
 						.log("RSOCKET_PRODUCER_CLIENT_Y", Level.FINE);
 	}
 
