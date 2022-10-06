@@ -43,12 +43,10 @@ public final class KafkaProducer<K> implements EventProducer<K> {
 		sender = KafkaSender.create(senderOptions.maxInFlight(1024));
 	}
 
-	@Override
 	public ChannelCodec getChannelCodec() {
 		return channelCodec;
 	}
 
-	@Override
 	public String getChannelName() {
 		return channelName;
 	}

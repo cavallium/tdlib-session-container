@@ -85,12 +85,10 @@ public final class KafkaConsumer<K> implements EventConsumer<K> {
 		return quickResponse;
 	}
 
-	@Override
 	public ChannelCodec getChannelCodec() {
 		return channelCodec;
 	}
 
-	@Override
 	public String getChannelName() {
 		return channelName;
 	}

@@ -18,6 +18,8 @@ import java.util.concurrent.ConcurrentLinkedDeque;
 import java.util.function.Function;
 import java.util.logging.Level;
 import java.util.stream.Collectors;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
@@ -30,6 +32,8 @@ import reactor.util.retry.Retry;
 
 public abstract class TestChannel {
 
+	private static final Logger LOG = LogManager.getLogger(TestChannel.class);
+
 	protected ChannelFactory channelFactory;
 	protected IntArrayList data;
 	protected ConcurrentLinkedDeque<Closeable> closeables = new ConcurrentLinkedDeque<>();
@@ -40,8 +44,8 @@ public abstract class TestChannel {
 
 	@BeforeEach
 	public void beforeEach() {
-		var consumerFactory = new RSocketChannelFactory(new RSocketParameters(isConsumerClient(), "localhost:25689", List.of()));
-		var producerFactory = new RSocketChannelFactory(new RSocketParameters(!isConsumerClient(), "localhost:25689", List.of()));
+		var consumerFactory = new RSocketChannelFactory(new RSocketParameters(isConsumerClient(), "127.0.0.1:25689", List.of()));
+		var producerFactory = new RSocketChannelFactory(new RSocketParameters(!isConsumerClient(), "127.0.0.1:25689", List.of()));
 
 		closeables.offer(consumerFactory);
 		closeables.offer(producerFactory);
@@ -61,11 +65,13 @@ public abstract class TestChannel {
 
 	@AfterEach
 	public void afterEach() {
+		System.out.println("Cleaning up...");
+		producer.close();
 		while (!closeables.isEmpty()) {
 			var c = closeables.poll();
 			try {
 				c.close();
-			} catch (IOException e) {
+			} catch (Throwable e) {
 				e.printStackTrace();
 			}
 		}
@@ -102,7 +108,7 @@ public abstract class TestChannel {
 				.timeout(Duration.ofSeconds(5));
 		var response = Flux
 				.merge(isConsumerClient() ? (List.of(eventProducer, eventConsumer)) : List.of(eventConsumer, eventProducer))
-				.blockLast();
+				.blockLast(Duration.ofSeconds(5));
 		Assertions.assertEquals(response, data);
 		System.out.println(response);
 	}
@@ -111,15 +117,17 @@ public abstract class TestChannel {
 	public void testSimple() {
 		Mono<IntArrayList> eventProducer = producer
 				.sendMessages(Flux.fromIterable(data).map(Integer::toUnsignedString))
-				.then(Mono.empty());
+				.doOnSuccess(s -> LOG.warn("Done producer"))
+				.then(Mono.<IntArrayList>empty());
 		Mono<IntArrayList> eventConsumer = consumer
 				.consumeMessages()
 				.map(Timestamped::data)
 				.map(Integer::parseUnsignedInt)
-				.collect(Collectors.toCollection(IntArrayList::new));
+				.collect(Collectors.toCollection(IntArrayList::new))
+				.doOnSuccess(s -> LOG.warn("Done consumer"));
 		var response = Flux
 				.merge(isConsumerClient() ? (List.of(eventProducer, eventConsumer)) : List.of(eventConsumer, eventProducer))
-				.blockLast();
+				.blockLast(Duration.ofSeconds(5));
 		Assertions.assertEquals(response, data);
 		System.out.println(response);
 	}
@@ -128,16 +136,18 @@ public abstract class TestChannel {
 	public void testInvertedSubscription() {
 		Mono<IntArrayList> eventProducer = producer
 				.sendMessages(Flux.fromIterable(data).map(Integer::toUnsignedString))
+				.doOnSuccess(s -> LOG.warn("Done producer"))
 				.then(Mono.empty());
 		Mono<IntArrayList> eventConsumer = consumer
 				.consumeMessages()
 				.map(Timestamped::data)
 				.map(Integer::parseUnsignedInt)
-				.collect(Collectors.toCollection(IntArrayList::new));
+				.collect(Collectors.toCollection(IntArrayList::new))
+				.doOnSuccess(s -> LOG.warn("Done consumer"));
 		var response = Flux
 				.merge(isConsumerClient() ? List.of(eventConsumer, eventProducer.delaySubscription(Duration.ofSeconds(1)))
 						: List.of(eventProducer, eventConsumer.delaySubscription(Duration.ofSeconds(1))))
-				.blockLast();
+				.blockLast(Duration.ofSeconds(60));
 		Assertions.assertEquals(response, data);
 		System.out.println(response);
 	}
@@ -157,7 +167,7 @@ public abstract class TestChannel {
 				.collect(Collectors.toCollection(IntArrayList::new));
 		Assertions.assertThrows(Exception.class, () -> Flux
 				.merge(isConsumerClient() ? (List.of(eventProducer, eventConsumer)) : List.of(eventConsumer, eventProducer))
-				.blockLast());
+				.blockLast(Duration.ofSeconds(5)));
 	}
 
 	@Test
@@ -172,7 +182,7 @@ public abstract class TestChannel {
 				.collect(Collectors.toCollection(IntArrayList::new));
 		var data = Flux
 				.merge(isConsumerClient() ? (List.of(eventProducer, eventConsumer)) : List.of(eventConsumer, eventProducer))
-				.blockLast();
+				.blockLast(Duration.ofSeconds(5));
 		Assertions.assertNotNull(data);
 		Assertions.assertTrue(data.isEmpty());
 	}
@@ -188,7 +198,7 @@ public abstract class TestChannel {
 				.collect(Collectors.toCollection(IntArrayList::new));
 		var response = Flux
 				.merge(isConsumerClient() ? (List.of(eventProducer, eventConsumer)) : List.of(eventConsumer, eventProducer))
-				.blockLast();
+				.blockLast(Duration.ofSeconds(5));
 		Assertions.assertEquals(response, data);
 		System.out.println(response);
 	}
@@ -204,7 +214,7 @@ public abstract class TestChannel {
 				.collect(Collectors.toCollection(IntArrayList::new));
 		var response = Flux
 				.merge(isConsumerClient() ? (List.of(eventProducer, eventConsumer)) : List.of(eventConsumer, eventProducer))
-				.blockLast();
+				.blockLast(Duration.ofSeconds(5));
 		data.removeElements(50, 100);
 		Assertions.assertEquals(response, data);
 		System.out.println(response);
@@ -223,7 +233,7 @@ public abstract class TestChannel {
 				.collect(Collectors.toCollection(IntArrayList::new));
 		var response = Flux
 				.merge(isConsumerClient() ? List.of(eventProducer, eventConsumer) : List.of(eventConsumer, eventProducer))
-				.blockLast();
+				.blockLast(Duration.ofSeconds(12));
 		Assertions.assertEquals(response, data);
 		System.out.println(response);
 	}
@@ -242,7 +252,7 @@ public abstract class TestChannel {
 				.collect(Collectors.toCollection(IntArrayList::new));
 		var response = Flux
 				.merge(isConsumerClient() ? List.of(eventProducer, eventConsumer) : List.of(eventConsumer, eventProducer))
-				.blockLast();
+				.blockLast(Duration.ofSeconds(12));
 		Assertions.assertEquals(response, data);
 		System.out.println(response);
 	}
@@ -343,7 +353,9 @@ public abstract class TestChannel {
 			producer
 					.sendMessages(dataFlux.limitRate(1).map(Integer::toUnsignedString))
 					.block();
-			data.removeInt(data.size() - 1);
+			if (numbers.size() < data.size()) {
+				data.removeInt(data.size() - 1);
+			}
 			Assertions.assertEquals(data, List.copyOf(numbers));
 		} finally {
 			eventConsumer.dispose();
@@ -372,13 +384,15 @@ public abstract class TestChannel {
 								throw new FakeException();
 							}
 						}).map(Integer::toUnsignedString))
-						.block();
+						.block(Duration.ofSeconds(5));
 			});
 			producer
 					.sendMessages(dataFlux.limitRate(1).map(Integer::toUnsignedString))
-					.block();
-			data.removeInt(data.size() - 1);
+					.block(Duration.ofSeconds(5));
 			data.removeInt(10);
+			if (numbers.size() < data.size()) {
+				data.removeInt(data.size() - 1);
+			}
 			Assertions.assertEquals(data, List.copyOf(numbers));
 		} finally {
 			eventConsumer.dispose();
@@ -401,7 +415,7 @@ public abstract class TestChannel {
 					.map(Integer::parseUnsignedInt)
 					.take(10, true)
 					.log("consumer-1", Level.INFO)
-					.blockLast();
+					.blockLast(Duration.ofSeconds(5));
 
 			Thread.sleep(4000);
 
@@ -411,7 +425,7 @@ public abstract class TestChannel {
 					.map(Timestamped::data)
 					.map(Integer::parseUnsignedInt)
 					.log("consumer-2", Level.INFO)
-					.blockLast();
+					.blockLast(Duration.ofSeconds(5));
 		} finally {
 			eventProducer.dispose();
 		}
@@ -426,7 +440,7 @@ public abstract class TestChannel {
 				.retryWhen(Retry.fixedDelay(5, Duration.ofSeconds(1)))
 				.subscribe(n -> {}, ex -> Assertions.fail(ex));
 
-		Assertions.assertThrows(CancelledChannelException.class, () -> {
+		Assertions.assertThrows(IllegalStateException.class, () -> {
 			try {
 				Mono
 						.when(consumer
@@ -443,7 +457,7 @@ public abstract class TestChannel {
 										.map(Integer::parseUnsignedInt)
 										.log("consumer-2", Level.INFO)
 										.onErrorResume(io.rsocket.exceptions.ApplicationErrorException.class,
-												ex -> Mono.error(new CancelledChannelException(ex))
+												ex -> Mono.error(new IllegalStateException(ex))
 										)
 						)
 						.block();
@@ -470,11 +484,11 @@ public abstract class TestChannel {
 							.take(10, true)
 							.log("producer-1", Level.INFO)
 							.map(Integer::toUnsignedString))
-					.block();
+					.block(Duration.ofSeconds(5));
 			Thread.sleep(4000);
 			producer
 					.sendMessages(dataFlux.log("producer-2", Level.INFO).map(Integer::toUnsignedString))
-					.block();
+					.block(Duration.ofSeconds(5));
 		} finally {
 			eventConsumer.dispose();
 		}
