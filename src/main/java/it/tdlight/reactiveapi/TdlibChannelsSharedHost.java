@@ -17,6 +17,7 @@ import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import reactor.core.Disposable;
 import reactor.core.publisher.Flux;
+import reactor.core.publisher.Mono;
 import reactor.core.publisher.SignalType;
 import reactor.core.publisher.Sinks;
 import reactor.core.publisher.Sinks.EmitFailureHandler;
@@ -30,43 +31,48 @@ import reactor.util.retry.RetryBackoffSpec;
 public class TdlibChannelsSharedHost implements Closeable {
 
 	private static final Logger LOG = LogManager.getLogger(TdlibChannelsSharedHost.class);
-	private static final RetryBackoffSpec RETRY_STRATEGY = Retry
+	public static final RetryBackoffSpec RETRY_STRATEGY = Retry
 			.backoff(Long.MAX_VALUE, Duration.ofSeconds(1))
 			.maxBackoff(Duration.ofSeconds(16))
 			.jitter(1.0)
-			.doBeforeRetry(signal -> LOG.warn("Retrying channel with signal {}", signal));
+			.doBeforeRetry(signal -> LogManager.getLogger("Channels").warn("Retrying channel with signal {}", signal));
+
+	public static final Function<Flux<Long>, Flux<Long>> REPEAT_STRATEGY = n -> n
+			.doOnNext(i -> LogManager.getLogger("Channels").debug("Resubscribing to channel"))
+			.delayElements(Duration.ofSeconds(5));
 
 	private final TdlibChannelsServers tdServersChannels;
 	private final Disposable responsesSub;
 	private final AtomicReference<Disposable> requestsSub = new AtomicReference<>();
-	private final Many<OnResponse<TdApi.Object>> responses = Sinks.many().multicast().onBackpressureBuffer(65535);
+	private final Many<OnResponse<TdApi.Object>> responses = Sinks.many().multicast().directAllOrNothing();
 	private final Map<String, Many<Flux<ClientBoundEvent>>> events;
 	private final Flux<Timestamped<OnRequest<Object>>> requests;
 
 	public TdlibChannelsSharedHost(Set<String> allLanes, TdlibChannelsServers tdServersChannels) {
 		this.tdServersChannels = tdServersChannels;
-		this.responsesSub = tdServersChannels.response()
-				.sendMessages(responses.asFlux().log("responses", Level.FINEST, SignalType.ON_NEXT))
-				.repeatWhen(n -> n.delayElements(Duration.ofSeconds(5)))
+		this.responsesSub = Mono.defer(() -> tdServersChannels.response()
+				.sendMessages(responses.asFlux().log("responses", Level.FINE)))
+				.repeatWhen(REPEAT_STRATEGY)
 				.retryWhen(RETRY_STRATEGY)
 				.subscribeOn(Schedulers.parallel())
 				.subscribe(n -> {}, ex -> LOG.error("Unexpected error when sending responses", ex));
 		events = allLanes.stream().collect(Collectors.toUnmodifiableMap(Function.identity(), lane -> {
 			Many<Flux<ClientBoundEvent>> sink = Sinks.many().multicast().onBackpressureBuffer(65535);
 			var outputEventsFlux = Flux
-					.merge(sink.asFlux().map(flux -> flux.subscribeOn(Schedulers.parallel())), Integer.MAX_VALUE)
+					.merge(sink.asFlux().cache().map(flux -> flux.publish().autoConnect().subscribeOn(Schedulers.parallel())), Integer.MAX_VALUE)
 					.doFinally(s -> LOG.debug("Output events flux of lane \"{}\" terminated with signal {}", lane, s));
-			tdServersChannels
+			Mono.defer(() -> tdServersChannels
 					.events(lane)
-					.sendMessages(outputEventsFlux)
-					.repeatWhen(n -> n.delayElements(Duration.ofSeconds(5)))
+					.sendMessages(outputEventsFlux))
+					.repeatWhen(REPEAT_STRATEGY)
 					.retryWhen(RETRY_STRATEGY)
 					.subscribeOn(Schedulers.parallel())
 					.subscribe(n -> {}, ex -> LOG.error("Unexpected error when sending events to lane {}", lane, ex));
 			return sink;
 		}));
 		this.requests = tdServersChannels.request().consumeMessages()
-				.repeatWhen(n -> n.delayElements(Duration.ofSeconds(5)))
+				.doFinally(s -> LOG.debug("Input requests consumer terminated with signal {}", s))
+				.repeatWhen(REPEAT_STRATEGY)
 				.retryWhen(RETRY_STRATEGY)
 				.doOnError(ex -> LOG.error("Unexpected error when receiving requests", ex))
 				.doFinally(s -> LOG.debug("Input requests flux terminated with signal {}", s));

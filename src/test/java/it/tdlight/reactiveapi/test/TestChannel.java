@@ -212,12 +212,14 @@ public abstract class TestChannel {
 				.map(Integer::parseUnsignedInt)
 				.take(50, true)
 				.collect(Collectors.toCollection(IntArrayList::new));
-		var response = Flux
-				.merge(isConsumerClient() ? (List.of(eventProducer, eventConsumer)) : List.of(eventConsumer, eventProducer))
-				.blockLast(Duration.ofSeconds(5));
-		data.removeElements(50, 100);
-		Assertions.assertEquals(response, data);
-		System.out.println(response);
+		Assertions.assertThrows(Throwable.class, () -> {
+			var response = Flux
+					.merge(isConsumerClient() ? (List.of(eventProducer, eventConsumer)) : List.of(eventConsumer, eventProducer))
+					.blockLast(Duration.ofSeconds(5));
+			data.removeElements(50, 100);
+			Assertions.assertEquals(response, data);
+			System.out.println(response);
+		});
 	}
 
 	@Test
@@ -274,14 +276,14 @@ public abstract class TestChannel {
 					.map(Integer::parseUnsignedInt)
 					.take(10, true)
 					.collect(Collectors.toCollection(IntArrayList::new))
-					.block();
+					.block(Duration.ofSeconds(5));
 			var receiver2 = consumer
 					.consumeMessages()
 					.limitRate(1)
 					.map(Timestamped::data)
 					.map(Integer::parseUnsignedInt)
 					.collect(Collectors.toCollection(IntArrayList::new))
-					.block();
+					.block(Duration.ofSeconds(5));
 			Assertions.assertNotNull(receiver1);
 			Assertions.assertNotNull(receiver2);
 			receiver1.addAll(receiver2);

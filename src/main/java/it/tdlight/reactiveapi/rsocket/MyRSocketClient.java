@@ -43,10 +43,10 @@ public class MyRSocketClient implements RSocketChannelManager {
 		this.nextClient = RSocketConnector.create()
 				//.setupPayload(DefaultPayload.create("client", "setup-info"))
 				.payloadDecoder(PayloadDecoder.ZERO_COPY)
-				.reconnect(retryStrategy)
+				//.reconnect(retryStrategy)
 				.connect(transport)
 				.doOnNext(lastClient::set)
-				.cache();
+				.cacheInvalidateIf(RSocket::isDisposed);
 	}
 
 	@Override
@@ -70,9 +70,11 @@ public class MyRSocketClient implements RSocketChannelManager {
 
 			@Override
 			public Mono<Void> handleSendMessages(Flux<K> eventsFlux) {
-				Flux<Payload> rawFlux = eventsFlux.transform(flux -> RSocketUtils.serialize(flux, serializer));
-				Flux<Payload> combinedRawFlux = Flux.just(DefaultPayload.create(channelName, "channel")).concatWith(rawFlux);
-				return nextClient.flatMapMany(client -> client.requestChannel(combinedRawFlux)).take(1, true).then();
+				return Mono.defer(() -> {
+					Flux<Payload> rawFlux = eventsFlux.transform(flux -> RSocketUtils.serialize(flux, serializer));
+					Flux<Payload> combinedRawFlux = Flux.just(DefaultPayload.create(channelName, "channel")).concatWith(rawFlux);
+					return nextClient.flatMapMany(client -> client.requestChannel(combinedRawFlux).take(1, true)).then();
+				});
 			}
 
 		};

@@ -43,7 +43,7 @@ public class MyRSocketServer implements RSocketChannelManager, RSocket {
 				.payloadDecoder(PayloadDecoder.ZERO_COPY)
 				.bind(TcpServerTransport.create(baseHost.getHost(), baseHost.getPort()))
 				.doOnNext(d -> logger.debug("Server up"))
-				.cache();
+				.cacheInvalidateIf(CloseableChannel::isDisposed);
 
 		serverMono.subscribeOn(Schedulers.parallel()).subscribe(v -> {}, ex -> logger.warn("Failed to bind server"));
 
@@ -93,7 +93,7 @@ public class MyRSocketServer implements RSocketChannelManager, RSocket {
 		return new EventConsumer<K>() {
 			@Override
 			public Flux<Timestamped<K>> consumeMessages() {
-				return Flux.defer(() -> {
+				return serverCloseable.flatMapMany(x -> {
 					//noinspection unchecked
 					var conn = (ConsumerConnection<K>) consumerRegistry.computeIfAbsent(channelName, ConsumerConnection::new);
 					conn.registerLocal(deserializer);
@@ -116,7 +116,7 @@ public class MyRSocketServer implements RSocketChannelManager, RSocket {
 		return new EventProducer<K>() {
 			@Override
 			public Mono<Void> sendMessages(Flux<K> eventsFlux) {
-				return Mono.defer(() -> {
+				return serverCloseable.flatMap(x -> {
 					//noinspection unchecked
 					var conn = (ProducerConnection<K>) producerRegistry.computeIfAbsent(channelName, ProducerConnection::new);
 					conn.registerLocal(eventsFlux.transform(flux -> RSocketUtils.serialize(flux, serializer)));

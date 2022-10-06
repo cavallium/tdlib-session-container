@@ -1,5 +1,8 @@
 package it.tdlight.reactiveapi;
 
+import static it.tdlight.reactiveapi.TdlibChannelsSharedHost.REPEAT_STRATEGY;
+import static it.tdlight.reactiveapi.TdlibChannelsSharedHost.RETRY_STRATEGY;
+
 import it.tdlight.jni.TdApi.Object;
 import it.tdlight.reactiveapi.Event.ClientBoundEvent;
 import it.tdlight.reactiveapi.Event.OnRequest;
@@ -9,6 +12,7 @@ import java.time.Duration;
 import java.util.Map;
 import java.util.Map.Entry;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.logging.Level;
 import java.util.stream.Collectors;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -27,45 +31,46 @@ public class TdlibChannelsSharedReceive implements Closeable {
 
 	private static final Logger LOG = LogManager.getLogger(TdlibChannelsSharedReceive.class);
 
-	private static final RetryBackoffSpec RETRY_STRATEGY = Retry
-			.backoff(Long.MAX_VALUE, Duration.ofSeconds(1))
-			.maxBackoff(Duration.ofSeconds(16))
-			.jitter(1.0)
-			.doBeforeRetry(signal -> LOG.warn("Retrying channel with signal {}", signal));
-
 	private final TdlibChannelsClients tdClientsChannels;
 	private final AtomicReference<Disposable> responsesSub = new AtomicReference<>();
 	private final Disposable requestsSub;
 	private final AtomicReference<Disposable> eventsSub = new AtomicReference<>();
 	private final Flux<Timestamped<OnResponse<Object>>> responses;
 	private final Map<String, Flux<Timestamped<ClientBoundEvent>>> events;
-	private final Many<OnRequest<?>> requests = Sinks.many().multicast().onBackpressureBuffer(65535);
+	private final Many<OnRequest<?>> requests = Sinks.many().multicast().directAllOrNothing();
 
 	public TdlibChannelsSharedReceive(TdlibChannelsClients tdClientsChannels) {
 		this.tdClientsChannels = tdClientsChannels;
-		this.responses = tdClientsChannels
-				.response()
-				.consumeMessages()
-				.repeatWhen(n -> n.delayElements(Duration.ofSeconds(5)))
+		this.responses = Flux
+				.defer(() -> tdClientsChannels.response().consumeMessages())
+				.log("responses", Level.FINE)
+				.repeatWhen(REPEAT_STRATEGY)
 				.retryWhen(RETRY_STRATEGY)
+				.publish()
+				.autoConnect()
 				.doFinally(s -> LOG.debug("Input responses flux terminated with signal {}", s));
 		this.events = tdClientsChannels.events().entrySet().stream()
 				.collect(Collectors.toUnmodifiableMap(Entry::getKey,
-						e -> e
-								.getValue()
-								.consumeMessages()
-								.repeatWhen(n -> n.delayElements(Duration.ofSeconds(5)))
+						e -> Flux
+								.defer(() -> e.getValue().consumeMessages())
+								.repeatWhen(REPEAT_STRATEGY)
 								.retryWhen(RETRY_STRATEGY)
 								.doFinally(s -> LOG.debug("Input events flux of lane \"{}\" terminated with signal {}", e.getKey(), s))
 				));
-		var requestsFlux = Flux.defer(() -> requests.asFlux()
-				.doFinally(s -> LOG.debug("Output requests flux terminated with signal {}", s)));
-		this.requestsSub = tdClientsChannels.request()
-				.sendMessages(requestsFlux)
-				.repeatWhen(n -> n.delayElements(Duration.ofSeconds(5)))
+		this.requestsSub = tdClientsChannels
+				.request()
+				.sendMessages(Flux
+						.defer(() -> requests
+								.asFlux()
+								.doFinally(s -> LOG.debug("Output requests flux terminated with signal {}", s))))
+				.doFinally(s -> LOG.debug("Output requests sender terminated with signal {}", s))
+				.repeatWhen(REPEAT_STRATEGY)
 				.retryWhen(RETRY_STRATEGY)
 				.subscribeOn(Schedulers.parallel())
-				.subscribe(n -> {}, ex -> requests.emitError(ex, EmitFailureHandler.busyLooping(Duration.ofMillis(100))));
+				.subscribe(n -> {}, ex -> {
+					LOG.error("An error when handling requests killed the requests subscriber!", ex);
+					requests.emitError(ex, EmitFailureHandler.busyLooping(Duration.ofMillis(100)));
+				});
 	}
 
 	public Flux<Timestamped<OnResponse<Object>>> responses() {
@@ -84,8 +89,10 @@ public class TdlibChannelsSharedReceive implements Closeable {
 		return events;
 	}
 
-	public Many<OnRequest<?>> requests() {
-		return requests;
+	public void emitRequest(OnRequest<?> request) {
+		synchronized (requests) {
+			requests.emitNext(request, EmitFailureHandler.FAIL_FAST);
+		}
 	}
 
 	@Override

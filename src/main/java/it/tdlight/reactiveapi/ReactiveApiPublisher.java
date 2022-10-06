@@ -198,7 +198,7 @@ public abstract class ReactiveApiPublisher {
 						.then(Mono.empty())
 				)
 				.subscribeOn(Schedulers.parallel())
-				.subscribe();
+				.subscribe(v -> {}, ex -> LOG.error("Resulting events flux has failed unexpectedly! (1)", ex));
 
 		var messagesToSend = publishedResultingEvents
 				// Obtain only client-bound events
@@ -229,7 +229,7 @@ public abstract class ReactiveApiPublisher {
 					} else {
 						LOG.error("Unknown cluster-bound event: {}", clusterBoundEvent);
 					}
-				});
+				}, ex -> LOG.error("Resulting events flux has failed unexpectedly! (2)", ex));
 
 
 		var prev = this.disposable.getAndSet(publishedResultingEvents.connect());

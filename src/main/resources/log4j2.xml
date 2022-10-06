@@ -16,6 +16,7 @@
 		<!-- log only INFO, WARN, ERROR and FATAL logging by classes in this package -->
 		<AsyncLogger name="io.netty" level="INFO" additivity="false"/>
 		<AsyncLogger name="io.rsocket" level="INFO" additivity="false"/>
+		<AsyncLogger name="it.tdlight.reactiveapi.rsocket" level="DEBUG"/>
 
     <AsyncRoot level="DEBUG">
       <filters>

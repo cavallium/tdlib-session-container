@@ -27,6 +27,7 @@ import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.Consumer;
 import org.apache.kafka.common.errors.SerializationException;
 import org.jetbrains.annotations.NotNull;
 import org.slf4j.Logger;
@@ -46,7 +47,7 @@ abstract class BaseAtomixReactiveApiClient implements ReactiveApiMultiClient {
 
 	// Temporary id used to make requests
 	private final long clientId;
-	private final Many<OnRequest<?>> requests;
+	private final Consumer<OnRequest<?>> requests;
 	private final Map<Long, CompletableFuture<Timestamped<OnResponse<TdApi.Object>>>> responses
 			= new ConcurrentHashMap<>();
 	private final AtomicLong requestId = new AtomicLong(0);
@@ -54,7 +55,7 @@ abstract class BaseAtomixReactiveApiClient implements ReactiveApiMultiClient {
 
 	public BaseAtomixReactiveApiClient(TdlibChannelsSharedReceive sharedTdlibClients) {
 		this.clientId = System.nanoTime();
-		this.requests = sharedTdlibClients.requests();
+		this.requests = sharedTdlibClients::emitRequest;
 
 		this.subscription = sharedTdlibClients.responses().doOnNext(response -> {
 			var responseSink = responses.get(response.data().requestId());
@@ -63,7 +64,8 @@ abstract class BaseAtomixReactiveApiClient implements ReactiveApiMultiClient {
 				return;
 			}
 			responseSink.complete(response);
-		}).subscribeOn(Schedulers.parallel()).subscribe();
+		}).subscribeOn(Schedulers.parallel())
+				.subscribe(v -> {}, ex -> LOG.error("Reactive api client responses flux has failed unexpectedly!", ex));
 	}
 
 	@Override
@@ -100,9 +102,7 @@ abstract class BaseAtomixReactiveApiClient implements ReactiveApiMultiClient {
 						}
 					})
 					.doFinally(s -> this.responses.remove(requestId));
-			synchronized (requests) {
-				requests.emitNext(new Request<>(userId, clientId, requestId, request, timeout), EmitFailureHandler.FAIL_FAST);
-			}
+			requests.accept(new Request<>(userId, clientId, requestId, request, timeout));
 			return response;
 		});
 	}
