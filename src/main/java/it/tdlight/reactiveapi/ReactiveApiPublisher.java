@@ -160,9 +160,6 @@ public abstract class ReactiveApiPublisher {
 				.filter(s -> s instanceof TDLibBoundResultingEvent<?>)
 				.map(s -> ((TDLibBoundResultingEvent<?>) s))
 
-				// Buffer requests to avoid halting the event loop
-				.onBackpressureBuffer()
-
 				// Send requests to tdlib
 				.flatMap(req -> Mono
 						.from(rawTelegramClient.send(req.action(), SPECIAL_RAW_TIMEOUT_DURATION))
@@ -185,9 +182,6 @@ public abstract class ReactiveApiPublisher {
 						.onErrorResume(ex -> Mono.just(new OnUpdateError(userId, new TdApi.Error(500, ex.getMessage()))))
 				, Integer.MAX_VALUE)
 
-				// Buffer requests to avoid halting the event loop
-				.onBackpressureBuffer()
-
 				.doOnError(ex -> LOG.error("Failed to receive resulting events. The instance will be closed", ex))
 				.onErrorResume(ex -> Mono.just(new OnUpdateError(userId, new TdApi.Error(500, ex.getMessage()))))
 
@@ -204,10 +198,7 @@ public abstract class ReactiveApiPublisher {
 				// Obtain only client-bound events
 				.filter(s -> s instanceof ClientBoundResultingEvent)
 				.cast(ClientBoundResultingEvent.class)
-				.map(ClientBoundResultingEvent::event)
-
-				// Buffer requests to avoid halting the event loop
-				.onBackpressureBuffer();
+				.map(ClientBoundResultingEvent::event);
 
 		sharedTdlibServers.events(lane, messagesToSend);
 
@@ -215,9 +206,6 @@ public abstract class ReactiveApiPublisher {
 				// Obtain only cluster-bound events
 				.filter(s -> s instanceof ClusterBoundResultingEvent)
 				.cast(ClusterBoundResultingEvent.class)
-
-				// Buffer requests to avoid halting the event loop
-				.onBackpressureBuffer()
 
 				// Send events to the cluster
 				.subscribeOn(Schedulers.parallel())
