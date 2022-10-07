@@ -60,7 +60,8 @@ public final class KafkaConsumer<K> implements EventConsumer<K> {
 		props.put(ConsumerConfig.CLIENT_ID_CONFIG, kafkaParameters.clientId());
 		props.put(ConsumerConfig.GROUP_ID_CONFIG, kafkaGroupId);
 		props.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, IntegerDeserializer.class);
-		props.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, getChannelCodec().getDeserializerClass());
+		props.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, KafkaDeserializer.class);
+		props.put("custom.deserializer.class", getChannelCodec().getDeserializerClass());
 		props.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "latest");
 		props.put(ConsumerConfig.MAX_POLL_INTERVAL_MS_CONFIG, toIntExact(Duration.ofMinutes(5).toMillis()));
 		if (!isQuickResponse()) {
@@ -141,6 +142,6 @@ public final class KafkaConsumer<K> implements EventConsumer<K> {
 				})
 				.transform(this::retryIfCleanup)
 				.transform(this::retryIfCommitFailed)
-				.transform(ReactorUtils::subscribeOnce);
+				.transform(ReactorUtils::subscribeOnceUntilUnsubscribe);
 	}
 }

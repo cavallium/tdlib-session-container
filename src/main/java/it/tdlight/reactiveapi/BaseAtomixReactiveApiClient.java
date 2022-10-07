@@ -19,6 +19,7 @@ import it.tdlight.reactiveapi.Event.OnUpdateData;
 import it.tdlight.reactiveapi.Event.OnUpdateError;
 import it.tdlight.reactiveapi.Event.OnUserLoginCodeRequested;
 import java.io.ByteArrayInputStream;
+import java.io.DataInput;
 import java.io.DataInputStream;
 import java.io.IOException;
 import java.time.Duration;
@@ -28,7 +29,6 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
-import org.apache.kafka.common.errors.SerializationException;
 import org.jetbrains.annotations.NotNull;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -117,7 +117,7 @@ abstract class BaseAtomixReactiveApiClient implements ReactiveApiMultiClient {
 		}
 	}
 
-	static @NotNull ClientBoundEvent deserializeEvent(DataInputStream is) throws IOException {
+	static @NotNull ClientBoundEvent deserializeEvent(DataInput is) throws IOException {
 		var userId = is.readLong();
 		var dataVersion = is.readInt();
 		if (dataVersion != SERIAL_VERSION) {

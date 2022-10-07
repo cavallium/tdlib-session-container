@@ -1,10 +1,10 @@
 package it.tdlight.reactiveapi.rsocket;
 
 import io.rsocket.Payload;
+import it.tdlight.reactiveapi.Deserializer;
 import it.tdlight.reactiveapi.Timestamped;
 import java.time.Duration;
 import java.util.Optional;
-import org.apache.kafka.common.serialization.Deserializer;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import reactor.core.publisher.Flux;

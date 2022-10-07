@@ -1,8 +1,6 @@
 package it.tdlight.reactiveapi;
 
 import java.lang.reflect.InvocationTargetException;
-import org.apache.kafka.common.serialization.Deserializer;
-import org.apache.kafka.common.serialization.Serializer;
 
 public class ChannelCodec {
 	public static final ChannelCodec CLIENT_BOUND_EVENT = new ChannelCodec(ClientBoundEventSerializer.class, ClientBoundEventDeserializer.class);

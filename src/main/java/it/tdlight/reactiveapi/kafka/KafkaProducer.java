@@ -37,7 +37,8 @@ public final class KafkaProducer<K> implements EventProducer<K> {
 		props.put(ProducerConfig.LINGER_MS_CONFIG, "20");
 		props.put(ProducerConfig.COMPRESSION_TYPE_CONFIG, "snappy");
 		props.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, IntegerSerializer.class);
-		props.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, getChannelCodec().getSerializerClass());
+		props.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, KafkaSerializer.class);
+		props.put("custom.serializer.class", getChannelCodec().getSerializerClass());
 		SenderOptions<Integer, K> senderOptions = SenderOptions.create(props);
 
 		sender = KafkaSender.create(senderOptions.maxInFlight(1024));

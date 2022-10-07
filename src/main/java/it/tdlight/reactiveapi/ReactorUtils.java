@@ -1,14 +1,9 @@
 package it.tdlight.reactiveapi;
 
-import java.io.IOException;
 import java.util.ArrayDeque;
 import java.util.Deque;
-import java.util.List;
-import java.util.Objects;
 import java.util.concurrent.CancellationException;
-import java.util.concurrent.ConcurrentLinkedDeque;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.LongConsumer;
 import org.jetbrains.annotations.NotNull;
@@ -36,6 +31,15 @@ public class ReactorUtils {
 		});
 	}
 
+	public static <V> Flux<V> subscribeOnceUntilUnsubscribe(Flux<V> f) {
+		AtomicBoolean subscribed = new AtomicBoolean();
+		return f.doOnSubscribe(s -> {
+			if (!subscribed.compareAndSet(false, true)) {
+				throw new UnsupportedOperationException("Can't subscribe more than once!");
+			}
+		}).doFinally(s -> subscribed.set(false));
+	}
+
 	public static <V> Mono<V> subscribeOnce(Mono<V> f) {
 		AtomicBoolean subscribed = new AtomicBoolean();
 		return f.doOnSubscribe(s -> {
@@ -43,6 +47,15 @@ public class ReactorUtils {
 				throw new UnsupportedOperationException("Can't subscribe more than once!");
 			}
 		});
+	}
+
+	public static <V> Mono<V> subscribeOnceUntilUnsubscribe(Mono<V> f) {
+		AtomicBoolean subscribed = new AtomicBoolean();
+		return f.doOnSubscribe(s -> {
+			if (!subscribed.compareAndSet(false, true)) {
+				throw new UnsupportedOperationException("Can't subscribe more than once!");
+			}
+		}).doFinally(s -> subscribed.set(false));
 	}
 
 	public static <K> Flux<K> createLastestSubscriptionFlux(Flux<K> upstream, int maxBufferSize) {

@@ -38,6 +38,7 @@ import it.tdlight.reactiveapi.ResultingEvent.ResultingEventPublisherClosed;
 import it.tdlight.reactiveapi.ResultingEvent.TDLibBoundResultingEvent;
 import it.tdlight.tdlight.ClientManager;
 import java.io.ByteArrayOutputStream;
+import java.io.DataOutput;
 import java.io.DataOutputStream;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -51,7 +52,6 @@ import java.util.Set;
 import java.util.StringJoiner;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
-import org.apache.kafka.common.errors.SerializationException;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.reactivestreams.Subscriber;
@@ -431,7 +431,7 @@ public abstract class ReactiveApiPublisher {
 		}
 	}
 
-	private static void writeClientBoundEvent(ClientBoundEvent clientBoundEvent, DataOutputStream dataOutputStream)
+	public static void writeClientBoundEvent(ClientBoundEvent clientBoundEvent, DataOutput dataOutputStream)
 			throws IOException {
 		dataOutputStream.writeLong(clientBoundEvent.userId());
 		dataOutputStream.writeInt(SERIAL_VERSION);
@@ -511,9 +511,13 @@ public abstract class ReactiveApiPublisher {
 
 				@Override
 				public void onNext(Object responseObj) {
-					r.accept(new Event.OnResponse.Response<>(onRequestObj.clientId(),
-							onRequestObj.requestId(),
-							userId, responseObj));
+					try {
+						r.accept(new Event.OnResponse.Response<>(onRequestObj.clientId(),
+								onRequestObj.requestId(),
+								userId, responseObj));
+					} catch (Throwable ex) {
+						onError(ex);
+					}
 				}
 
 				@Override

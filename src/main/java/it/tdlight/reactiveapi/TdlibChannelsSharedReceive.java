@@ -43,7 +43,7 @@ public class TdlibChannelsSharedReceive implements Closeable {
 		this.tdClientsChannels = tdClientsChannels;
 		this.responses = Flux
 				.defer(() -> tdClientsChannels.response().consumeMessages())
-				.log("responses", Level.FINE)
+				//.log("responses", Level.FINE)
 				.repeatWhen(REPEAT_STRATEGY)
 				.retryWhen(RETRY_STRATEGY)
 				.publish()

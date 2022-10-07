@@ -147,7 +147,7 @@ public class AtomixReactiveApi implements ReactiveApi {
 						.subscribeOn(Schedulers.parallel())
 						.subscribe(n -> {}, ex -> LOG.error("Requests channel broke unexpectedly", ex));
 			}
-			})).transform(ReactorUtils::subscribeOnce);
+			})).transform(ReactorUtils::subscribeOnceUntilUnsubscribe);
 	}
 
 	@Override

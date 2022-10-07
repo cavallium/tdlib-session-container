@@ -51,7 +51,7 @@ public class TdlibChannelsSharedHost implements Closeable {
 	public TdlibChannelsSharedHost(Set<String> allLanes, TdlibChannelsServers tdServersChannels) {
 		this.tdServersChannels = tdServersChannels;
 		this.responsesSub = Mono.defer(() -> tdServersChannels.response()
-				.sendMessages(responses.asFlux().log("responses", Level.FINE)))
+				.sendMessages(responses.asFlux()/*.log("responses", Level.FINE)*/))
 				.repeatWhen(REPEAT_STRATEGY)
 				.retryWhen(RETRY_STRATEGY)
 				.subscribeOn(Schedulers.parallel())

@@ -11,7 +11,7 @@ module tdlib.reactive.api {
 	requires tdlight.api;
 	requires com.google.common;
 	requires java.logging;
-	requires kafka.clients;
+	requires static kafka.clients;
 	requires org.apache.logging.log4j;
 	requires reactor.kafka;
 	requires com.fasterxml.jackson.databind;
