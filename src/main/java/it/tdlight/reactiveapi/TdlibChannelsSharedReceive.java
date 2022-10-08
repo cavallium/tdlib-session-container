@@ -64,7 +64,9 @@ public class TdlibChannelsSharedReceive implements Closeable {
 				.subscribeOn(Schedulers.parallel())
 				.subscribe(n -> {}, ex -> {
 					LOG.error("An error when handling requests killed the requests subscriber!", ex);
-					requests.emitError(ex, EmitFailureHandler.busyLooping(Duration.ofMillis(100)));
+					synchronized (requests) {
+						requests.emitError(ex, EmitFailureHandler.FAIL_FAST);
+					}
 				});
 	}
 
