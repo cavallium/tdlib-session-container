@@ -58,11 +58,10 @@ public class TdlibChannelsSharedHost implements Closeable {
 				.subscribe(n -> {}, ex -> LOG.error("Unexpected error when sending responses", ex));
 		events = allLanes.stream().collect(Collectors.toUnmodifiableMap(Function.identity(), lane -> {
 			Many<Flux<ClientBoundEvent>> sink = Sinks.many().replay().all();
-			var outputEventsFlux = Flux
-					.merge(sink.asFlux().map(flux -> flux.publish().autoConnect().subscribeOn(Schedulers.parallel())), Integer.MAX_VALUE)
+			Flux<ClientBoundEvent> outputEventsFlux = Flux
+					.merge(sink.asFlux().map(flux -> flux.publishOn(Schedulers.parallel())), Integer.MAX_VALUE, 256)
 					.doFinally(s -> LOG.debug("Output events flux of lane \"{}\" terminated with signal {}", lane, s));
-			Mono.defer(() -> tdServersChannels
-					.events(lane)
+			Mono.defer(() -> tdServersChannels.events(lane)
 					.sendMessages(outputEventsFlux))
 					.repeatWhen(REPEAT_STRATEGY)
 					.retryWhen(RETRY_STRATEGY)

@@ -46,8 +46,6 @@ public class TdlibChannelsSharedReceive implements Closeable {
 				//.log("responses", Level.FINE)
 				.repeatWhen(REPEAT_STRATEGY)
 				.retryWhen(RETRY_STRATEGY)
-				.publish()
-				.autoConnect()
 				.doFinally(s -> LOG.debug("Input responses flux terminated with signal {}", s));
 		this.events = tdClientsChannels.events().entrySet().stream()
 				.collect(Collectors.toUnmodifiableMap(Entry::getKey,
@@ -59,10 +57,7 @@ public class TdlibChannelsSharedReceive implements Closeable {
 				));
 		this.requestsSub = tdClientsChannels
 				.request()
-				.sendMessages(Flux
-						.defer(() -> requests
-								.asFlux()
-								.doFinally(s -> LOG.debug("Output requests flux terminated with signal {}", s))))
+				.sendMessages(Flux.defer(() -> requests.asFlux().doFinally(s -> LOG.debug("Output requests flux terminated with signal {}", s))))
 				.doFinally(s -> LOG.debug("Output requests sender terminated with signal {}", s))
 				.repeatWhen(REPEAT_STRATEGY)
 				.retryWhen(RETRY_STRATEGY)
