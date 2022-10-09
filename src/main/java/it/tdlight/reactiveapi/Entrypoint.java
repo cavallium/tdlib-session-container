@@ -11,13 +11,13 @@ import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.util.HashSet;
 import java.util.Set;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import org.jetbrains.annotations.Nullable;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 public class Entrypoint {
 
-	private static final Logger LOG = LoggerFactory.getLogger(Entrypoint.class);
+	private static final Logger LOG = LogManager.getLogger(Entrypoint.class);
 
 	public record ValidEntrypointArgs(String clusterPath, String instancePath, String diskSessionsPath) {}
 

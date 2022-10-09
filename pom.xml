@@ -75,6 +75,11 @@
 	</dependencyManagement>
 	<dependencies>
 		<dependency>
+			<groupId>it.cavallium</groupId>
+			<artifactId>filequeue</artifactId>
+			<version>3.0.0</version>
+		</dependency>
+		<dependency>
 			<groupId>io.projectreactor</groupId>
 			<artifactId>reactor-tools</artifactId>
 			<classifier>original</classifier>
@@ -138,22 +143,52 @@
 		<dependency>
 			<groupId>io.projectreactor.kafka</groupId>
 			<artifactId>reactor-kafka</artifactId>
+			<exclusions>
+				<exclusion>
+					<groupId>org.slf4j</groupId>
+					<artifactId>slf4j-api</artifactId>
+				</exclusion>
+			</exclusions>
 		</dependency>
 		<dependency>
 			<groupId>io.rsocket</groupId>
 			<artifactId>rsocket-core</artifactId>
+			<exclusions>
+				<exclusion>
+					<groupId>org.slf4j</groupId>
+					<artifactId>slf4j-api</artifactId>
+				</exclusion>
+			</exclusions>
 		</dependency>
 		<dependency>
 			<groupId>io.rsocket</groupId>
 			<artifactId>rsocket-load-balancer</artifactId>
+			<exclusions>
+				<exclusion>
+					<groupId>org.slf4j</groupId>
+					<artifactId>slf4j-api</artifactId>
+				</exclusion>
+			</exclusions>
 		</dependency>
 		<dependency>
 			<groupId>io.rsocket</groupId>
 			<artifactId>rsocket-transport-local</artifactId>
+			<exclusions>
+				<exclusion>
+					<groupId>org.slf4j</groupId>
+					<artifactId>slf4j-api</artifactId>
+				</exclusion>
+			</exclusions>
 		</dependency>
 		<dependency>
 			<groupId>io.rsocket</groupId>
 			<artifactId>rsocket-transport-netty</artifactId>
+			<exclusions>
+				<exclusion>
+					<groupId>org.slf4j</groupId>
+					<artifactId>slf4j-api</artifactId>
+				</exclusion>
+			</exclusions>
 		</dependency>
 		<dependency>
 			<groupId>org.apache.logging.log4j</groupId>

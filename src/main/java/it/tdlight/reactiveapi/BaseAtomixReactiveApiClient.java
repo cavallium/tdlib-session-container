@@ -29,9 +29,9 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import org.jetbrains.annotations.NotNull;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import reactor.core.Disposable;
 import reactor.core.publisher.Mono;
 import reactor.core.publisher.MonoSink;
@@ -42,7 +42,7 @@ import reactor.core.scheduler.Schedulers;
 
 abstract class BaseAtomixReactiveApiClient implements ReactiveApiMultiClient {
 
-	private static final Logger LOG = LoggerFactory.getLogger(BaseAtomixReactiveApiClient.class);
+	private static final Logger LOG = LogManager.getLogger(BaseAtomixReactiveApiClient.class);
 	private static final long EMPTY_USER_ID = 0;
 
 	// Temporary id used to make requests

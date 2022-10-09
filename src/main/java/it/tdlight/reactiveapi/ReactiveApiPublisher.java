@@ -5,6 +5,7 @@ import static it.tdlight.reactiveapi.AuthPhase.LOGGED_OUT;
 import static it.tdlight.reactiveapi.Event.SERIAL_VERSION;
 import static java.util.Objects.requireNonNull;
 
+import it.cavallium.filequeue.DiskQueueToConsumer;
 import it.tdlight.common.Init;
 import it.tdlight.common.ReactiveTelegramClient;
 import it.tdlight.common.Response;
@@ -36,41 +37,53 @@ import it.tdlight.reactiveapi.ResultingEvent.ClientBoundResultingEvent;
 import it.tdlight.reactiveapi.ResultingEvent.ClusterBoundResultingEvent;
 import it.tdlight.reactiveapi.ResultingEvent.ResultingEventPublisherClosed;
 import it.tdlight.reactiveapi.ResultingEvent.TDLibBoundResultingEvent;
+import it.tdlight.reactiveapi.rsocket.FileQueueUtils;
 import it.tdlight.tdlight.ClientManager;
 import java.io.ByteArrayOutputStream;
 import java.io.DataOutput;
 import java.io.DataOutputStream;
+import java.io.File;
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Objects;
 import java.util.Set;
 import java.util.StringJoiner;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
+import org.reactivestreams.Publisher;
 import org.reactivestreams.Subscriber;
 import org.reactivestreams.Subscription;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import reactor.core.CoreSubscriber;
 import reactor.core.Disposable;
+import reactor.core.publisher.BaseSubscriber;
+import reactor.core.publisher.EmitterProcessor;
 import reactor.core.publisher.Flux;
+import reactor.core.publisher.FluxSink.OverflowStrategy;
 import reactor.core.publisher.Mono;
+import reactor.core.publisher.SignalType;
 import reactor.core.publisher.Sinks.EmitFailureHandler;
 import reactor.core.publisher.Sinks.Many;
 import reactor.core.scheduler.Schedulers;
 
 public abstract class ReactiveApiPublisher {
 
-	private static final Logger LOG = LoggerFactory.getLogger(ReactiveApiPublisher.class);
+	private static final Logger LOG = LogManager.getLogger(ReactiveApiPublisher.class);
 	private static final Duration SPECIAL_RAW_TIMEOUT_DURATION = Duration.ofMinutes(5);
-
-	private static final Duration HUNDRED_MS = Duration.ofMillis(100);
 	private final TdlibChannelsSharedHost sharedTdlibServers;
 	private final Set<ResultingEventTransformer> resultingEventTransformerSet;
 	private final ReactiveTelegramClient rawTelegramClient;
@@ -100,18 +113,68 @@ public abstract class ReactiveApiPublisher {
 			throw new RuntimeException("Can't load TDLight", e);
 		}
 		this.telegramClient = Flux.<Signal>create(sink -> {
+			var path = this.path.get();
+			if (path == null) {
+				sink.error(new IllegalStateException("Path not set!"));
+				return;
+			}
+			DiskQueueToConsumer<Signal> queue;
+			try {
+				var queuePath = path.resolve(".queue");
+				if (Files.notExists(queuePath)) {
+					Files.createDirectories(queuePath);
+				}
+				queue = new DiskQueueToConsumer<>(queuePath.resolve("tdlib-events.tape2"),
+						FileQueueUtils.convert(SignalUtils.serializer()),
+						FileQueueUtils.convert(SignalUtils.deserializer()),
+						signal -> {
+							if (sink.requestedFromDownstream() > 0) {
+								if (signal != null) {
+									sink.next(signal);
+								}
+								return true;
+							} else {
+								return false;
+							}
+						}
+				);
+			} catch (Throwable ex) {
+				LOG.error("Failed to initialize queue {}", userId, ex);
+				sink.error(ex);
+				return;
+			}
+			try {
+				queue.startQueue();
+			} catch (Throwable ex) {
+				LOG.error("Failed to initialize queue {}", userId, ex);
+				sink.error(ex);
+				return;
+			}
+
 			try {
 				rawTelegramClient.createAndRegisterClient();
 			} catch (Throwable ex) {
 				LOG.error("Failed to initialize client {}", userId, ex);
 				sink.error(ex);
+				return;
 			}
-			rawTelegramClient.setListener(sink::next);
-			sink.onCancel(rawTelegramClient::cancel);
+
+			rawTelegramClient.setListener(value -> {
+				if (!sink.isCancelled()) {
+					queue.add(value);
+				}
+			});
+
 			sink.onDispose(() -> {
 				rawTelegramClient.dispose();
+				try {
+					queue.close();
+				} catch (Exception e) {
+					LOG.error("Unexpected error while closing the queue", e);
+				}
 			});
-		});
+			sink.onCancel(rawTelegramClient::cancel);
+		}, OverflowStrategy.ERROR).subscribeOn(Schedulers.boundedElastic());
 	}
 
 	public static ReactiveApiPublisher fromToken(TdlibChannelsSharedHost sharedTdlibServers,
@@ -180,7 +243,7 @@ public abstract class ReactiveApiPublisher {
 						.doOnError(ex -> LOG.error("Failed to receive the response for special request {}\n"
 								+ " The instance will be closed", req.action(), ex))
 						.onErrorResume(ex -> Mono.just(new OnUpdateError(userId, new TdApi.Error(500, ex.getMessage()))))
-				, Integer.MAX_VALUE)
+				, Integer.MAX_VALUE, Integer.MAX_VALUE)
 
 				.doOnError(ex -> LOG.error("Failed to receive resulting events. The instance will be closed", ex))
 				.onErrorResume(ex -> Mono.just(new OnUpdateError(userId, new TdApi.Error(500, ex.getMessage()))))
@@ -198,7 +261,56 @@ public abstract class ReactiveApiPublisher {
 				// Obtain only client-bound events
 				.filter(s -> s instanceof ClientBoundResultingEvent)
 				.cast(ClientBoundResultingEvent.class)
-				.map(ClientBoundResultingEvent::event);
+				.map(ClientBoundResultingEvent::event)
+				.transform(flux -> Flux.<ClientBoundEvent>create(sink -> {
+					try {
+						var queuePath = path.resolve(".queue");
+						if (Files.notExists(queuePath)) {
+							Files.createDirectories(queuePath);
+						}
+						var queue = new DiskQueueToConsumer<>(queuePath.resolve("client-bound-resulting-events.tape2"),
+								FileQueueUtils.convert(new ClientBoundEventSerializer()),
+								FileQueueUtils.convert(new ClientBoundEventDeserializer()),
+								signal -> {
+									if (sink.requestedFromDownstream() > 0) {
+										if (signal != null) {
+											sink.next(signal);
+										}
+										return true;
+									} else {
+										return false;
+									}
+								}
+						);
+						sink.onDispose(queue::close);
+						flux.subscribeOn(Schedulers.parallel()).subscribe(new CoreSubscriber<>() {
+							@Override
+							public void onSubscribe(@NotNull Subscription s) {
+								sink.onCancel(s::cancel);
+								s.request(Long.MAX_VALUE);
+							}
+
+							@Override
+							public void onNext(ClientBoundEvent clientBoundEvent) {
+								if (!sink.isCancelled()) {
+									queue.add(clientBoundEvent);
+								}
+							}
+
+							@Override
+							public void onError(Throwable throwable) {
+								sink.error(throwable);
+							}
+
+							@Override
+							public void onComplete() {
+							}
+						});
+					} catch (IOException ex) {
+						sink.error(ex);
+					}
+				}, OverflowStrategy.ERROR).subscribeOn(Schedulers.boundedElastic()))
+				.as(ReactorUtils::subscribeOnceUntilUnsubscribe);
 
 		sharedTdlibServers.events(lane, messagesToSend);
 

@@ -12,15 +12,15 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Collectors;
 import net.minecrell.terminalconsole.SimpleTerminalConsole;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import org.jline.reader.LineReader;
 import org.jline.reader.LineReaderBuilder;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import reactor.core.scheduler.Schedulers;
 
 public class Cli {
 
-	private static final Logger LOG = LoggerFactory.getLogger(Cli.class);
+	private static final Logger LOG = LogManager.getLogger(Cli.class);
 
 	private static final Object parameterLock = new Object();
 	private static boolean askedParameter = false;

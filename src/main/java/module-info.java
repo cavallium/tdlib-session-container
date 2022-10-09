@@ -5,13 +5,12 @@ module tdlib.reactive.api {
 	exports it.tdlight.reactiveapi.kafka;
 	requires com.fasterxml.jackson.annotation;
 	requires org.jetbrains.annotations;
-	requires org.slf4j;
 	requires tdlight.java;
 	requires org.reactivestreams;
 	requires tdlight.api;
 	requires com.google.common;
 	requires java.logging;
-	requires static kafka.clients;
+	requires kafka.clients;
 	requires org.apache.logging.log4j;
 	requires reactor.kafka;
 	requires com.fasterxml.jackson.databind;
@@ -28,4 +27,5 @@ module tdlib.reactive.api {
 	requires rsocket.transport.local;
 	requires rsocket.transport.netty;
 	requires io.netty.buffer;
+	requires filequeue;
 }

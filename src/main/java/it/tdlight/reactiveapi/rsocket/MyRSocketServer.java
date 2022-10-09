@@ -16,6 +16,7 @@ import it.tdlight.reactiveapi.EventConsumer;
 import it.tdlight.reactiveapi.EventProducer;
 import it.tdlight.reactiveapi.Serializer;
 import it.tdlight.reactiveapi.Timestamped;
+import java.io.IOException;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
@@ -39,7 +40,16 @@ public class MyRSocketServer implements RSocketChannelManager, RSocket {
 
 	public MyRSocketServer(HostAndPort baseHost) {
 		var serverMono = RSocketServer
-				.create(SocketAcceptor.with(this))
+				.create(new SocketAcceptor() {
+					@Override
+					public @NotNull Mono<RSocket> accept(@NotNull ConnectionSetupPayload setup, @NotNull RSocket sendingSocket) {
+						if (setup.getMetadataUtf8().equals("setup-info") && setup.getDataUtf8().equals("client")) {
+							return Mono.just(MyRSocketServer.this);
+						} else {
+							return Mono.error(new IOException("Invalid credentials"));
+						}
+					}
+				})
 				.payloadDecoder(PayloadDecoder.ZERO_COPY)
 				.bind(TcpServerTransport.create(baseHost.getHost(), baseHost.getPort()))
 				.doOnNext(d -> logger.debug("Server up"))

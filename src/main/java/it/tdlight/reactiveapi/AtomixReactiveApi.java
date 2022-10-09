@@ -21,17 +21,17 @@ import java.util.concurrent.CompletionException;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.locks.LockSupport;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import reactor.core.Disposable;
 import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Schedulers;
 
 public class AtomixReactiveApi implements ReactiveApi {
 
-	private static final Logger LOG = LoggerFactory.getLogger(AtomixReactiveApi.class);
+	private static final Logger LOG = LogManager.getLogger(AtomixReactiveApi.class);
 
 	private final AtomixReactiveApiMode mode;
 
