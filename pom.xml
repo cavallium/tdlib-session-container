@@ -77,7 +77,13 @@
 		<dependency>
 			<groupId>it.cavallium</groupId>
 			<artifactId>filequeue</artifactId>
-			<version>3.0.2</version>
+			<version>3.1.2</version>
+			<exclusions>
+				<exclusion>
+					<groupId>org.ow2.asm</groupId>
+					<artifactId>asm</artifactId>
+				</exclusion>
+			</exclusions>
 		</dependency>
 		<dependency>
 			<groupId>io.projectreactor</groupId>
@@ -134,7 +140,7 @@
 		<dependency>
 			<groupId>org.ow2.asm</groupId>
 			<artifactId>asm</artifactId>
-			<version>9.3</version>
+			<version>9.4</version>
 		</dependency>
 		<dependency>
 			<groupId>io.projectreactor</groupId>

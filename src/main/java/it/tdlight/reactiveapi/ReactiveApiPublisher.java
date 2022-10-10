@@ -3,8 +3,10 @@ package it.tdlight.reactiveapi;
 import static it.tdlight.reactiveapi.AuthPhase.LOGGED_IN;
 import static it.tdlight.reactiveapi.AuthPhase.LOGGED_OUT;
 import static it.tdlight.reactiveapi.Event.SERIAL_VERSION;
+import static it.tdlight.reactiveapi.rsocket.FileQueueUtils.convert;
 import static java.util.Objects.requireNonNull;
 
+import it.cavallium.filequeue.QueueConsumer;
 import it.tdlight.common.Init;
 import it.tdlight.common.ReactiveTelegramClient;
 import it.tdlight.common.Response;
@@ -43,6 +45,7 @@ import java.io.DataOutputStream;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -65,6 +68,7 @@ import reactor.core.publisher.FluxSink.OverflowStrategy;
 import reactor.core.publisher.Mono;
 import reactor.core.publisher.Sinks.EmitFailureHandler;
 import reactor.core.publisher.Sinks.Many;
+import reactor.core.scheduler.Scheduler.Worker;
 import reactor.core.scheduler.Schedulers;
 
 public abstract class ReactiveApiPublisher {
@@ -112,6 +116,7 @@ public abstract class ReactiveApiPublisher {
 			} catch (Throwable ex) {
 				LOG.error("Failed to initialize client {}", userId, ex);
 				sink.error(ex);
+				return;
 			}
 			rawTelegramClient.setListener(t -> {
 				if (!sink.isCancelled()) {
@@ -120,10 +125,8 @@ public abstract class ReactiveApiPublisher {
 				}
 			});
 			sink.onCancel(rawTelegramClient::cancel);
-			sink.onDispose(() -> {
-				rawTelegramClient.dispose();
-			});
-		}, OverflowStrategy.ERROR).doOnNext(next -> bufferedUpdates.increment());
+			sink.onDispose(rawTelegramClient::dispose);
+		}, OverflowStrategy.BUFFER).doOnNext(next -> bufferedUpdates.increment());
 
 
 		Stats.STATS.add(this);
@@ -176,12 +179,7 @@ public abstract class ReactiveApiPublisher {
 				.<TDLibBoundResultingEvent<?>>map(s -> ((TDLibBoundResultingEvent<?>) s))
 
 				// Buffer requests to avoid halting the event loop
-				.transform(ReactorUtils.onBackpressureBuffer(path,
-						"tdlib-bound-events",
-						false,
-						new TdlibBoundResultingEventSerializer(),
-						new TdlibBoundResultingEventDeserializer()
-				))
+				.onBackpressureBuffer()
 
 				// Send requests to tdlib
 				.flatMap(req -> Mono
@@ -225,7 +223,7 @@ public abstract class ReactiveApiPublisher {
 
 				// Buffer requests to avoid halting the event loop
 				.doOnNext(clientBoundEvent -> clientBoundEvents.increment())
-				.transform(ReactorUtils.onBackpressureBufferSubscribe(path,
+				.transform(ReactorUtils.onBackpressureBufferSubscribe(Paths.get(""),
 						"client-bound-resulting-events",
 						false,
 						new ClientBoundEventSerializer(),
@@ -243,12 +241,7 @@ public abstract class ReactiveApiPublisher {
 				.cast(ClusterBoundResultingEvent.class)
 
 				// Buffer requests to avoid halting the event loop
-				.as(ReactorUtils.onBackpressureBuffer(path,
-						"cluster-bound-events",
-						false,
-						new ClusterBoundResultingEventSerializer(),
-						new ClusterBoundResultingEventDeserializer()
-				))
+				.onBackpressureBuffer()
 
 				// Send events to the cluster
 				.subscribeOn(Schedulers.parallel())

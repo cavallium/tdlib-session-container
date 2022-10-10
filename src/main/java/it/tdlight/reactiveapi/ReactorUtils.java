@@ -1,6 +1,7 @@
 package it.tdlight.reactiveapi;
 
-import it.cavallium.filequeue.DiskQueueToConsumer;
+import it.cavallium.filequeue.IQueueToConsumer;
+import it.cavallium.filequeue.LMDBQueueToConsumer;
 import it.tdlight.reactiveapi.rsocket.FileQueueUtils;
 import java.io.IOException;
 import java.io.UncheckedIOException;
@@ -166,37 +167,30 @@ public class ReactorUtils {
 			Deserializer<T> deserializer) {
 		return flux -> {
 			AtomicReference<FluxSink<T>> ref = new AtomicReference<>();
-			DiskQueueToConsumer<T> queue;
-			try {
-				var queuePath = path.resolve(".tdlib-queue");
-				if (Files.notExists(queuePath)) {
-					Files.createDirectories(queuePath);
-				}
-				queue = new DiskQueueToConsumer<>(queuePath.resolve(name + ".tape2"),
-						!persistent,
-						FileQueueUtils.convert(serializer),
-						FileQueueUtils.convert(deserializer),
-						signal -> {
-							var sink = ref.get();
-							if (sink != null && sink.requestedFromDownstream() > 0) {
-								if (signal != null) {
-									sink.next(signal);
-								}
-								return true;
-							} else {
-								return false;
+			var queuePath = path.resolve(".tdlib-queue");
+			IQueueToConsumer<T> queue = new LMDBQueueToConsumer<>(queuePath,
+					name,
+					!persistent,
+					FileQueueUtils.convert(serializer),
+					FileQueueUtils.convert(deserializer),
+					signal -> {
+						var sink = ref.get();
+						if (sink != null && !sink.isCancelled() && sink.requestedFromDownstream() > 0) {
+							if (signal != null) {
+								sink.next(signal);
 							}
+							return true;
+						} else {
+							return false;
 						}
-				);
-			} catch (IOException ex) {
-				throw new UncheckedIOException(ex);
-			}
+					}
+			);
 			var disposable = flux
 					.subscribeOn(Schedulers.parallel())
 					.publishOn(Schedulers.boundedElastic())
 					.subscribe(queue::add);
 			queue.startQueue();
-			return Flux.<T>create(sink -> {
+			return Flux.create(sink -> {
 				sink.onDispose(() -> {
 					disposable.dispose();
 					queue.close();
@@ -213,58 +207,52 @@ public class ReactorUtils {
 			Serializer<T> serializer,
 			Deserializer<T> deserializer) {
 		return flux -> Flux.<T>create(sink -> {
-			try {
-				var queuePath = path.resolve(".tdlib-queue");
-				if (Files.notExists(queuePath)) {
-					Files.createDirectories(queuePath);
-				}
-				var queue = new DiskQueueToConsumer<>(queuePath.resolve(name + ".tape2"),
-						!persistent,
-						FileQueueUtils.convert(serializer),
-						FileQueueUtils.convert(deserializer),
-						signal -> {
-							if (sink.requestedFromDownstream() > 0 && !sink.isCancelled()) {
-								if (signal != null) {
-									sink.next(signal);
-								}
-								return true;
-							} else {
-								return false;
+			var queuePath = path.resolve(".tdlib-queue");
+			var queue = new LMDBQueueToConsumer<>(queuePath,
+					name,
+					!persistent,
+					FileQueueUtils.convert(serializer),
+					FileQueueUtils.convert(deserializer),
+					signal -> {
+						if (sink.requestedFromDownstream() > 0 && !sink.isCancelled()) {
+							if (signal != null) {
+								sink.next(signal);
+							}
+							return true;
+						} else {
+							return false;
+						}
+					}
+			);
+			sink.onDispose(queue::close);
+			flux
+					.subscribeOn(Schedulers.parallel())
+					.publishOn(Schedulers.boundedElastic())
+					.subscribe(new CoreSubscriber<>() {
+						@Override
+						public void onSubscribe(@NotNull Subscription s) {
+							sink.onCancel(s::cancel);
+							s.request(Long.MAX_VALUE);
+						}
+
+						@Override
+						public void onNext(T element) {
+							if (!sink.isCancelled()) {
+								queue.add(element);
 							}
 						}
-				);
-				sink.onDispose(queue::close);
-				flux
-						.subscribeOn(Schedulers.parallel())
-						.publishOn(Schedulers.boundedElastic())
-						.subscribe(new CoreSubscriber<T>() {
-							@Override
-							public void onSubscribe(@NotNull Subscription s) {
-								sink.onCancel(s::cancel);
-								s.request(Long.MAX_VALUE);
-							}
 
-							@Override
-							public void onNext(T element) {
-								if (!sink.isCancelled()) {
-									queue.add(element);
-								}
-							}
+						@Override
+						public void onError(Throwable throwable) {
+							sink.error(throwable);
+						}
 
-							@Override
-							public void onError(Throwable throwable) {
-								sink.error(throwable);
-							}
-
-							@Override
-							public void onComplete() {
-							}
-						});
-				queue.startQueue();
-			} catch (IOException ex) {
-				sink.error(ex);
-			}
-		}).subscribeOn(Schedulers.boundedElastic());
+						@Override
+						public void onComplete() {
+						}
+					});
+			queue.startQueue();
+		}, OverflowStrategy.ERROR).subscribeOn(Schedulers.boundedElastic());
 	}
 
 	private static class WaitingSink<T> implements FluxSink<T> {

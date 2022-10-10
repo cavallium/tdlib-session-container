@@ -143,7 +143,14 @@ public class AtomixReactiveApi implements ReactiveApi {
 		return loadSessions.<Void>then(Mono.fromRunnable(() -> {
 			if (sharedTdlibServers != null) {
 				requestsSub = sharedTdlibServers.requests()
-						.doOnNext(req -> localSessions.get(req.data().userId()).handleRequest(req.data()))
+						.doOnNext(req -> {
+							var publisher = localSessions.get(req.data().userId());
+							if (publisher != null) {
+								publisher.handleRequest(req.data());
+							} else {
+								LOG.error("Dropped request because no session is found: {}", req);
+							}
+						})
 						.subscribeOn(Schedulers.parallel())
 						.subscribe(n -> {}, ex -> LOG.error("Requests channel broke unexpectedly", ex));
 			}
