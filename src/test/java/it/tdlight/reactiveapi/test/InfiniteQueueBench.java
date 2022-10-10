@@ -23,7 +23,7 @@ public class InfiniteQueueBench {
 		AtomicInteger status = new AtomicInteger();
 		tmpFile.toFile().deleteOnExit();
 		Files.delete(tmpFile);
-		try (var queue = new it.cavallium.filequeue.DiskQueueToConsumer<String>(tmpFile, new Serializer<String>() {
+		try (var queue = new it.cavallium.filequeue.DiskQueueToConsumer<String>(tmpFile, true, new Serializer<String>() {
 			@Override
 			public byte[] serialize(String data) throws IOException {
 				return data.getBytes(StandardCharsets.US_ASCII);

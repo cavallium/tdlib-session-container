@@ -1,10 +1,17 @@
 package it.tdlight.reactiveapi;
 
+import it.cavallium.filequeue.DiskQueueToConsumer;
+import it.tdlight.reactiveapi.rsocket.FileQueueUtils;
+import java.io.IOException;
+import java.io.UncheckedIOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayDeque;
 import java.util.Deque;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Function;
 import java.util.function.LongConsumer;
 import org.jetbrains.annotations.NotNull;
 import org.reactivestreams.Subscription;
@@ -15,6 +22,7 @@ import reactor.core.publisher.FluxSink;
 import reactor.core.publisher.FluxSink.OverflowStrategy;
 import reactor.core.publisher.Mono;
 import reactor.core.publisher.Signal;
+import reactor.core.scheduler.Schedulers;
 import reactor.util.context.Context;
 
 public class ReactorUtils {
@@ -137,7 +145,8 @@ public class ReactorUtils {
 				var s = subscriptionAtomicReference.get();
 				emitter.onRequest(n -> {
 					if (n > maxBufferSize) {
-						emitter.error(new UnsupportedOperationException("Requests count is bigger than max buffer size! " + n + " > " + maxBufferSize));
+						emitter.error(new UnsupportedOperationException(
+								"Requests count is bigger than max buffer size! " + n + " > " + maxBufferSize));
 					} else {
 						s.request(n);
 					}
@@ -148,6 +157,114 @@ public class ReactorUtils {
 				emitter.onDispose(() -> prevEmitterRef.compareAndSet(emitter, WAITING_SINK));
 			}, OverflowStrategy.BUFFER);
 		});
+	}
+
+	public static <T> Function<Flux<T>, Flux<T>> onBackpressureBufferSubscribe(Path path,
+			String name,
+			boolean persistent,
+			Serializer<T> serializer,
+			Deserializer<T> deserializer) {
+		return flux -> {
+			AtomicReference<FluxSink<T>> ref = new AtomicReference<>();
+			DiskQueueToConsumer<T> queue;
+			try {
+				var queuePath = path.resolve(".tdlib-queue");
+				if (Files.notExists(queuePath)) {
+					Files.createDirectories(queuePath);
+				}
+				queue = new DiskQueueToConsumer<>(queuePath.resolve(name + ".tape2"),
+						!persistent,
+						FileQueueUtils.convert(serializer),
+						FileQueueUtils.convert(deserializer),
+						signal -> {
+							var sink = ref.get();
+							if (sink != null && sink.requestedFromDownstream() > 0) {
+								if (signal != null) {
+									sink.next(signal);
+								}
+								return true;
+							} else {
+								return false;
+							}
+						}
+				);
+			} catch (IOException ex) {
+				throw new UncheckedIOException(ex);
+			}
+			var disposable = flux
+					.subscribeOn(Schedulers.parallel())
+					.publishOn(Schedulers.boundedElastic())
+					.subscribe(queue::add);
+			queue.startQueue();
+			return Flux.<T>create(sink -> {
+				sink.onDispose(() -> {
+					disposable.dispose();
+					queue.close();
+				});
+				ref.set(sink);
+				sink.onCancel(() -> ref.set(null));
+			});
+		};
+	}
+
+	public static <T> Function<Flux<T>, Flux<T>> onBackpressureBuffer(Path path,
+			String name,
+			boolean persistent,
+			Serializer<T> serializer,
+			Deserializer<T> deserializer) {
+		return flux -> Flux.<T>create(sink -> {
+			try {
+				var queuePath = path.resolve(".tdlib-queue");
+				if (Files.notExists(queuePath)) {
+					Files.createDirectories(queuePath);
+				}
+				var queue = new DiskQueueToConsumer<>(queuePath.resolve(name + ".tape2"),
+						!persistent,
+						FileQueueUtils.convert(serializer),
+						FileQueueUtils.convert(deserializer),
+						signal -> {
+							if (sink.requestedFromDownstream() > 0 && !sink.isCancelled()) {
+								if (signal != null) {
+									sink.next(signal);
+								}
+								return true;
+							} else {
+								return false;
+							}
+						}
+				);
+				sink.onDispose(queue::close);
+				flux
+						.subscribeOn(Schedulers.parallel())
+						.publishOn(Schedulers.boundedElastic())
+						.subscribe(new CoreSubscriber<T>() {
+							@Override
+							public void onSubscribe(@NotNull Subscription s) {
+								sink.onCancel(s::cancel);
+								s.request(Long.MAX_VALUE);
+							}
+
+							@Override
+							public void onNext(T element) {
+								if (!sink.isCancelled()) {
+									queue.add(element);
+								}
+							}
+
+							@Override
+							public void onError(Throwable throwable) {
+								sink.error(throwable);
+							}
+
+							@Override
+							public void onComplete() {
+							}
+						});
+				queue.startQueue();
+			} catch (IOException ex) {
+				sink.error(ex);
+			}
+		}).subscribeOn(Schedulers.boundedElastic());
 	}
 
 	private static class WaitingSink<T> implements FluxSink<T> {

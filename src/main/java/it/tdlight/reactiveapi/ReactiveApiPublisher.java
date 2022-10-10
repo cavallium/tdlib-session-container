@@ -5,7 +5,6 @@ import static it.tdlight.reactiveapi.AuthPhase.LOGGED_OUT;
 import static it.tdlight.reactiveapi.Event.SERIAL_VERSION;
 import static java.util.Objects.requireNonNull;
 
-import it.cavallium.filequeue.DiskQueueToConsumer;
 import it.tdlight.common.Init;
 import it.tdlight.common.ReactiveTelegramClient;
 import it.tdlight.common.Response;
@@ -37,45 +36,33 @@ import it.tdlight.reactiveapi.ResultingEvent.ClientBoundResultingEvent;
 import it.tdlight.reactiveapi.ResultingEvent.ClusterBoundResultingEvent;
 import it.tdlight.reactiveapi.ResultingEvent.ResultingEventPublisherClosed;
 import it.tdlight.reactiveapi.ResultingEvent.TDLibBoundResultingEvent;
-import it.tdlight.reactiveapi.rsocket.FileQueueUtils;
 import it.tdlight.tdlight.ClientManager;
 import java.io.ByteArrayOutputStream;
 import java.io.DataOutput;
 import java.io.DataOutputStream;
-import java.io.File;
 import java.io.IOException;
-import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.List;
 import java.util.Objects;
 import java.util.Set;
 import java.util.StringJoiner;
-import java.util.concurrent.Executors;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.atomic.LongAdder;
 import java.util.function.Consumer;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
-import org.reactivestreams.Publisher;
 import org.reactivestreams.Subscriber;
 import org.reactivestreams.Subscription;
-import reactor.core.CoreSubscriber;
 import reactor.core.Disposable;
-import reactor.core.publisher.BaseSubscriber;
-import reactor.core.publisher.EmitterProcessor;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.FluxSink.OverflowStrategy;
 import reactor.core.publisher.Mono;
-import reactor.core.publisher.SignalType;
 import reactor.core.publisher.Sinks.EmitFailureHandler;
 import reactor.core.publisher.Sinks.Many;
 import reactor.core.scheduler.Schedulers;
@@ -98,6 +85,13 @@ public abstract class ReactiveApiPublisher {
 	private final AtomicReference<Disposable> disposable = new AtomicReference<>();
 	private final AtomicReference<Path> path = new AtomicReference<>();
 
+	// Debugging variables
+	final LongAdder receivedUpdates = new LongAdder();
+	final LongAdder bufferedUpdates = new LongAdder();
+	final LongAdder processedUpdates = new LongAdder();
+	final LongAdder clientBoundEvents = new LongAdder();
+	final LongAdder sentClientBoundEvents = new LongAdder();
+
 	private ReactiveApiPublisher(TdlibChannelsSharedHost sharedTdlibServers,
 			Set<ResultingEventTransformer> resultingEventTransformerSet,
 			long userId, String lane) {
@@ -113,68 +107,26 @@ public abstract class ReactiveApiPublisher {
 			throw new RuntimeException("Can't load TDLight", e);
 		}
 		this.telegramClient = Flux.<Signal>create(sink -> {
-			var path = this.path.get();
-			if (path == null) {
-				sink.error(new IllegalStateException("Path not set!"));
-				return;
-			}
-			DiskQueueToConsumer<Signal> queue;
-			try {
-				var queuePath = path.resolve(".queue");
-				if (Files.notExists(queuePath)) {
-					Files.createDirectories(queuePath);
-				}
-				queue = new DiskQueueToConsumer<>(queuePath.resolve("tdlib-events.tape2"),
-						FileQueueUtils.convert(SignalUtils.serializer()),
-						FileQueueUtils.convert(SignalUtils.deserializer()),
-						signal -> {
-							if (sink.requestedFromDownstream() > 0) {
-								if (signal != null) {
-									sink.next(signal);
-								}
-								return true;
-							} else {
-								return false;
-							}
-						}
-				);
-			} catch (Throwable ex) {
-				LOG.error("Failed to initialize queue {}", userId, ex);
-				sink.error(ex);
-				return;
-			}
-			try {
-				queue.startQueue();
-			} catch (Throwable ex) {
-				LOG.error("Failed to initialize queue {}", userId, ex);
-				sink.error(ex);
-				return;
-			}
-
 			try {
 				rawTelegramClient.createAndRegisterClient();
 			} catch (Throwable ex) {
 				LOG.error("Failed to initialize client {}", userId, ex);
 				sink.error(ex);
-				return;
 			}
-
-			rawTelegramClient.setListener(value -> {
+			rawTelegramClient.setListener(t -> {
 				if (!sink.isCancelled()) {
-					queue.add(value);
-				}
-			});
-
-			sink.onDispose(() -> {
-				rawTelegramClient.dispose();
-				try {
-					queue.close();
-				} catch (Exception e) {
-					LOG.error("Unexpected error while closing the queue", e);
+					this.receivedUpdates.increment();
+					sink.next(t);
 				}
 			});
 			sink.onCancel(rawTelegramClient::cancel);
-		}, OverflowStrategy.ERROR).subscribeOn(Schedulers.boundedElastic());
+			sink.onDispose(() -> {
+				rawTelegramClient.dispose();
+			});
+		}, OverflowStrategy.ERROR).doOnNext(next -> bufferedUpdates.increment());
+
+
+		Stats.STATS.add(this);
 	}
 
 	public static ReactiveApiPublisher fromToken(TdlibChannelsSharedHost sharedTdlibServers,
@@ -216,12 +168,20 @@ public abstract class ReactiveApiPublisher {
 					return transformedFlux;
 				})
 
-				.publish(256);
+				.publish(512);
 
 		publishedResultingEvents
 				// Obtain only TDLib-bound events
 				.filter(s -> s instanceof TDLibBoundResultingEvent<?>)
-				.map(s -> ((TDLibBoundResultingEvent<?>) s))
+				.<TDLibBoundResultingEvent<?>>map(s -> ((TDLibBoundResultingEvent<?>) s))
+
+				// Buffer requests to avoid halting the event loop
+				.transform(ReactorUtils.onBackpressureBuffer(path,
+						"tdlib-bound-events",
+						false,
+						new TdlibBoundResultingEventSerializer(),
+						new TdlibBoundResultingEventDeserializer()
+				))
 
 				// Send requests to tdlib
 				.flatMap(req -> Mono
@@ -262,54 +222,17 @@ public abstract class ReactiveApiPublisher {
 				.filter(s -> s instanceof ClientBoundResultingEvent)
 				.cast(ClientBoundResultingEvent.class)
 				.map(ClientBoundResultingEvent::event)
-				.transform(flux -> Flux.<ClientBoundEvent>create(sink -> {
-					try {
-						var queuePath = path.resolve(".queue");
-						if (Files.notExists(queuePath)) {
-							Files.createDirectories(queuePath);
-						}
-						var queue = new DiskQueueToConsumer<>(queuePath.resolve("client-bound-resulting-events.tape2"),
-								FileQueueUtils.convert(new ClientBoundEventSerializer()),
-								FileQueueUtils.convert(new ClientBoundEventDeserializer()),
-								signal -> {
-									if (sink.requestedFromDownstream() > 0) {
-										if (signal != null) {
-											sink.next(signal);
-										}
-										return true;
-									} else {
-										return false;
-									}
-								}
-						);
-						sink.onDispose(queue::close);
-						flux.subscribeOn(Schedulers.parallel()).subscribe(new CoreSubscriber<>() {
-							@Override
-							public void onSubscribe(@NotNull Subscription s) {
-								sink.onCancel(s::cancel);
-								s.request(Long.MAX_VALUE);
-							}
 
-							@Override
-							public void onNext(ClientBoundEvent clientBoundEvent) {
-								if (!sink.isCancelled()) {
-									queue.add(clientBoundEvent);
-								}
-							}
+				// Buffer requests to avoid halting the event loop
+				.doOnNext(clientBoundEvent -> clientBoundEvents.increment())
+				.transform(ReactorUtils.onBackpressureBufferSubscribe(path,
+						"client-bound-resulting-events",
+						false,
+						new ClientBoundEventSerializer(),
+						new ClientBoundEventDeserializer()
+				))
+				.doOnNext(clientBoundEvent -> sentClientBoundEvents.increment())
 
-							@Override
-							public void onError(Throwable throwable) {
-								sink.error(throwable);
-							}
-
-							@Override
-							public void onComplete() {
-							}
-						});
-					} catch (IOException ex) {
-						sink.error(ex);
-					}
-				}, OverflowStrategy.ERROR).subscribeOn(Schedulers.boundedElastic()))
 				.as(ReactorUtils::subscribeOnceUntilUnsubscribe);
 
 		sharedTdlibServers.events(lane, messagesToSend);
@@ -318,6 +241,14 @@ public abstract class ReactiveApiPublisher {
 				// Obtain only cluster-bound events
 				.filter(s -> s instanceof ClusterBoundResultingEvent)
 				.cast(ClusterBoundResultingEvent.class)
+
+				// Buffer requests to avoid halting the event loop
+				.as(ReactorUtils.onBackpressureBuffer(path,
+						"cluster-bound-events",
+						false,
+						new ClusterBoundResultingEventSerializer(),
+						new ClusterBoundResultingEventDeserializer()
+				))
 
 				// Send events to the cluster
 				.subscribeOn(Schedulers.parallel())
@@ -382,6 +313,7 @@ public abstract class ReactiveApiPublisher {
 		// Update the state
 		var state = this.state.updateAndGet(oldState -> oldState.withSignal(signal));
 
+		processedUpdates.increment();
 		if (state.authPhase() == LOGGED_IN) {
 			ResultingEvent resultingEvent = wrapUpdateSignal(signal);
 			return List.of(resultingEvent);
