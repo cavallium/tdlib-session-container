@@ -37,13 +37,11 @@ public class MyRSocketClient implements RSocketChannelManager {
 	private final Empty<Void> disposeRequest = Sinks.empty();
 
 	public MyRSocketClient(HostAndPort baseHost) {
-		RetryBackoffSpec retryStrategy = Retry.backoff(Long.MAX_VALUE, Duration.ofSeconds(1)).maxBackoff(Duration.ofSeconds(16)).jitter(1.0);
 		var transport = TcpClientTransport.create(baseHost.getHost(), baseHost.getPort());
 
 		this.nextClient = RSocketConnector.create()
 				.setupPayload(DefaultPayload.create("client", "setup-info"))
 				.payloadDecoder(PayloadDecoder.ZERO_COPY)
-				//.reconnect(retryStrategy)
 				.connect(transport)
 				.doOnNext(lastClient::set)
 				.cacheInvalidateIf(RSocket::isDisposed);
