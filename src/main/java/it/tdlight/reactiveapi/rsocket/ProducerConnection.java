@@ -7,12 +7,11 @@ import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
-import reactor.core.publisher.Signal;
 import reactor.core.publisher.SignalType;
 import reactor.core.publisher.Sinks;
 import reactor.core.publisher.Sinks.EmitFailureHandler;
-import reactor.core.publisher.Sinks.EmitResult;
 import reactor.core.publisher.Sinks.Empty;
+import reactor.core.publisher.Sinks.Many;
 import reactor.core.scheduler.Schedulers;
 
 public class ProducerConnection<T> {
@@ -20,8 +19,8 @@ public class ProducerConnection<T> {
 	private static final Logger LOG = LogManager.getLogger(ProducerConnection.class);
 
 	private final String channel;
-
-	private Object remote;
+	private final int bufferSize;
+	private int remoteCount = 0;
 
 	private Flux<Payload> local;
 
@@ -30,8 +29,9 @@ public class ProducerConnection<T> {
 	private Optional<Throwable> remoteTerminationState = null;
 	private Empty<Void> remoteTerminationSink = Sinks.empty();
 
-	public ProducerConnection(String channel) {
+	public ProducerConnection(String channel, int bufferSize) {
 		this.channel = channel;
+		this.bufferSize = bufferSize;
 		if  (LOG.isDebugEnabled()) LOG.debug("{} Create new blank connection", this.printStatus());
 	}
 
@@ -39,7 +39,7 @@ public class ProducerConnection<T> {
 		return "[\"%s\" (%d)%s%s%s]".formatted(channel,
 				System.identityHashCode(this),
 				local != null ? ", local" : "",
-				remote != null ? ", remote" : "",
+				remoteCount > 0 ? (remoteCount > 1 ? ", " + remoteCount + " remotes" : ", 1 remote") : "",
 				connectedState ? ((remoteTerminationState != null) ? (remoteTerminationState.isPresent() ? ", done with error" : ", done") : ", connected") : ", waiting"
 		);
 	}
@@ -55,13 +55,7 @@ public class ProducerConnection<T> {
 				if (LOG.isDebugEnabled()) LOG.debug("{} Local is connected", this.printStatus());
 				return remoteTerminationSink.asMono().publishOn(Schedulers.parallel());
 			}
-		})).doFinally(s -> {
-			if (s != SignalType.ON_ERROR) {
-				synchronized (ProducerConnection.this) {
-					//reset(false);
-				}
-			}
-		});
+		}));
 	}
 
 	public synchronized Flux<Payload> connectRemote() {
@@ -77,37 +71,50 @@ public class ProducerConnection<T> {
 			}
 		})).doOnError(ex -> {
 			synchronized (ProducerConnection.this) {
-				if (local != null && remoteTerminationState == null) {
-					remoteTerminationState = Optional.of(ex);
-					if (LOG.isDebugEnabled()) LOG.debug("%s Remote connection ended with failure, emitting termination failure".formatted(this.printStatus()), ex);
-					var sink = remoteTerminationSink;
-					reset(true);
-					sink.emitError(ex, EmitFailureHandler.busyLooping(Duration.ofMillis(100)));
-					if (LOG.isDebugEnabled()) LOG.debug("%s Remote connection ended with failure, emitted termination failure".formatted(this.printStatus()));
+				if (remoteCount <= 1) {
+					if (local != null && remoteTerminationState == null) {
+						remoteTerminationState = Optional.of(ex);
+						if (LOG.isDebugEnabled()) LOG.debug("%s Remote connection ended with failure, emitting termination failure".formatted(this.printStatus()), ex);
+						var sink = remoteTerminationSink;
+						reset();
+						sink.emitError(ex, EmitFailureHandler.busyLooping(Duration.ofMillis(100)));
+						if (LOG.isDebugEnabled()) LOG.debug("%s Remote connection ended with failure, emitted termination failure".formatted(this.printStatus()));
+					}
+				} else {
+					remoteCount--;
+					if (LOG.isDebugEnabled()) {
+						LOG.debug("%s Remote connection ended with failure, but at least one remote is still online".formatted(
+								this.printStatus()));
+					}
 				}
 			}
 		}).doFinally(s -> {
 			if (s != SignalType.ON_ERROR) {
 				synchronized (ProducerConnection.this) {
-					if (local != null && remoteTerminationState == null) {
-						assert connectedState;
-						remoteTerminationState = Optional.empty();
-						if (LOG.isDebugEnabled()) LOG.debug("{} Remote connection ended with status {}, emitting termination complete", this.printStatus(), s);
-						if (s == SignalType.CANCEL) {
-							remoteTerminationSink.emitError(new CancelledChannelException(), EmitFailureHandler.busyLooping(Duration.ofMillis(100)));
-						} else {
-							remoteTerminationSink.emitEmpty(EmitFailureHandler.busyLooping(Duration.ofMillis(100)));
+					if (LOG.isDebugEnabled()) LOG.debug("{} Remote connection ending with status {}", this.printStatus(), s);
+					if (remoteCount <= 1) {
+						if (local != null && remoteTerminationState == null) {
+							assert connectedState;
+							remoteTerminationState = Optional.empty();
+							if (LOG.isDebugEnabled()) LOG.debug("{} Remote connection ended with status {}, emitting termination complete", this.printStatus(), s);
+							if (s == SignalType.CANCEL) {
+								remoteTerminationSink.emitError(new CancelledChannelException(), EmitFailureHandler.busyLooping(Duration.ofMillis(100)));
+							} else {
+								remoteTerminationSink.emitEmpty(EmitFailureHandler.busyLooping(Duration.ofMillis(100)));
+							}
 						}
+						reset();
 						if (LOG.isDebugEnabled()) LOG.debug("{} Remote connection ended with status {}, emitted termination complete", this.printStatus(), s);
+					} else {
+						remoteCount--;
+						if (LOG.isDebugEnabled()) LOG.debug("{} Remote connection ended with status {}, but at least one remote is still online", this.printStatus(), s);
 					}
-					reset(true);
-
 				}
 			}
 		});
 	}
 
-	public synchronized void reset(boolean resettingFromRemote) {
+	public synchronized void reset() {
 		if (LOG.isDebugEnabled()) LOG.debug("{} Reset started", this.printStatus());
 		if (connectedState) {
 			if (remoteTerminationState == null) {
@@ -124,7 +131,7 @@ public class ProducerConnection<T> {
 			if (LOG.isDebugEnabled()) LOG.debug("{} The previous connection has been interrupted", this.printStatus());
 		}
 		local = null;
-		remote = null;
+		remoteCount = 0;
 		connectedState = false;
 		connectedSink = Sinks.empty();
 		remoteTerminationState = null;
@@ -134,11 +141,11 @@ public class ProducerConnection<T> {
 
 	public synchronized void registerRemote() {
 		if (LOG.isDebugEnabled()) LOG.debug("{} Remote is trying to register", this.printStatus());
-		if (this.remote != null) {
+		if (this.remoteCount  > 0) {
 			if (LOG.isDebugEnabled()) LOG.debug("{} Remote was already registered", this.printStatus());
 			throw new IllegalStateException("Remote is already registered");
 		}
-		this.remote = new Object();
+		this.remoteCount++;
 		if (LOG.isDebugEnabled()) LOG.debug("{} Remote registered", this.printStatus());
 		onChanged();
 	}
@@ -149,14 +156,14 @@ public class ProducerConnection<T> {
 			if (LOG.isDebugEnabled()) LOG.debug("{} Local was already registered", this.printStatus());
 			throw new IllegalStateException("Local is already registered");
 		}
-		this.local = local;
+		this.local = local.publish(bufferSize).refCount(1);
 		if (LOG.isDebugEnabled()) LOG.debug("{} Local registered", this.printStatus());
 		onChanged();
 	}
 
 	private synchronized void onChanged() {
 		if (LOG.isDebugEnabled()) LOG.debug("{} Checking connection changes", this.printStatus());
-		if (local != null && remote != null) {
+		if (local != null && remoteCount > 0) {
 			connectedState = true;
 			if (LOG.isDebugEnabled()) LOG.debug("{} Connected successfully! Emitting connected event", this.printStatus());
 			connectedSink.emitEmpty(EmitFailureHandler.busyLooping(Duration.ofMillis(100)));

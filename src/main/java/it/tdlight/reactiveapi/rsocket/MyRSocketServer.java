@@ -1,5 +1,7 @@
 package it.tdlight.reactiveapi.rsocket;
 
+import static reactor.util.concurrent.Queues.XS_BUFFER_SIZE;
+
 import com.google.common.net.HostAndPort;
 import io.rsocket.ConnectionSetupPayload;
 import io.rsocket.Payload;
@@ -32,6 +34,7 @@ public class MyRSocketServer implements RSocketChannelManager, RSocket {
 
 	private final Logger logger = LogManager.getLogger(this.getClass());
 
+	private final int bufferSize;
 	private final Mono<CloseableChannel> serverCloseable;
 
 	protected final Map<String, ConsumerConnection<?>> consumerRegistry = new ConcurrentHashMap<>();
@@ -39,6 +42,11 @@ public class MyRSocketServer implements RSocketChannelManager, RSocket {
 	protected final Map<String, ProducerConnection<?>> producerRegistry = new ConcurrentHashMap<>();
 
 	public MyRSocketServer(HostAndPort baseHost) {
+		this(baseHost, XS_BUFFER_SIZE);
+	}
+
+	public MyRSocketServer(HostAndPort baseHost, int bufferSize) {
+		this.bufferSize = bufferSize;
 		var serverMono = RSocketServer
 				.create(new SocketAcceptor() {
 					@Override
@@ -71,7 +79,8 @@ public class MyRSocketServer implements RSocketChannelManager, RSocket {
 					return Mono.error(new CancelledChannelException("Metadata is wrong"));
 				}
 				var channel = firstValue.getDataUtf8();
-				var conn = MyRSocketServer.this.consumerRegistry.computeIfAbsent(channel, ConsumerConnection::new);
+				var conn = MyRSocketServer.this.consumerRegistry.computeIfAbsent(channel,
+						ch -> new ConsumerConnection<>(ch, bufferSize));
 				conn.registerRemote(flux.skip(1));
 				return conn.connectRemote().then(Mono.fromSupplier(() -> DefaultPayload.create("ok", "result")));
 			} else {
@@ -84,7 +93,8 @@ public class MyRSocketServer implements RSocketChannelManager, RSocket {
 	public @NotNull Flux<Payload> requestStream(@NotNull Payload payload) {
 		var channel = payload.getDataUtf8();
 		return Flux.defer(() -> {
-			var conn = MyRSocketServer.this.producerRegistry.computeIfAbsent(channel, ProducerConnection::new);
+			var conn = MyRSocketServer.this.producerRegistry.computeIfAbsent(channel,
+					ch -> new ProducerConnection<>(ch, bufferSize));
 			conn.registerRemote();
 			return conn.connectRemote();
 		});
@@ -105,8 +115,12 @@ public class MyRSocketServer implements RSocketChannelManager, RSocket {
 			public Flux<Timestamped<K>> consumeMessages() {
 				return serverCloseable.flatMapMany(x -> {
 					//noinspection unchecked
-					var conn = (ConsumerConnection<K>) consumerRegistry.computeIfAbsent(channelName, ConsumerConnection::new);
-					conn.registerLocal(deserializer);
+					var conn = (ConsumerConnection<K>) consumerRegistry.computeIfAbsent(channelName,
+							ch -> new ConsumerConnection<>(ch, bufferSize));
+					Throwable ex = conn.registerLocal(deserializer);
+					if (ex != null) {
+						return Flux.error(ex);
+					}
 					return conn.connectLocal();
 				});
 			}
@@ -123,12 +137,13 @@ public class MyRSocketServer implements RSocketChannelManager, RSocket {
 			logger.error("Failed to create codec for channel \"{}\"", channelName, ex);
 			throw new IllegalStateException("Failed to create codec for channel " + channelName);
 		}
-		return new EventProducer<K>() {
+		return new EventProducer<>() {
 			@Override
 			public Mono<Void> sendMessages(Flux<K> eventsFlux) {
 				return serverCloseable.flatMap(x -> {
 					//noinspection unchecked
-					var conn = (ProducerConnection<K>) producerRegistry.computeIfAbsent(channelName, ProducerConnection::new);
+					var conn = (ProducerConnection<K>) producerRegistry.computeIfAbsent(channelName,
+							ch -> new ProducerConnection<>(ch, bufferSize));
 					conn.registerLocal(eventsFlux.transform(flux -> RSocketUtils.serialize(flux, serializer)));
 					return conn.connectLocal();
 				});

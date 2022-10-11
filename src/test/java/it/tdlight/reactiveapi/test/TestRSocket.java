@@ -44,7 +44,7 @@ public class TestRSocket {
 
 	@Test
 	public void testServerConsumer() {
-		var server = new MyRSocketServer(HostAndPort.fromParts("127.0.0.1", 8085));
+		var server = new MyRSocketServer(HostAndPort.fromParts("127.0.0.1", 8085), 1);
 		try {
 			var rawClient = RSocketConnector.create()
 					.setupPayload(DefaultPayload.create("client", "setup-info"))
@@ -73,7 +73,7 @@ public class TestRSocket {
 
 	@Test
 	public void testServerProducer() {
-		var server = new MyRSocketServer(HostAndPort.fromParts("127.0.0.1", 8085));
+		var server = new MyRSocketServer(HostAndPort.fromParts("127.0.0.1", 8085), 1);
 		try {
 			var rawClient = RSocketConnector.create()
 					.setupPayload(DefaultPayload.create("client", "setup-info"))
@@ -173,7 +173,7 @@ public class TestRSocket {
 	@Test
 	public void testServerOnClose() {
 		Assertions.assertThrows(IllegalStateException.class, () -> {
-			var server = new MyRSocketServer(HostAndPort.fromParts("127.0.0.1", 8085));
+			var server = new MyRSocketServer(HostAndPort.fromParts("127.0.0.1", 8085), 1);
 			try {
 				server.onClose().block(Duration.ofSeconds(1));
 			} finally {
