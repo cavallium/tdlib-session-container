@@ -55,7 +55,14 @@ public class ProducerConnection<T> {
 				if (LOG.isDebugEnabled()) LOG.debug("{} Local is connected", this.printStatus());
 				return remoteTerminationSink.asMono().publishOn(Schedulers.parallel());
 			}
-		}));
+		})).doFinally(s -> {
+			if (s == SignalType.CANCEL) {
+				synchronized (ProducerConnection.this) {
+					local = null;
+					if (LOG.isDebugEnabled()) LOG.debug("{} Local is cancelled", this.printStatus());
+				}
+			}
+		});
 	}
 
 	public synchronized Flux<Payload> connectRemote() {

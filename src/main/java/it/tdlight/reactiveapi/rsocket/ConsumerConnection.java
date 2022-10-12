@@ -115,10 +115,24 @@ public class ConsumerConnection<T> {
 								}
 							});
 						}), Integer.MAX_VALUE, bufferSize)
-						.transform(remote -> RSocketUtils.deserialize(remote, local))
+						.transform(remote -> {
+							synchronized (ConsumerConnection.this) {
+								return RSocketUtils.deserialize(remote, local);
+							}
+						})
 						.map(element -> new Timestamped<>(System.currentTimeMillis(), element));
 			}
-		}));
+		})).doFinally(s -> {
+			if (s == SignalType.CANCEL) {
+				synchronized (ConsumerConnection.this) {
+					local = null;
+					var ex = new InterruptedException();
+					localTerminationState = Optional.of(ex);
+					if (LOG.isDebugEnabled()) LOG.debug("{} Local is cancelled", this.printStatus());
+					localTerminationSink.emitError(ex, EmitFailureHandler.busyLooping(Duration.ofMillis(100)));
+				}
+			}
+		});
 	}
 
 	public synchronized Mono<Void> connectRemote() {
