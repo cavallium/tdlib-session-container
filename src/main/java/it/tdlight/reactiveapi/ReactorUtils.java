@@ -185,16 +185,28 @@ public class ReactorUtils {
 						}
 					}
 			);
+			AtomicReference<Throwable> startEx = new AtomicReference<>();
 			var disposable = flux
 					.subscribeOn(Schedulers.parallel())
 					.publishOn(Schedulers.boundedElastic())
-					.subscribe(queue::add);
+					.subscribe(queue::add, ex -> {
+						startEx.set(ex);
+						var refVal = ref.get();
+						if (refVal != null) {
+							refVal.error(ex);
+						}
+					});
 			queue.startQueue();
 			return Flux.create(sink -> {
 				sink.onDispose(() -> {
 					disposable.dispose();
 					queue.close();
 				});
+				var startExVal = startEx.get();
+				if (startExVal != null) {
+					sink.error(startExVal);
+					return;
+				}
 				ref.set(sink);
 				sink.onCancel(() -> ref.set(null));
 			});

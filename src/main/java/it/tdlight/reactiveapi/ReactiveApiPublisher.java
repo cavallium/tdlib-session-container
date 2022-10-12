@@ -67,6 +67,7 @@ import reactor.core.publisher.Flux;
 import reactor.core.publisher.FluxSink.OverflowStrategy;
 import reactor.core.publisher.Mono;
 import reactor.core.publisher.Sinks.EmitFailureHandler;
+import reactor.core.publisher.Sinks.EmitResult;
 import reactor.core.publisher.Sinks.Many;
 import reactor.core.scheduler.Scheduler.Worker;
 import reactor.core.scheduler.Schedulers;
@@ -503,8 +504,21 @@ public abstract class ReactiveApiPublisher {
 
 	public void handleRequest(OnRequest<TdApi.Object> onRequestObj) {
 		handleRequestInternal(onRequestObj, response -> {
+			EmitResult status;
 			synchronized (this.responses) {
-				this.responses.emitNext(response, EmitFailureHandler.FAIL_FAST);
+				status = this.responses.tryEmitNext(response);
+			}
+			if (status.isFailure()) {
+				switch (status) {
+					case FAIL_ZERO_SUBSCRIBER ->
+							LOG.warn("Failed to send response of request {}, user {}, client {}: no subscribers",
+									onRequestObj.userId(), onRequestObj.userId(), onRequestObj.clientId());
+					case FAIL_OVERFLOW ->
+							LOG.warn("Failed to send response of request {}, user {}, client {}: too many unsent responses",
+									onRequestObj.userId(), onRequestObj.userId(), onRequestObj.clientId());
+					default -> LOG.error("Failed to send response of request {}, user {}, client {}: {}",
+							onRequestObj.userId(), onRequestObj.userId(), onRequestObj.clientId(), status);
+				}
 			}
 		});
 	}

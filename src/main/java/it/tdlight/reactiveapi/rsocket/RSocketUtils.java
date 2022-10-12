@@ -22,6 +22,8 @@ public class RSocketUtils {
 				}
 			} catch (IOException e) {
 				throw new UncheckedIOException(e);
+			} finally {
+				payload.release();
 			}
 		});
 	}

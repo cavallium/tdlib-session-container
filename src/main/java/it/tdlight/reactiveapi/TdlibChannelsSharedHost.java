@@ -47,14 +47,13 @@ public class TdlibChannelsSharedHost implements Closeable {
 	private final TdlibChannelsServers tdServersChannels;
 	private final Disposable responsesSub;
 	private final AtomicReference<Disposable> requestsSub = new AtomicReference<>();
-	private final Many<OnResponse<TdApi.Object>> responses = Sinks.many().multicast().directAllOrNothing();
+	private final Many<OnResponse<TdApi.Object>> responses = Sinks.many().multicast().onBackpressureBuffer(65_535);
 	private final Map<String, Many<Flux<ClientBoundEvent>>> events;
 	private final Flux<Timestamped<OnRequest<Object>>> requests;
 
 	public TdlibChannelsSharedHost(Set<String> allLanes, TdlibChannelsServers tdServersChannels) {
 		this.tdServersChannels = tdServersChannels;
-		this.responsesSub = Mono.defer(() -> tdServersChannels.response()
-				.sendMessages(responses.asFlux()/*.log("responses", Level.FINE)*/))
+		this.responsesSub = tdServersChannels.response().sendMessages(responses.asFlux()/*.log("responses", Level.FINE)*/)
 				.repeatWhen(REPEAT_STRATEGY)
 				.retryWhen(RETRY_STRATEGY)
 				.subscribeOn(Schedulers.parallel())
@@ -64,8 +63,7 @@ public class TdlibChannelsSharedHost implements Closeable {
 			Flux<ClientBoundEvent> outputEventsFlux = Flux
 					.merge(sink.asFlux().map(flux -> flux.publishOn(Schedulers.parallel())), Integer.MAX_VALUE, 256)
 					.doFinally(s -> LOG.debug("Output events flux of lane \"{}\" terminated with signal {}", lane, s));
-			Mono.defer(() -> tdServersChannels.events(lane)
-					.sendMessages(outputEventsFlux))
+			tdServersChannels.events(lane).sendMessages(outputEventsFlux)
 					.repeatWhen(REPEAT_STRATEGY)
 					.retryWhen(RETRY_STRATEGY)
 					.subscribeOn(Schedulers.parallel())
@@ -92,9 +90,9 @@ public class TdlibChannelsSharedHost implements Closeable {
 		if (eventsSink == null) {
 			throw new IllegalArgumentException("Lane " + lane + " does not exist");
 		}
-		eventsSink.emitNext(eventFlux.takeUntilOther(canceller.asMono()),
-				EmitFailureHandler.busyLooping(Duration.ofMillis(100))
-		);
+		synchronized (events) {
+			eventsSink.emitNext(eventFlux.takeUntilOther(canceller.asMono()), EmitFailureHandler.FAIL_FAST);
+		}
 		return () -> canceller.tryEmitEmpty();
 	}
 

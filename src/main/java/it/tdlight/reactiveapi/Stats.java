@@ -99,7 +99,9 @@ public class Stats extends Thread {
 						processedUpdatesRateSum += processedUpdatesRate;
 						clientBoundEventsRateSum += clientBoundEventsRate;
 						sentClientBoundEventsRateSum += sentClientBoundEventsRate;
-						out.append(String.format("%d:\t", clientIds.getLong(i)));
+						if (LOG.isTraceEnabled()) {
+							out.append(String.format("%d:\t", clientIds.getLong(i)));
+						}
 					} else {
 						receivedUpdatesRate = receivedUpdatesRateSum;
 						diskBuffered = diskBufferedSum;
@@ -110,16 +112,18 @@ public class Stats extends Thread {
 						sentClientBoundEventsRate = sentClientBoundEventsRateSum;
 						out.append("Total:\t");
 					}
-					out.append(String.format(
-							"\tUpdates:\t[received %03.2fHz\tbuffered: %03.2fHz (RAM: %d HDD: %d)\tprocessed: %03.2fHz]\tClient bound events: %03.2fHz\tProcessed events: %03.2fHz\t%n",
-							receivedUpdatesRate,
-							bufferedUpdatesRate,
-							ramBuffered,
-							diskBuffered,
-							processedUpdatesRate,
-							clientBoundEventsRate,
-							sentClientBoundEventsRate
-					));
+					if (i == currentClients || LOG.isTraceEnabled()) {
+						out.append(String.format(
+								"\tUpdates:\t[received %03.2fHz\tbuffered: %03.2fHz (RAM: %d HDD: %d)\tprocessed: %03.2fHz]\tClient bound events: %03.2fHz\tProcessed events: %03.2fHz\t%n",
+								receivedUpdatesRate,
+								bufferedUpdatesRate,
+								ramBuffered,
+								diskBuffered,
+								processedUpdatesRate,
+								clientBoundEventsRate,
+								sentClientBoundEventsRate
+						));
+					}
 				}
 				out.append(String.format("%n"));
 

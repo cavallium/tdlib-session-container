@@ -7,12 +7,9 @@ import it.tdlight.reactiveapi.EventConsumer;
 import it.tdlight.reactiveapi.EventProducer;
 import it.tdlight.reactiveapi.RSocketParameters;
 import it.tdlight.reactiveapi.Timestamped;
-import it.tdlight.reactiveapi.rsocket.CancelledChannelException;
 import it.unimi.dsi.fastutil.ints.IntArrayList;
 import java.io.Closeable;
-import java.io.IOException;
 import java.time.Duration;
-import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.ConcurrentLinkedDeque;
 import java.util.concurrent.atomic.AtomicReference;
@@ -25,6 +22,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.function.Executable;
 import reactor.core.Exceptions;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
@@ -449,7 +447,7 @@ public abstract class TestChannel {
 	}
 
 	@Test
-	public void testFailTwoSubscribers() {
+	public void testTwoSubscribers() {
 		var dataFlux = Flux.fromIterable(data).publish().autoConnect();
 		var exRef1 = new AtomicReference<Throwable>();
 		var exRef2 = new AtomicReference<Throwable>();
@@ -459,35 +457,43 @@ public abstract class TestChannel {
 				.retryWhen(Retry.fixedDelay(5, Duration.ofSeconds(1)))
 				.subscribe(n -> {}, ex -> exRef1.set(ex));
 
-		Assertions.assertThrows(IllegalStateException.class, () -> {
-			try {
-				Mono
-						.when(consumer
-										.consumeMessages()
-										.limitRate(1)
-										.map(Timestamped::data)
-										.map(Integer::parseUnsignedInt)
-										.log("consumer-1", Level.INFO)
-										.doOnError(ex -> exRef2.set(ex)),
-								consumer
-										.consumeMessages()
-										.limitRate(1)
-										.map(Timestamped::data)
-										.map(Integer::parseUnsignedInt)
-										.log("consumer-2", Level.INFO)
-										.onErrorResume(io.rsocket.exceptions.ApplicationErrorException.class,
-												ex -> Mono.error(new IllegalStateException(ex))
-										)
-						)
-						.block();
-				Assertions.assertNull(exRef1.get());
-				Assertions.assertNull(exRef2.get());
-			} catch (RuntimeException ex) {
-				throw Exceptions.unwrap(ex);
-			} finally {
-				eventProducer.dispose();
+		var exe = new Executable() {
+			@Override
+			public void execute() throws Throwable {
+				try {
+					Mono
+							.when(consumer
+											.consumeMessages()
+											.limitRate(1)
+											.map(Timestamped::data)
+											.map(Integer::parseUnsignedInt)
+											.log("consumer-1", Level.INFO)
+											.doOnError(ex -> exRef2.set(ex)),
+									consumer
+											.consumeMessages()
+											.limitRate(1)
+											.map(Timestamped::data)
+											.map(Integer::parseUnsignedInt)
+											.log("consumer-2", Level.INFO)
+											.onErrorResume(io.rsocket.exceptions.ApplicationErrorException.class,
+													ex -> Mono.error(new IllegalStateException(ex))
+											)
+							)
+							.block();
+					Assertions.assertNull(exRef1.get());
+					Assertions.assertNull(exRef2.get());
+				} catch (RuntimeException ex) {
+					throw Exceptions.unwrap(ex);
+				} finally {
+					eventProducer.dispose();
+				}
 			}
-		});
+		};
+		if (isConsumerClient()) {
+			Assertions.assertDoesNotThrow(exe);
+		} else {
+			Assertions.assertThrows(IllegalStateException.class, exe);
+		}
 	}
 
 	@Test

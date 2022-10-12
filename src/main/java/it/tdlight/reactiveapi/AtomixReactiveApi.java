@@ -148,7 +148,7 @@ public class AtomixReactiveApi implements ReactiveApi {
 							if (publisher != null) {
 								publisher.handleRequest(req.data());
 							} else {
-								LOG.error("Dropped request because no session is found: {}", req);
+								LOG.debug("Dropped request because no session is found: {}", req);
 							}
 						})
 						.subscribeOn(Schedulers.parallel())

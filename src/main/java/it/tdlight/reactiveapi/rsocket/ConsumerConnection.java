@@ -15,7 +15,6 @@ import reactor.core.publisher.Sinks.EmitFailureHandler;
 import reactor.core.publisher.Sinks.Empty;
 import reactor.core.publisher.Sinks.Many;
 import reactor.core.scheduler.Schedulers;
-import reactor.util.concurrent.Queues;
 
 public class ConsumerConnection<T> {
 
@@ -61,20 +60,7 @@ public class ConsumerConnection<T> {
 							return remote.doOnError(ex -> {
 								synchronized (ConsumerConnection.this) {
 									if (remoteCount <= 1) {
-										if (remoteCount > 0 && localTerminationState == null) {
-											localTerminationState = Optional.of(ex);
-											if (LOG.isDebugEnabled()) {
-												LOG.debug("%s Local connection ended with failure".formatted(this.printStatus()), ex);
-											}
-											if (remoteCount <= 1) {
-												var sink = localTerminationSink;
-												reset();
-												sink.emitError(ex, EmitFailureHandler.FAIL_FAST);
-												if (LOG.isDebugEnabled()) {
-													LOG.debug("%s Local connection ended with failure, emitted termination failure".formatted(this.printStatus()));
-												}
-											}
-										}
+										onRemoteLastError(ex);
 									} else {
 										remoteCount--;
 										if (LOG.isDebugEnabled()) {
@@ -88,17 +74,7 @@ public class ConsumerConnection<T> {
 									synchronized (ConsumerConnection.this) {
 										if (LOG.isDebugEnabled()) LOG.debug("{} Remote connection ending with status {}", this.printStatus(), s);
 										if (remoteCount <= 1) {
-											if (remoteCount > 0 && localTerminationState == null) {
-												assert connectedState;
-												localTerminationState = Optional.empty();
-												if (s == SignalType.CANCEL) {
-													localTerminationSink.emitError(new CancelledChannelException(), EmitFailureHandler.FAIL_FAST);
-												} else {
-													localTerminationSink.emitEmpty(EmitFailureHandler.FAIL_FAST);
-												}
-											}
-											reset();
-											if (LOG.isDebugEnabled()) LOG.debug("{} Remote connection ended with status {}, emitted termination complete", this.printStatus(), s);
+											onLastFinally(s);
 										} else {
 											remoteCount--;
 											if (LOG.isDebugEnabled()) LOG.debug("{} Remote connection ended with status {}, but at least one remote is still online", this.printStatus(), s);
@@ -122,17 +98,39 @@ public class ConsumerConnection<T> {
 						})
 						.map(element -> new Timestamped<>(System.currentTimeMillis(), element));
 			}
-		})).doFinally(s -> {
+		})).doOnError(this::onRemoteLastError).doFinally(this::onLastFinally);
+	}
+
+	private synchronized void onLastFinally(SignalType s) {
+		if (remoteCount > 0 && localTerminationState == null) {
+			assert connectedState;
+			var ex = new CancelledChannelException();
+			localTerminationState = Optional.of(ex);
 			if (s == SignalType.CANCEL) {
-				synchronized (ConsumerConnection.this) {
-					local = null;
-					var ex = new InterruptedException();
-					localTerminationState = Optional.of(ex);
-					if (LOG.isDebugEnabled()) LOG.debug("{} Local is cancelled", this.printStatus());
-					localTerminationSink.emitError(ex, EmitFailureHandler.busyLooping(Duration.ofMillis(100)));
+				localTerminationSink.emitError(ex, EmitFailureHandler.FAIL_FAST);
+			} else {
+				localTerminationSink.emitEmpty(EmitFailureHandler.FAIL_FAST);
+			}
+		}
+		reset();
+		if (LOG.isDebugEnabled()) LOG.debug("{} Remote connection ended with status {}, emitted termination complete", this.printStatus(), s);
+	}
+
+	private synchronized void onRemoteLastError(Throwable ex) {
+		if (remoteCount > 0 && localTerminationState == null) {
+			localTerminationState = Optional.of(ex);
+			if (LOG.isDebugEnabled()) {
+				LOG.debug("%s Local connection ended with failure".formatted(this.printStatus()), ex);
+			}
+			if (remoteCount <= 1) {
+				var sink = localTerminationSink;
+				reset();
+				sink.emitError(ex, EmitFailureHandler.FAIL_FAST);
+				if (LOG.isDebugEnabled()) {
+					LOG.debug("%s Local connection ended with failure, emitted termination failure".formatted(this.printStatus()));
 				}
 			}
-		});
+		}
 	}
 
 	public synchronized Mono<Void> connectRemote() {
@@ -154,7 +152,7 @@ public class ConsumerConnection<T> {
 		if (connectedState) {
 			if (localTerminationState == null) {
 				if (LOG.isDebugEnabled()) LOG.debug("{} The previous connection is still marked as open but not terminated, interrupting it", this.printStatus());
-				var ex = new InterruptedException();
+				var ex = new InterruptedException("Interrupted this connection because a new one is being prepared");
 				localTerminationState = Optional.of(ex);
 				localTerminationSink.emitError(ex, EmitFailureHandler.busyLooping(Duration.ofMillis(100)));
 				if (LOG.isDebugEnabled()) LOG.debug("{} The previous connection has been interrupted", this.printStatus());
@@ -167,7 +165,7 @@ public class ConsumerConnection<T> {
 		}
 		local = null;
 		remoteCount = 0;
-		remotes.emitComplete(EmitFailureHandler.FAIL_FAST);
+		remotes.tryEmitComplete();
 		remotes = Sinks.many().replay().all();
 		connectedState = false;
 		connectedSink = Sinks.empty();
@@ -179,7 +177,7 @@ public class ConsumerConnection<T> {
 	public synchronized void registerRemote(Flux<Payload> remote) {
 		if (LOG.isDebugEnabled()) LOG.debug("{} Remote is trying to register", this.printStatus());
 		this.remoteCount++;
-		this.remotes.emitNext(remote, EmitFailureHandler.FAIL_FAST);
+		this.remotes.tryEmitNext(remote);
 		if (LOG.isDebugEnabled()) LOG.debug("{} Remote registered", this.printStatus());
 		onChanged();
 	}

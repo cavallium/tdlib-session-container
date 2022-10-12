@@ -56,8 +56,12 @@ public class ProducerConnection<T> {
 				return remoteTerminationSink.asMono().publishOn(Schedulers.parallel());
 			}
 		})).doFinally(s -> {
-			if (s == SignalType.CANCEL) {
+			if (s == SignalType.ON_ERROR || s == SignalType.CANCEL) {
 				synchronized (ProducerConnection.this) {
+					if (connectedState) {
+						connectedState = false;
+						connectedSink = Sinks.empty();
+					}
 					local = null;
 					if (LOG.isDebugEnabled()) LOG.debug("{} Local is cancelled", this.printStatus());
 				}
@@ -126,7 +130,7 @@ public class ProducerConnection<T> {
 		if (connectedState) {
 			if (remoteTerminationState == null) {
 				if (LOG.isDebugEnabled()) LOG.debug("{} The previous connection is still marked as open but not terminated, interrupting it", this.printStatus());
-				var ex = new InterruptedException();
+				var ex = new InterruptedException("Interrupted this connection because a new one is being prepared");
 				remoteTerminationState = Optional.of(ex);
 				remoteTerminationSink.emitError(ex, EmitFailureHandler.busyLooping(Duration.ofMillis(100)));
 				if (LOG.isDebugEnabled()) LOG.debug("{} The previous connection has been interrupted", this.printStatus());
@@ -148,10 +152,6 @@ public class ProducerConnection<T> {
 
 	public synchronized void registerRemote() {
 		if (LOG.isDebugEnabled()) LOG.debug("{} Remote is trying to register", this.printStatus());
-		if (this.remoteCount  > 0) {
-			if (LOG.isDebugEnabled()) LOG.debug("{} Remote was already registered", this.printStatus());
-			throw new IllegalStateException("Remote is already registered");
-		}
 		this.remoteCount++;
 		if (LOG.isDebugEnabled()) LOG.debug("{} Remote registered", this.printStatus());
 		onChanged();
