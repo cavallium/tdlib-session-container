@@ -25,6 +25,7 @@ import it.tdlight.jni.TdApi.SetAuthenticationPhoneNumber;
 import it.tdlight.jni.TdApi.SetTdlibParameters;
 import it.tdlight.jni.TdApi.TdlibParameters;
 import it.tdlight.reactiveapi.Event.ClientBoundEvent;
+import it.tdlight.reactiveapi.Event.Ignored;
 import it.tdlight.reactiveapi.Event.OnBotLoginCodeRequested;
 import it.tdlight.reactiveapi.Event.OnOtherDeviceLoginRequested;
 import it.tdlight.reactiveapi.Event.OnPasswordRequested;
@@ -481,6 +482,8 @@ public abstract class ReactiveApiPublisher {
 			dataOutputStream.writeUTF(onPasswordRequested.passwordHint());
 			dataOutputStream.writeBoolean(onPasswordRequested.hasRecoveryEmail());
 			dataOutputStream.writeUTF(onPasswordRequested.recoveryEmailPattern());
+		} else if (clientBoundEvent instanceof Ignored) {
+			dataOutputStream.writeByte(0x7);
 		} else {
 			throw new UnsupportedOperationException("Unexpected value: " + clientBoundEvent);
 		}

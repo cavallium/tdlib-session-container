@@ -134,6 +134,7 @@ abstract class BaseAtomixReactiveApiClient implements ReactiveApiMultiClient {
 			case 0x04 -> new OnBotLoginCodeRequested(userId, is.readUTF());
 			case 0x05 -> new OnOtherDeviceLoginRequested(userId, is.readUTF());
 			case 0x06 -> new OnPasswordRequested(userId, is.readUTF(), is.readBoolean(), is.readUTF());
+			case 0x07 -> new Ignored(userId);
 			default -> throw new IllegalStateException("Unexpected value: " + is.readByte());
 		};
 	}
