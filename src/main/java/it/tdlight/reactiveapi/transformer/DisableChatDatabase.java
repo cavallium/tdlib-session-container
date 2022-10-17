@@ -16,7 +16,7 @@ public class DisableChatDatabase implements ResultingEventTransformer {
 			// Change option
 			if (event instanceof TDLibBoundResultingEvent tdLibBoundResultingEvent
 					&& tdLibBoundResultingEvent.action() instanceof TdApi.SetTdlibParameters setTdlibParameters) {
-				setTdlibParameters.parameters.useChatInfoDatabase = false;
+				setTdlibParameters.useChatInfoDatabase = false;
 			}
 
 			return List.of(event);

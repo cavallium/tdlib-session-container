@@ -2,7 +2,6 @@ package it.tdlight.reactiveapi;
 
 import static it.tdlight.reactiveapi.AuthPhase.AUTH_PHASE;
 import static it.tdlight.reactiveapi.AuthPhase.BROKEN;
-import static it.tdlight.reactiveapi.AuthPhase.ENCRYPTION_PHASE;
 import static it.tdlight.reactiveapi.AuthPhase.LOGGED_IN;
 import static it.tdlight.reactiveapi.AuthPhase.LOGGED_OUT;
 import static it.tdlight.reactiveapi.AuthPhase.LOGGING_OUT;
@@ -30,7 +29,7 @@ public record State(AuthPhase authPhase) implements StateBuilder.With {
 
 		newState = switch (newState.authPhase) {
 			// Mark state as broken if the connection is terminated unexpectedly
-			case PARAMETERS_PHASE, ENCRYPTION_PHASE, AUTH_PHASE, LOGGED_IN -> {
+			case PARAMETERS_PHASE, AUTH_PHASE, LOGGED_IN -> {
 				if (signal.isClosed()) {
 					yield newState.withAuthPhase(BROKEN);
 				} else {
@@ -83,34 +82,25 @@ public record State(AuthPhase authPhase) implements StateBuilder.With {
 							}
 							yield newState.withAuthPhase(PARAMETERS_PHASE);
 						}
-						case TdApi.AuthorizationStateWaitEncryptionKey.CONSTRUCTOR -> {
-							if (newState.authPhase != PARAMETERS_PHASE) {
-								LOG.warn("Waiting parameters, but the current auth phase is {} instead of {}",
-										newState.authPhase,
-										Set.of(PARAMETERS_PHASE)
-								);
-							}
-							yield newState.withAuthPhase(ENCRYPTION_PHASE);
-						}
 						case TdApi.AuthorizationStateWaitPhoneNumber.CONSTRUCTOR,
 								TdApi.AuthorizationStateWaitRegistration.CONSTRUCTOR,
 								TdApi.AuthorizationStateWaitCode.CONSTRUCTOR,
 								TdApi.AuthorizationStateWaitPassword.CONSTRUCTOR,
 								TdApi.AuthorizationStateWaitOtherDeviceConfirmation.CONSTRUCTOR -> {
-							if (newState.authPhase != ENCRYPTION_PHASE && newState.authPhase != AUTH_PHASE) {
+							if (newState.authPhase != PARAMETERS_PHASE && newState.authPhase != AUTH_PHASE) {
 								LOG.warn(
 										"Waiting for authentication, but the current auth phase is {} instead of {}",
 										newState.authPhase,
-										Set.of(ENCRYPTION_PHASE, AUTH_PHASE)
+										Set.of(PARAMETERS_PHASE, AUTH_PHASE)
 								);
 							}
 							yield newState.withAuthPhase(AUTH_PHASE);
 						}
 						case TdApi.AuthorizationStateReady.CONSTRUCTOR -> {
-							if (newState.authPhase != ENCRYPTION_PHASE && newState.authPhase != AUTH_PHASE) {
+							if (newState.authPhase != PARAMETERS_PHASE && newState.authPhase != AUTH_PHASE) {
 								LOG.warn("Logged in, but the current auth phase is {} instead of {}",
 										newState.authPhase,
-										Set.of(ENCRYPTION_PHASE, AUTH_PHASE)
+										Set.of(PARAMETERS_PHASE, AUTH_PHASE)
 								);
 							}
 							yield newState.withAuthPhase(LOGGED_IN);

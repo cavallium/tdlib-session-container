@@ -16,7 +16,7 @@ public class DisableFileDatabase implements ResultingEventTransformer {
 			// Change option
 			if (event instanceof TDLibBoundResultingEvent tdLibBoundResultingEvent
 					&& tdLibBoundResultingEvent.action() instanceof TdApi.SetTdlibParameters setTdlibParameters) {
-				setTdlibParameters.parameters.useFileDatabase = false;
+				setTdlibParameters.useFileDatabase = false;
 			}
 
 			return List.of(event);

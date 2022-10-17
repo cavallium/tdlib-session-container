@@ -35,7 +35,7 @@ public class TdlightDefaultOptions implements ResultingEventTransformer {
 			if (event instanceof ClientBoundResultingEvent clientBoundResultingEvent
 					&& clientBoundResultingEvent.event() instanceof OnUpdateData onUpdate
 					&& onUpdate.update() instanceof TdApi.UpdateAuthorizationState authorizationState
-					&& authorizationState.authorizationState instanceof TdApi.AuthorizationStateWaitEncryptionKey) {
+					&& authorizationState.authorizationState instanceof TdApi.AuthorizationStateWaitTdlibParameters) {
 
 				var resultingEvent = new ArrayList<ResultingEvent>(1 + DEFAULT_OPTIONS.size() + DEFAULT_USER_OPTIONS.size());
 				// Add the intercepted event

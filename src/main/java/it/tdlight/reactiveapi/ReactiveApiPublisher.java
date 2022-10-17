@@ -17,13 +17,11 @@ import it.tdlight.jni.TdApi.AuthorizationStateClosed;
 import it.tdlight.jni.TdApi.AuthorizationStateWaitOtherDeviceConfirmation;
 import it.tdlight.jni.TdApi.AuthorizationStateWaitPassword;
 import it.tdlight.jni.TdApi.CheckAuthenticationBotToken;
-import it.tdlight.jni.TdApi.CheckDatabaseEncryptionKey;
 import it.tdlight.jni.TdApi.Function;
 import it.tdlight.jni.TdApi.Object;
 import it.tdlight.jni.TdApi.PhoneNumberAuthenticationSettings;
 import it.tdlight.jni.TdApi.SetAuthenticationPhoneNumber;
 import it.tdlight.jni.TdApi.SetTdlibParameters;
-import it.tdlight.jni.TdApi.TdlibParameters;
 import it.tdlight.reactiveapi.Event.ClientBoundEvent;
 import it.tdlight.reactiveapi.Event.Ignored;
 import it.tdlight.reactiveapi.Event.OnBotLoginCodeRequested;
@@ -267,14 +265,14 @@ public abstract class ReactiveApiPublisher {
 
 	private <T extends TdApi.Object> Mono<TdApi.Object> fixBrokenKey(Function<T> function, TdApi.Object result) {
 		if (result.getConstructor() == TdApi.Error.CONSTRUCTOR
-				&& function instanceof TdApi.CheckDatabaseEncryptionKey checkDatabaseEncryptionKey) {
+				&& function instanceof TdApi.SetTdlibParameters setTdlibParameters) {
 			// Fix legacy "cucumbers" password
-			if (checkDatabaseEncryptionKey.encryptionKey == null
+			if (setTdlibParameters.databaseEncryptionKey == null
 					&& "Wrong password".equals(((TdApi.Error) result).message)) {
 
-				var checkOldKeyFunction = new TdApi.CheckDatabaseEncryptionKey("cucumber".getBytes(StandardCharsets.US_ASCII));
+				setTdlibParameters.databaseEncryptionKey = "cucumber".getBytes(StandardCharsets.US_ASCII);
 				Mono<TdApi.Object> oldKeyCheckResultMono = Mono
-						.from(rawTelegramClient.send(checkOldKeyFunction, SPECIAL_RAW_TIMEOUT_DURATION));
+						.from(rawTelegramClient.send(setTdlibParameters, SPECIAL_RAW_TIMEOUT_DURATION));
 				return oldKeyCheckResultMono.flatMap(oldKeyCheckResult -> {
 					if (oldKeyCheckResult.getConstructor() != TdApi.Error.CONSTRUCTOR) {
 						var fixOldKeyFunction = new TdApi.SetDatabaseEncryptionKey();
@@ -351,20 +349,8 @@ public abstract class ReactiveApiPublisher {
 						var updateAuthorizationState = (TdApi.UpdateAuthorizationState) update;
 						switch (updateAuthorizationState.authorizationState.getConstructor()) {
 							case TdApi.AuthorizationStateWaitTdlibParameters.CONSTRUCTOR -> {
-								TdlibParameters parameters = generateTDLibParameters();
-								return List.of(updateResult, new TDLibBoundResultingEvent<>(new SetTdlibParameters(parameters)));
-							}
-						}
-					}
-				}
-			}
-			case ENCRYPTION_PHASE -> {
-				switch (update.getConstructor()) {
-					case TdApi.UpdateAuthorizationState.CONSTRUCTOR -> {
-						var updateAuthorizationState = (TdApi.UpdateAuthorizationState) update;
-						switch (updateAuthorizationState.authorizationState.getConstructor()) {
-							case TdApi.AuthorizationStateWaitEncryptionKey.CONSTRUCTOR -> {
-								return List.of(updateResult, new TDLibBoundResultingEvent<>(new CheckDatabaseEncryptionKey()));
+								SetTdlibParameters parameters = generateTDLibParameters();
+								return List.of(updateResult, new TDLibBoundResultingEvent<>(parameters));
 							}
 						}
 					}
@@ -404,8 +390,8 @@ public abstract class ReactiveApiPublisher {
 		return List.of();
 	}
 
-	private TdlibParameters generateTDLibParameters() {
-		var tdlibParameters = new TdlibParameters();
+	private SetTdlibParameters generateTDLibParameters() {
+		var tdlibParameters = new SetTdlibParameters();
 		var path = requireNonNull(this.path.get(), "Path must not be null");
 		tdlibParameters.databaseDirectory = path + "?use_custom_database_format=true";
 		tdlibParameters.apiId = 376588;

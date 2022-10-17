@@ -22,7 +22,7 @@ public class EnableMinithumbnails implements ResultingEventTransformer {
 			if (event instanceof ClientBoundResultingEvent clientBoundResultingEvent
 					&& clientBoundResultingEvent.event() instanceof OnUpdateData onUpdate
 					&& onUpdate.update() instanceof TdApi.UpdateAuthorizationState authorizationState
-					&& authorizationState.authorizationState instanceof TdApi.AuthorizationStateWaitEncryptionKey) {
+					&& authorizationState.authorizationState instanceof TdApi.AuthorizationStateWaitTdlibParameters) {
 
 				var resultingEvent = new ArrayList<ResultingEvent>(2);
 				// Add the intercepted event

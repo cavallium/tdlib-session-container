@@ -16,7 +16,7 @@ public class DisableMessageDatabase implements ResultingEventTransformer {
 			// Change option
 			if (event instanceof TDLibBoundResultingEvent tdLibBoundResultingEvent
 					&& tdLibBoundResultingEvent.action() instanceof TdApi.SetTdlibParameters setTdlibParameters) {
-				setTdlibParameters.parameters.useMessageDatabase = false;
+				setTdlibParameters.useMessageDatabase = false;
 			}
 
 			return List.of(event);
