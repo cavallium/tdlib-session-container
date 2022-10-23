@@ -60,7 +60,7 @@
 			<dependency>
 				<groupId>io.projectreactor</groupId>
 				<artifactId>reactor-bom</artifactId>
-				<version>2020.0.23</version>
+				<version>2020.0.24</version>
 				<type>pom</type>
 				<scope>import</scope>
 			</dependency>
@@ -90,7 +90,7 @@
 			<artifactId>reactor-tools</artifactId>
 			<classifier>original</classifier>
 			<scope>runtime</scope>
-			<version>3.4.23</version>
+			<version>3.4.24</version>
     </dependency>
 		<dependency>
 			<groupId>io.projectreactor</groupId>
