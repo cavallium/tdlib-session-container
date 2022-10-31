@@ -224,7 +224,7 @@ public abstract class ReactiveApiPublisher {
 				// Buffer requests to avoid halting the event loop
 				.doOnNext(clientBoundEvent -> clientBoundEvents.increment())
 				.transform(ReactorUtils.onBackpressureBufferSubscribe(Paths.get(""),
-						"client-bound-resulting-events",
+						"client-bound-resulting-events-" + userId,
 						false,
 						new ClientBoundEventSerializer(),
 						new ClientBoundEventDeserializer()
