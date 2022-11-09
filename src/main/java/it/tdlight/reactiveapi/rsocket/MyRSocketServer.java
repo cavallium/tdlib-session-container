@@ -3,12 +3,14 @@ package it.tdlight.reactiveapi.rsocket;
 import static reactor.util.concurrent.Queues.XS_BUFFER_SIZE;
 
 import com.google.common.net.HostAndPort;
+import io.rsocket.Closeable;
 import io.rsocket.ConnectionSetupPayload;
 import io.rsocket.Payload;
 import io.rsocket.RSocket;
 import io.rsocket.SocketAcceptor;
 import io.rsocket.core.RSocketServer;
 import io.rsocket.frame.decoder.PayloadDecoder;
+import io.rsocket.transport.ServerTransport;
 import io.rsocket.transport.netty.server.CloseableChannel;
 import io.rsocket.transport.netty.server.TcpServerTransport;
 import io.rsocket.util.DefaultPayload;
@@ -18,6 +20,7 @@ import it.tdlight.reactiveapi.EventConsumer;
 import it.tdlight.reactiveapi.EventProducer;
 import it.tdlight.reactiveapi.Serializer;
 import it.tdlight.reactiveapi.Timestamped;
+import it.tdlight.reactiveapi.TransportFactory;
 import java.io.IOException;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -35,19 +38,27 @@ public class MyRSocketServer implements RSocketChannelManager, RSocket {
 	private final Logger logger = LogManager.getLogger(this.getClass());
 
 	private final int bufferSize;
-	private final Mono<CloseableChannel> serverCloseable;
+	private final Mono<Closeable> serverCloseable;
 
 	protected final Map<String, ConsumerConnection<?>> consumerRegistry = new ConcurrentHashMap<>();
 
 	protected final Map<String, ProducerConnection<?>> producerRegistry = new ConcurrentHashMap<>();
 
 	public MyRSocketServer(HostAndPort baseHost) {
-		this(baseHost, XS_BUFFER_SIZE);
+		this(TransportFactory.tcp(baseHost));
 	}
 
 	public MyRSocketServer(HostAndPort baseHost, int bufferSize) {
+		this(TransportFactory.tcp(baseHost), bufferSize);
+	}
+
+	public MyRSocketServer(TransportFactory transportFactory) {
+		this(transportFactory, XS_BUFFER_SIZE);
+	}
+
+	public MyRSocketServer(TransportFactory transportFactory, int bufferSize) {
 		this.bufferSize = bufferSize;
-		var serverMono = RSocketServer
+		Mono<Closeable> serverMono = RSocketServer
 				.create(new SocketAcceptor() {
 					@Override
 					public @NotNull Mono<RSocket> accept(@NotNull ConnectionSetupPayload setup, @NotNull RSocket sendingSocket) {
@@ -59,9 +70,20 @@ public class MyRSocketServer implements RSocketChannelManager, RSocket {
 					}
 				})
 				.payloadDecoder(PayloadDecoder.ZERO_COPY)
-				.bind(TcpServerTransport.create(baseHost.getHost(), baseHost.getPort()))
+				.bind(transportFactory.getServerTransport(0))
+				.cast(Object.class)
 				.doOnNext(d -> logger.debug("Server up"))
-				.cacheInvalidateIf(CloseableChannel::isDisposed);
+				.cacheInvalidateIf(t -> t instanceof Closeable closeableChannel && closeableChannel.isDisposed())
+				.filter(t -> t instanceof Closeable)
+				.cast(Closeable.class)
+				.defaultIfEmpty(new Closeable() {
+					@Override
+					public void dispose() {}
+					@Override
+					public @NotNull Mono<Void> onClose() {
+						return Mono.empty();
+					}
+				});
 
 		serverMono.subscribeOn(Schedulers.parallel()).subscribe(v -> {}, ex -> logger.warn("Failed to bind server"));
 
@@ -158,13 +180,13 @@ public class MyRSocketServer implements RSocketChannelManager, RSocket {
 
 	@Override
 	public @NotNull Mono<Void> onClose() {
-		return Mono.when(serverCloseable.flatMap(CloseableChannel::onClose));
+		return Mono.when(serverCloseable.flatMap(Closeable::onClose));
 	}
 
 	@Override
 	public void dispose() {
 		serverCloseable
-				.doOnNext(CloseableChannel::dispose)
+				.doOnNext(Closeable::dispose)
 				.subscribeOn(Schedulers.parallel())
 				.subscribe(v -> {}, ex -> logger.error("Failed to dispose the server", ex));
 	}

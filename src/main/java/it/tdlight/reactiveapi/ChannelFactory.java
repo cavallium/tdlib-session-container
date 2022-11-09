@@ -1,6 +1,5 @@
 package it.tdlight.reactiveapi;
 
-import io.rsocket.core.RSocketClient;
 import it.tdlight.reactiveapi.kafka.KafkaConsumer;
 import it.tdlight.reactiveapi.kafka.KafkaProducer;
 import it.tdlight.reactiveapi.rsocket.MyRSocketClient;
@@ -52,9 +51,9 @@ public interface ChannelFactory {
 		public RSocketChannelFactory(RSocketParameters channelsParameters) {
 			this.channelsParameters = channelsParameters;
 			if (channelsParameters.isClient()) {
-				this.manager = new MyRSocketClient(channelsParameters.baseHost());
+				this.manager = new MyRSocketClient(channelsParameters.transportFactory());
 			} else {
-				this.manager = new MyRSocketServer(channelsParameters.baseHost());
+				this.manager = new MyRSocketServer(channelsParameters.transportFactory());
 			}
 		}
 

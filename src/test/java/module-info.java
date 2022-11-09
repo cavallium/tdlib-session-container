@@ -19,4 +19,5 @@ module tdlib.reactive.api.test {
 	requires reactor.netty.core;
 	requires org.apache.logging.log4j;
 	requires filequeue;
+	requires rsocket.transport.local;
 }

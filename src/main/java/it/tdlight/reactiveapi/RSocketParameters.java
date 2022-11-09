@@ -5,17 +5,24 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Objects;
 import java.util.Set;
-import org.jetbrains.annotations.Nullable;
+import java.util.StringJoiner;
 
 public final class RSocketParameters implements ChannelsParameters {
 
 	private final boolean client;
-	private final HostAndPort host;
+	private final TransportFactory transportFactory;
 	private final List<String> lanes;
 
 	public RSocketParameters(boolean client, String host, List<String> lanes) {
 		this.client = client;
-		this.host = HostAndPort.fromString(host);
+		var hostAndPort = HostAndPort.fromString(host);
+		this.transportFactory = TransportFactory.tcp(hostAndPort);
+		this.lanes = lanes;
+	}
+
+	public RSocketParameters(boolean client, TransportFactory transportFactory, List<String> lanes) {
+		this.client = client;
+		this.transportFactory = transportFactory;
 		this.lanes = lanes;
 	}
 
@@ -31,58 +38,35 @@ public final class RSocketParameters implements ChannelsParameters {
 		return client;
 	}
 
-	public HostAndPort baseHost() {
-		return host;
-	}
-
-	public HostAndPort channelHost(String channelName) {
-		return switch (channelName) {
-			case "request" -> HostAndPort.fromParts(host.getHost(), host.getPort());
-			case "response" -> HostAndPort.fromParts(host.getHost(), host.getPort() + 1);
-			default -> {
-				if (channelName.startsWith("event-")) {
-					var lane = channelName.substring("event-".length());
-					int index;
-					if (lane.equals("main")) {
-						index = 0;
-					} else {
-						index = lanes.indexOf(lane);
-						if (index < 0) {
-							throw new IllegalArgumentException("Unknown lane: " + lane);
-						}
-						index++;
-					}
-					yield HostAndPort.fromParts(host.getHost(), host.getPort() + 2 + index);
-				} else {
-					throw new IllegalArgumentException("Unknown channel: " + channelName);
-				}
-			}
-		};
+	public TransportFactory transportFactory() {
+		return transportFactory;
 	}
 
 	@Override
-	public boolean equals(Object obj) {
-		if (obj == this) {
+	public boolean equals(Object o) {
+		if (this == o) {
 			return true;
 		}
-		if (obj == null || obj.getClass() != this.getClass()) {
+		if (o == null || getClass() != o.getClass()) {
 			return false;
 		}
-		var that = (RSocketParameters) obj;
-		return Objects.equals(this.client, that.client) && Objects.equals(
-				this.host,
-				that.host) && Objects.equals(this.lanes, that.lanes);
+		RSocketParameters that = (RSocketParameters) o;
+		return client == that.client && Objects.equals(transportFactory, that.transportFactory) && Objects.equals(lanes,
+				that.lanes
+		);
 	}
 
 	@Override
 	public int hashCode() {
-		return Objects.hash(client, host, lanes);
+		return Objects.hash(client, transportFactory, lanes);
 	}
 
 	@Override
 	public String toString() {
-		return "RSocketParameters[client=" + client + ", " + "host=" + host + ", "
-				+ "lanes=" + lanes + ']';
+		return new StringJoiner(", ", RSocketParameters.class.getSimpleName() + "[", "]")
+				.add("client=" + client)
+				.add("transportFactory=" + transportFactory)
+				.add("lanes=" + lanes)
+				.toString();
 	}
-
 }

@@ -1,5 +1,7 @@
 package it.tdlight.reactiveapi.test;
 
+import com.google.common.net.HostAndPort;
+import io.rsocket.transport.local.LocalClientTransport;
 import it.tdlight.reactiveapi.ChannelCodec;
 import it.tdlight.reactiveapi.ChannelFactory;
 import it.tdlight.reactiveapi.ChannelFactory.RSocketChannelFactory;
@@ -7,6 +9,7 @@ import it.tdlight.reactiveapi.EventConsumer;
 import it.tdlight.reactiveapi.EventProducer;
 import it.tdlight.reactiveapi.RSocketParameters;
 import it.tdlight.reactiveapi.Timestamped;
+import it.tdlight.reactiveapi.TransportFactory;
 import it.unimi.dsi.fastutil.ints.IntArrayList;
 import java.io.Closeable;
 import java.time.Duration;
@@ -31,6 +34,8 @@ import reactor.util.retry.Retry;
 
 public abstract class TestChannel {
 
+	private static final TransportFactory TEST_TRANSPORT_FACTORY = TransportFactory.local("local");
+
 	private static final Logger LOG = LogManager.getLogger(TestChannel.class);
 
 	protected ChannelFactory channelFactory;
@@ -43,8 +48,8 @@ public abstract class TestChannel {
 
 	@BeforeEach
 	public void beforeEach() {
-		var consumerFactory = new RSocketChannelFactory(new RSocketParameters(isConsumerClient(), "127.0.0.1:25689", List.of()));
-		var producerFactory = new RSocketChannelFactory(new RSocketParameters(!isConsumerClient(), "127.0.0.1:25689", List.of()));
+		var consumerFactory = new RSocketChannelFactory(new RSocketParameters(isConsumerClient(), TEST_TRANSPORT_FACTORY, List.of()));
+		var producerFactory = new RSocketChannelFactory(new RSocketParameters(!isConsumerClient(), TEST_TRANSPORT_FACTORY, List.of()));
 
 		closeables.offer(consumerFactory);
 		closeables.offer(producerFactory);

@@ -7,6 +7,7 @@ import io.rsocket.RSocket;
 import io.rsocket.SocketAcceptor;
 import io.rsocket.core.RSocketConnector;
 import io.rsocket.frame.decoder.PayloadDecoder;
+import io.rsocket.transport.ClientTransport;
 import io.rsocket.transport.netty.client.TcpClientTransport;
 import io.rsocket.util.DefaultPayload;
 import it.tdlight.reactiveapi.ChannelCodec;
@@ -16,6 +17,7 @@ import it.tdlight.reactiveapi.EventProducer;
 import it.tdlight.reactiveapi.Serializer;
 import it.tdlight.reactiveapi.SimpleEventProducer;
 import it.tdlight.reactiveapi.Timestamped;
+import it.tdlight.reactiveapi.TransportFactory;
 import java.time.Duration;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -37,12 +39,14 @@ public class MyRSocketClient implements RSocketChannelManager {
 	private final Empty<Void> disposeRequest = Sinks.empty();
 
 	public MyRSocketClient(HostAndPort baseHost) {
-		var transport = TcpClientTransport.create(baseHost.getHost(), baseHost.getPort());
+		this(TransportFactory.tcp(baseHost));
+	}
 
+	public MyRSocketClient(TransportFactory transportFactory) {
 		this.nextClient = RSocketConnector.create()
 				.setupPayload(DefaultPayload.create("client", "setup-info"))
 				.payloadDecoder(PayloadDecoder.ZERO_COPY)
-				.connect(transport)
+				.connect(transportFactory.getClientTransport(0))
 				.doOnNext(lastClient::set)
 				.cacheInvalidateIf(RSocket::isDisposed);
 	}

@@ -7,33 +7,33 @@ import io.rsocket.SocketAcceptor;
 import io.rsocket.core.RSocketConnector;
 import io.rsocket.core.RSocketServer;
 import io.rsocket.frame.decoder.PayloadDecoder;
-import io.rsocket.transport.ClientTransport;
-import io.rsocket.transport.netty.client.TcpClientTransport;
+import io.rsocket.transport.local.LocalClientTransport;
 import io.rsocket.transport.netty.server.TcpServerTransport;
 import io.rsocket.util.DefaultPayload;
 import it.tdlight.reactiveapi.ChannelCodec;
 import it.tdlight.reactiveapi.EventConsumer;
 import it.tdlight.reactiveapi.EventProducer;
 import it.tdlight.reactiveapi.Timestamped;
+import it.tdlight.reactiveapi.TransportFactory;
 import it.tdlight.reactiveapi.rsocket.MyRSocketClient;
 import it.tdlight.reactiveapi.rsocket.MyRSocketServer;
 import java.time.Duration;
 import java.util.List;
-import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 import reactor.core.publisher.Flux;
-import reactor.core.publisher.Hooks;
 import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Schedulers;
 
 public class TestRSocket {
 
+	private static final TransportFactory TEST_TRANSPORT_FACTORY = TransportFactory.tcp(HostAndPort.fromParts("127.0.0.1", 8085));
+
 	@Test
 	public void testClientOnClose() {
 		Assertions.assertThrows(IllegalStateException.class, () -> {
-			var client = new MyRSocketClient(HostAndPort.fromParts("127.0.0.1", 8085));
+			var client = new MyRSocketClient(TEST_TRANSPORT_FACTORY);
 			try {
 				client.onClose().block(Duration.ofSeconds(1));
 			} finally {
@@ -44,12 +44,12 @@ public class TestRSocket {
 
 	@Test
 	public void testServerConsumer() {
-		var server = new MyRSocketServer(HostAndPort.fromParts("127.0.0.1", 8085), 1);
+		var server = new MyRSocketServer(TEST_TRANSPORT_FACTORY, 1);
 		try {
 			var rawClient = RSocketConnector.create()
 					.setupPayload(DefaultPayload.create("client", "setup-info"))
 					.payloadDecoder(PayloadDecoder.ZERO_COPY)
-					.connect(TcpClientTransport.create("127.0.0.1", 8085))
+					.connect(TEST_TRANSPORT_FACTORY.getClientTransport(0))
 					.block(Duration.ofSeconds(5));
 			Assertions.assertNotNull(rawClient);
 			var outputSequence = Flux.just("a", "b", "c").map(DefaultPayload::create);
@@ -73,12 +73,12 @@ public class TestRSocket {
 
 	@Test
 	public void testServerProducer() {
-		var server = new MyRSocketServer(HostAndPort.fromParts("127.0.0.1", 8085), 1);
+		var server = new MyRSocketServer(TEST_TRANSPORT_FACTORY, 1);
 		try {
 			var rawClient = RSocketConnector.create()
 					.setupPayload(DefaultPayload.create("client", "setup-info"))
 					.payloadDecoder(PayloadDecoder.ZERO_COPY)
-					.connect(TcpClientTransport.create("127.0.0.1", 8085))
+					.connect(TEST_TRANSPORT_FACTORY.getClientTransport(0))
 					.block(Duration.ofSeconds(5));
 			Assertions.assertNotNull(rawClient);
 			EventProducer<String> producer = server.registerProducer(ChannelCodec.UTF8_TEST, "test");
@@ -104,7 +104,7 @@ public class TestRSocket {
 
 	@Test
 	public void testClientConsumer() {
-		var client = new MyRSocketClient(HostAndPort.fromParts("127.0.0.1", 8085));
+		var client = new MyRSocketClient(TEST_TRANSPORT_FACTORY);
 		try {
 			var rawServer = RSocketServer.create(SocketAcceptor.forRequestStream(payload -> {
 						var metadata = payload.getMetadataUtf8();
@@ -114,7 +114,7 @@ public class TestRSocket {
 						return Flux.just("a", "b", "c").map(DefaultPayload::create);
 					}))
 					.payloadDecoder(PayloadDecoder.ZERO_COPY)
-					.bindNow(TcpServerTransport.create("127.0.0.1", 8085));
+					.bindNow(TEST_TRANSPORT_FACTORY.getServerTransport(0));
 			try {
 				var events = client
 						.<String>registerConsumer(ChannelCodec.UTF8_TEST, "test")
@@ -153,9 +153,9 @@ public class TestRSocket {
 					}
 				})))
 				.payloadDecoder(PayloadDecoder.ZERO_COPY)
-				.bindNow(TcpServerTransport.create("127.0.0.1", 8085));
+				.bindNow(TEST_TRANSPORT_FACTORY.getServerTransport(0));
 		try {
-			var client = new MyRSocketClient(HostAndPort.fromParts("127.0.0.1", 8085));
+			var client = new MyRSocketClient(TEST_TRANSPORT_FACTORY);
 			try {
 				client
 						.<String>registerProducer(ChannelCodec.UTF8_TEST, "test")
@@ -173,7 +173,7 @@ public class TestRSocket {
 	@Test
 	public void testServerOnClose() {
 		Assertions.assertThrows(IllegalStateException.class, () -> {
-			var server = new MyRSocketServer(HostAndPort.fromParts("127.0.0.1", 8085), 1);
+			var server = new MyRSocketServer(TEST_TRANSPORT_FACTORY, 1);
 			try {
 				server.onClose().block(Duration.ofSeconds(1));
 			} finally {
