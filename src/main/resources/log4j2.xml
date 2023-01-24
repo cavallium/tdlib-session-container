@@ -22,6 +22,8 @@
     <AsyncRoot level="DEBUG">
       <filters>
         <MarkerFilter marker="NETWORK_PACKETS" onMatch="DENY" onMismatch="NEUTRAL"/>
+				<BurstFilter level="ERROR" rate="16" maxBurst="100"/>
+				<BurstFilter level="INFO" rate="8" maxBurst="50"/>
       </filters>
       <AppenderRef ref="Async"/>
     </AsyncRoot>
